@@ -1,4 +1,4 @@
-![Conductor Logo](/docs/logo.png)
+![GigaWallet Logo](/doc/gigawallet-logo.png)
 
 The Dogecoin GigaWallet is a backend service which provides a
 convenient integration API for platforms such as online shops,
