@@ -5,12 +5,12 @@
 
 [dogecoind.testnet]
   rpcaddr = "localhost"
-  rpcport = 22555
+  rpcport = 44555
   rpcpass = "gigawallet"
   rpcuser = "gigawallet"
 
 [dogecoind.mainnet]
   rpcaddr = "localhost"
-  rpcport = 44555
+  rpcport = 22555
   rpcpass = "gigawallet"
   rpcuser = "gigawallet"
