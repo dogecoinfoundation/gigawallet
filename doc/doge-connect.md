@@ -117,6 +117,7 @@ to a user-agent. The payload can take the form of a number of payment options:
 {
   type: "dc:0.1:payment_request",
   request_id: "8TSBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAVu9",
+  address: "wqd6ksZyfTVakMS6iYSAVu98TSBrzyPQnvZnob7JVvq85PYcCt8",
   ammount: 123.45,
   initiated: "2022-03-29T22:18:26.625Z",
   timeout_sec: 900,
@@ -145,6 +146,7 @@ Docs TBD
 {
   type: "dc:0.1:donation_request",
   request_id: "8TSBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAVu9",
+  address: "wqd6ksZyfTVakMS6iYSAVu98TSBrzyPQnvZnob7JVvq85PYcCt8",
   initiated: "2022-03-29T22:18:26.625Z",
   modes: ["OPTIONS_SINGLE", "ANY", "COMMENT"],
   options : [
