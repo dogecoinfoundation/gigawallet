@@ -118,7 +118,7 @@ to a user-agent. The payload can take the form of a number of payment options:
   type: "dc:0.1:payment_request",
   request_id: "8TSBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAVu9",
   address: "wqd6ksZyfTVakMS6iYSAVu98TSBrzyPQnvZnob7JVvq85PYcCt8",
-  ammount: 123.45,
+  amount: 123.45,
   initiated: "2022-03-29T22:18:26.625Z",
   timeout_sec: 900,
   items: [
@@ -129,8 +129,8 @@ to a user-agent. The payload can take the form of a number of payment options:
       name: "Example Item",
       description: "A rather nice Example Item",
       unit_count: 1,
-      unit_ammount: "50.0",
-      ammount: "50.0"
+      unit_amount: "50.0",
+      amount: "50.0"
     }, 
     ...
   ]
@@ -156,7 +156,7 @@ Docs TBD
       item_thumb: "https://example.com/123456/thumb.png",
       name: "High Roller",
       description: "Your donation will support Example Org for 3 months",
-      ammount: "5000000.0"
+      amount: "5000000.0"
     }, 
     {
       type: "dc:0.1:donation_option",
@@ -164,7 +164,7 @@ Docs TBD
       item_thumb: "https://example.com/456789/thumb.png",
       name: "bread'n'Butter Backer",
       description: "Your donation contributes to Example Cause",
-      ammount: "5000.0"
+      amount: "5000.0"
     }, 
     ...
   ]
