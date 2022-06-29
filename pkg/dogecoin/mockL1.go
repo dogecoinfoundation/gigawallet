@@ -1,4 +1,4 @@
-package core
+package dogecoin
 
 import giga "github.com/dogecoinfoundation/gigawallet/pkg"
 
