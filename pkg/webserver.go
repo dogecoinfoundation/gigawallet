@@ -16,7 +16,6 @@ type PaymentAPIService struct {
 
 func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
-		//
 		mux := httprouter.New()
 		mux.POST("/invoice", createInvoice)
 		mux.GET("/invoice/:id", getInvoice)
