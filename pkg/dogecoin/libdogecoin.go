@@ -14,16 +14,15 @@ func NewL1Libdogecoin(config giga.Config) (L1Libdogecoin, error) {
 	return L1Libdogecoin{}, nil
 }
 
-type L1Libdogecoin struct {
-}
-
-func (d L1Libdogecoin) Send(txn giga.Txn) error {
-	return nil
-}
+type L1Libdogecoin struct{}
 
 func (d L1Libdogecoin) MakeAddress() (giga.Address, error) {
 	libdogecoin.W_context_start()
 	priv, pub := libdogecoin.W_generate_hd_master_pub_keypair(false)
 	libdogecoin.W_context_stop()
 	return giga.Address{priv, pub}, nil
+}
+
+func (d L1Libdogecoin) Send(txn giga.Txn) error {
+	return nil
 }

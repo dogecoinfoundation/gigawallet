@@ -11,6 +11,7 @@ import (
 // interface guard ensures L1CoreRPC implements giga.L1
 var _ giga.L1 = L1CoreRPC{}
 
+// NewDogecoinCoreRPC returns a giga.L1 implementor that uses dogecoin-core's RPC
 func NewDogecoinCoreRPC(config giga.Config) (L1CoreRPC, error) {
 	// Connect to the dogecoin daemon
 	addr := fmt.Sprintf("%s:%d", config.Dogecoind["testnet"].Rpcaddr, config.Dogecoind["testnet"].Rpcport)

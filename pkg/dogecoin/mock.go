@@ -10,8 +10,7 @@ func NewL1Mock(config giga.Config) (L1Mock, error) {
 	return L1Mock{}, nil
 }
 
-type L1Mock struct {
-}
+type L1Mock struct{}
 
 func (d L1Mock) MakeAddress() (giga.Address, error) {
 	return giga.Address{"mockPrivKey", "mockPubKey"}, nil
