@@ -7,7 +7,11 @@ import (
 type Config struct {
 	Gigawallet struct {
 		// key for which Dogecoind struct to use
-		Dogecoind string `default:"testnet" required:"true" env="network"`
+		Dogecoind string `default:"testnet" required:"true" env:"network"`
+	}
+
+	PaymentService struct {
+		Port string `default:"8080" env:"payment_service_port"`
 	}
 
 	// info for connecting to dogecoin-core daemon

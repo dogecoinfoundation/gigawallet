@@ -20,6 +20,6 @@ func main() {
 		conductor.HookSignals(),
 		conductor.Noisy(),
 	)
-	c.Service("Payment API", giga.PaymentAPIService{})
+	c.Service("Payment API", giga.NewPaymentAPIService(conf))
 	<-c.Start()
 }
