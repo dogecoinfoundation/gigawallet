@@ -8,8 +8,8 @@ package giga
  */
 
 type DogecoinL1 interface {
-	makeAddress() (Address, error)
-	send(Txn) error
+	MakeAddress() (Address, error)
+	Send(Txn) error
 }
 
 type Address struct {

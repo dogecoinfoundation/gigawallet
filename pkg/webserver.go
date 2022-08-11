@@ -11,17 +11,21 @@ import (
 
 // implements tjstebbing/conductor.Service
 type PaymentAPIService struct {
-	srv *http.Server
+	srv  *http.Server
+	port string
+}
+
+func NewPaymentAPIService(config Config) PaymentAPIService {
+	return PaymentAPIService{port: config.PaymentService.Port}
 }
 
 func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
-		//
 		mux := httprouter.New()
 		mux.POST("/invoice", createInvoice)
 		mux.GET("/invoice/:id", getInvoice)
 
-		t.srv = &http.Server{Addr: ":8080", Handler: mux}
+		t.srv = &http.Server{Addr: ":" + t.port, Handler: mux}
 		go func() {
 			if err := t.srv.ListenAndServe(); err != http.ErrServerClosed {
 				log.Fatalf("HTTP server ListenAndServe: %v", err)
