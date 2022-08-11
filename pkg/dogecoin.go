@@ -7,7 +7,7 @@ package giga
  * will be implemented via RPC/ZMQ comms to the Dogecoin Core APIs.
  */
 
-type DogecoinL1 interface {
+type L1 interface {
 	MakeAddress() (Address, error)
 	Send(Txn) error
 }
