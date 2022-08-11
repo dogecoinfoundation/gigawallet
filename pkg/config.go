@@ -11,7 +11,7 @@ type Config struct {
 	}
 
 	PaymentService struct {
-		Port string `default:"8080" env:"payment_service_port"`
+		Port string `default:"8080" env:"port"`
 	}
 
 	// info for connecting to dogecoin-core daemon
