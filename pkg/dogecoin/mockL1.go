@@ -2,9 +2,10 @@ package dogecoin
 
 import giga "github.com/dogecoinfoundation/gigawallet/pkg"
 
+// interface guard ensures DogecoinL1Mock implements giga.DogecoinL1
 var _ giga.DogecoinL1 = DogecoinL1Mock{}
 
-/* Returns a Mocked giga.DogecoinL1 implementor */
+// NewL1Mock returns a mocked giga.DogecoinL1 implementor
 func NewL1Mock(config giga.Config) (DogecoinL1Mock, error) {
 	return DogecoinL1Mock{}, nil
 }

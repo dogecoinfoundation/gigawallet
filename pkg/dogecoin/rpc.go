@@ -8,6 +8,7 @@ import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 )
 
+// interface guard ensures DogecoinCoreRPC implements giga.DogecoinL1
 var _ giga.DogecoinL1 = DogecoinCoreRPC{}
 
 func NewDogecoinCoreRPC(config giga.Config) (DogecoinCoreRPC, error) {

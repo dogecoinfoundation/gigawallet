@@ -6,9 +6,10 @@ import (
 	"github.com/jaxlotl/go-libdogecoin"
 )
 
+// interface guard ensures DogecoinL1Libdogecoin implements giga.DogecoinL1
 var _ giga.DogecoinL1 = DogecoinL1Libdogecoin{}
 
-/* Returns a Mocked giga.DogecoinL1 implementor */
+// NewL1Libdogecoin returns a giga.DogecoinL1 implementor that uses libdogecoin
 func NewL1Libdogecoin(config giga.Config) (DogecoinL1Libdogecoin, error) {
 	return DogecoinL1Libdogecoin{}, nil
 }
