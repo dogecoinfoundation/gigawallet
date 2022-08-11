@@ -6,10 +6,9 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-/* ConnectEnvelope is a wrapper for a ConnectRequest
- * the Payload is a base64 encoded JSON string containing
- * a ConnectRequest
- */
+// ConnectEnvelope is a wrapper for a ConnectRequest.
+// The Payload is a base64 encoded JSON string containing
+// a ConnectRequest
 type ConnectEnvelope struct {
 	Type           string `json:"type"`
 	ServiceName    string `json:"service_name"`

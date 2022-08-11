@@ -9,7 +9,7 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
-// implements tjstebbing/conductor.Service
+// PaymentAPIService implements tjstebbing/conductor.Service
 type PaymentAPIService struct {
 	srv  *http.Server
 	port string
@@ -42,16 +42,12 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 	return nil
 }
 
-/* getInvoice is responsible for returning the current status of an invoice
- *
- */
+// getInvoice is responsible for returning the current status of an invoice
 func getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	fmt.Fprintf(w, "invoice for %s!\n", p.ByName("id"))
 }
 
-/* createInvoice accepts an invoice structure and returns an Invoice
- *
- */
+// createInvoice accepts an invoice structure and returns an Invoice
 func createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	fmt.Fprintf(w, "create invoice")
 }
