@@ -2,11 +2,13 @@ package giga
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/shopspring/decimal"
 )
 
 // PaymentAPIService implements tjstebbing/conductor.Service
@@ -23,6 +25,7 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 	go func() {
 		mux := httprouter.New()
 		mux.POST("/invoice", createInvoice)
+		mux.POST("/order", createOrder)
 		mux.GET("/invoice/:id", getInvoice)
 
 		t.srv = &http.Server{Addr: ":" + t.port, Handler: mux}
@@ -40,6 +43,24 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 		}
 	}()
 	return nil
+}
+
+type order struct {
+	Vendor string `json:"vendor"`
+	Items  []item `json:"items"`
+}
+type item struct {
+	Name      string          `json:"name"`
+	Price     decimal.Decimal `json:"price"`
+	Quantity  int             `json:"quantity"`
+	ImageLink string          `json:"image_link"`
+}
+
+func createOrder(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	var o order
+	json.NewDecoder(r.Body).Decode(&o)
+	// TODO: do something with that order
+	fmt.Fprintf(w, "get order")
 }
 
 // getInvoice is responsible for returning the current status of an invoice
