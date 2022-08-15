@@ -23,12 +23,12 @@ func NewSQLite(fileName string) (SQLite, error) {
 	return SQLite{db}, nil
 }
 
-func (d SQLite) NewOrder(order giga.Order) (string, error) {
+func (d SQLite) NewOrder(seller giga.Address, order giga.Order) error {
 	// TODO: make the sql query
-	return "", nil
+	return nil
 }
 
-func (d SQLite) GetOrder(id string) (giga.Order, error) {
+func (d SQLite) GetOrder(seller giga.Address) (giga.Order, error) {
 	// TODO: make the sql query
 	return giga.Order{}, nil
 }
