@@ -6,6 +6,7 @@ require (
 	github.com/jaxlotl/go-libdogecoin v0.0.40
 	github.com/jinzhu/configor v1.2.1
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/mattn/go-sqlite3 v1.14.14
 	github.com/shopspring/decimal v1.3.1
 	github.com/tjstebbing/conductor v1.0.0
 )
