@@ -14,14 +14,18 @@ type L1 interface {
 	Send(Txn) error
 }
 
-type Address struct {
+type Address string
+
+type Account struct {
 	PrivKey string
 	PubKey  string
 }
 
 type Txn struct{}
 
-type Order struct {
+type Invoice struct {
+	// ID is the single-use address that the invoice needs to be paid to.
+	ID     Address
 	Vendor string `json:"vendor"`
 	Items  []Item `json:"items"`
 }

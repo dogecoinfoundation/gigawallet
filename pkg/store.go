@@ -1,9 +1,13 @@
 package giga
 
-type PaymentsStore interface {
-	// NewOrder stores an order in the payments store under the given address.
-	// The Address should be a one-time use address.
-	NewOrder(seller Address, order Order) error
-	// GetOrder returns the order under the given address.
-	GetOrder(seller Address) (Order, error)
+type Store interface {
+	// StoreInvoice stores an invoice.
+	StoreInvoice(invoice Invoice) error
+	// GetInvoice returns the invoice with the given ID.
+	GetInvoice(id Address) (Invoice, error)
+
+	// StoreAccount stores an account.
+	StoreAccount(account Account) error
+	// GetAccount returns the account with the given ID.
+	GetAccount(pubkey string) (Account, error)
 }

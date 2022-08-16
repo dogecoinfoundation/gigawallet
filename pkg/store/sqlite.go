@@ -8,7 +8,7 @@ import (
 )
 
 // interface guard ensures SQLite implements giga.PaymentsStore
-var _ giga.PaymentsStore = SQLite{}
+var _ giga.Store = SQLite{}
 
 type SQLite struct {
 	db *sql.DB
@@ -23,12 +23,22 @@ func NewSQLite(fileName string) (SQLite, error) {
 	return SQLite{db}, nil
 }
 
-func (d SQLite) NewOrder(seller giga.Address, order giga.Order) error {
+func (s SQLite) StoreInvoice(order giga.Invoice) error {
 	// TODO: make the sql query
 	return nil
 }
 
-func (d SQLite) GetOrder(seller giga.Address) (giga.Order, error) {
+func (s SQLite) GetInvoice(id giga.Address) (giga.Invoice, error) {
 	// TODO: make the sql query
-	return giga.Order{}, nil
+	return giga.Invoice{}, nil
+}
+
+func (s SQLite) StoreAccount(account giga.Account) error {
+	// TODO: make the sql query
+	return nil
+}
+
+func (s SQLite) GetAccount(pubkey string) (giga.Account, error) {
+	// TODO: make the sql query
+	return giga.Account{}, nil
 }
