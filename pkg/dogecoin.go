@@ -17,8 +17,10 @@ type L1 interface {
 type Address string
 
 type Account struct {
-	PrivKey string
-	PubKey  string
+	Address   Address
+	ForeignID string
+	PrivKey   string
+	PubKey    string
 }
 
 type Txn struct{}

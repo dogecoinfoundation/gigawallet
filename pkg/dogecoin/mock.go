@@ -13,7 +13,7 @@ func NewL1Mock(config giga.Config) (L1Mock, error) {
 type L1Mock struct{}
 
 func (d L1Mock) MakeAddress() (giga.Address, error) {
-	return giga.Address{"mockPrivKey", "mockPubKey"}, nil
+	return "mockPubkey", nil
 }
 
 func (d L1Mock) Send(txn giga.Txn) error {

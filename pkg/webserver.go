@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
+	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"log"
 	"net/http"
 
@@ -14,18 +16,24 @@ import (
 type PaymentAPIService struct {
 	srv  *http.Server
 	port string
+	api  API
 }
 
-func NewPaymentAPIService(config Config) PaymentAPIService {
-	return PaymentAPIService{port: config.PaymentService.Port}
+func NewPaymentAPIService(config Config) (PaymentAPIService, error) {
+	l1, err := dogecoin.NewL1Libdogecoin(config)
+	if err != nil {
+		return PaymentAPIService{}, err
+	}
+	// TODO: this uses a mock store
+	api := NewAPI(store.NewMock(), l1)
+	return PaymentAPIService{port: config.PaymentService.Port, api: api}, nil
 }
 
 func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
 		mux := httprouter.New()
-		mux.POST("/invoice", createInvoice)
-		mux.POST("/order", createOrder)
-		mux.GET("/invoice/:id", getInvoice)
+		mux.POST("/invoice", t.createInvoice)
+		mux.GET("/invoice/:id", t.getInvoice)
 
 		t.srv = &http.Server{Addr: ":" + t.port, Handler: mux}
 		go func() {
@@ -44,19 +52,31 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 	return nil
 }
 
-func createOrder(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	var o Order
-	json.NewDecoder(r.Body).Decode(&o)
-	// TODO: do something with that order
+func (t PaymentAPIService) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	var o Invoice
+	err := json.NewDecoder(r.Body).Decode(&o)
+	if err != nil {
+		fmt.Fprintf(w, "error: %v", err)
+	}
+	err = t.api.StoreInvoice(o)
+	if err != nil {
+		fmt.Fprintf(w, "error: %v", err)
+	}
+	// TODO: do something with that invoice
 	fmt.Fprintf(w, "get order")
 }
 
 // getInvoice is responsible for returning the current status of an invoice
-func getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	fmt.Fprintf(w, "invoice for %s!\n", p.ByName("id"))
-}
-
-// createInvoice accepts an invoice structure and returns an Invoice
-func createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	fmt.Fprintf(w, "create invoice")
+func (t PaymentAPIService) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the id is the address of the invoice
+	id := p.ByName("id")
+	invoice, err := t.api.GetInvoice(Address(id))
+	if err != nil {
+		fmt.Fprintf(w, "error: %v", err)
+	}
+	b, err := json.Marshal(invoice)
+	if err != nil {
+		fmt.Fprintf(w, "error: %v", err)
+	}
+	fmt.Fprintf(w, string(b))
 }

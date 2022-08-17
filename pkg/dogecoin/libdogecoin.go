@@ -18,9 +18,9 @@ type L1Libdogecoin struct{}
 
 func (d L1Libdogecoin) MakeAddress() (giga.Address, error) {
 	libdogecoin.W_context_start()
-	priv, pub := libdogecoin.W_generate_hd_master_pub_keypair(false)
+	_, pub := libdogecoin.W_generate_hd_master_pub_keypair(false)
 	libdogecoin.W_context_stop()
-	return giga.Address{priv, pub}, nil
+	return giga.Address(pub), nil
 }
 
 func (d L1Libdogecoin) Send(txn giga.Txn) error {

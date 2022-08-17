@@ -34,7 +34,7 @@ func (d L1CoreRPC) MakeAddress() (giga.Address, error) {
 	res := ""
 	err := d.client.Call("getrpcinfo", nil, &res)
 	fmt.Println(res, err)
-	return giga.Address{"foo", "bar"}, nil
+	return "foo", nil
 }
 
 func (d L1CoreRPC) Send(txn giga.Txn) error {
