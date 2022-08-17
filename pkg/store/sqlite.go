@@ -38,7 +38,7 @@ func (s SQLite) StoreAccount(account giga.Account) error {
 	return nil
 }
 
-func (s SQLite) GetAccount(pubkey string) (giga.Account, error) {
+func (s SQLite) GetAccount(id giga.Address) (giga.Account, error) {
 	// TODO: make the sql query
 	return giga.Account{}, nil
 }

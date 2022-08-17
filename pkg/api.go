@@ -22,7 +22,7 @@ func (a API) MakeAccount(account Account) error {
 	return a.Store.StoreAccount(account)
 }
 
-// TODO: make this take in the ForeignID instead of the pubkey return the Address
-func (a API) GetAccount(pubkey string) (Account, error) {
-	return a.Store.GetAccount(pubkey)
+// TODO: make this take in the ForeignID instead of the Address and return the Address
+func (a API) GetAccount(id Address) (Account, error) {
+	return a.Store.GetAccount(id)
 }

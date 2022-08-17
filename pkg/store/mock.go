@@ -13,7 +13,7 @@ var _ giga.Store = Mock{}
 
 type Mock struct {
 	invoices map[giga.Address]giga.Invoice
-	accounts map[string]giga.Account
+	accounts map[giga.Address]giga.Account
 }
 
 // NewMock returns a giga.PaymentsStore implementor that stores orders in memory
@@ -35,14 +35,14 @@ func (m Mock) GetInvoice(id giga.Address) (giga.Invoice, error) {
 }
 
 func (m Mock) StoreAccount(account giga.Account) error {
-	m.accounts[account.PubKey] = account
+	m.accounts[account.Address] = account
 	return nil
 }
 
-func (m Mock) GetAccount(pubkey string) (giga.Account, error) {
-	v, ok := m.accounts[pubkey]
+func (m Mock) GetAccount(id giga.Address) (giga.Account, error) {
+	v, ok := m.accounts[id]
 	if !ok {
-		return giga.Account{}, errors.New("account not found for pubkey " + pubkey)
+		return giga.Account{}, errors.New("account not found for id " + fmt.Sprint(id))
 	}
 	return v, nil
 }
