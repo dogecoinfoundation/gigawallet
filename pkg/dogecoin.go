@@ -10,7 +10,7 @@ import (
 // Go binding for the libdogecoin project, however to begin with
 // will be implemented via RPC/ZMQ comms to the Dogecoin Core APIs.
 type L1 interface {
-	MakeAddress() (Address, error)
+	MakeAddress() (Address, Privkey, error)
 	Send(Txn) error
 }
 
@@ -20,6 +20,15 @@ type Privkey string
 type Account struct {
 	Address   Address
 	Privkey   Privkey
+	ForeignID string
+}
+
+func (a Account) GetPublicInfo() AccountPublic {
+	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID}
+}
+
+type AccountPublic struct {
+	Address   Address
 	ForeignID string
 }
 

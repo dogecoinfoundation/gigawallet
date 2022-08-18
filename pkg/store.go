@@ -8,7 +8,8 @@ type Store interface {
 
 	// StoreAccount stores an account.
 	StoreAccount(account Account) error
-	// GetAccount returns the account with the given ID.
-	// TODO: GetAccount by ForeignID
-	GetAccount(id Address) (Account, error)
+	// GetAccount returns the account with the given ForeignID.
+	GetAccount(foreignID string) (Account, error)
+	// GetAccountByAddress returns the account with the given Address.
+	GetAccountByAddress(id Address) (Account, error)
 }

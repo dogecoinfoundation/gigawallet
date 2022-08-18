@@ -17,12 +17,27 @@ func (a API) GetInvoice(id Address) (Invoice, error) {
 	return a.Store.GetInvoice(id)
 }
 
-// TODO: make this take in the ForeignID instead of the whole Account and return the Address
-func (a API) MakeAccount(account Account) error {
-	return a.Store.StoreAccount(account)
+func (a API) MakeAccount(foreignID string) (Address, error) {
+	addr, priv, err := a.L1.MakeAddress()
+	if err != nil {
+		return "", err
+	}
+	account := Account{
+		Address:   addr,
+		ForeignID: foreignID,
+		Privkey:   priv,
+	}
+	return account.Address, a.Store.StoreAccount(account)
 }
 
-// TODO: make this take in the ForeignID instead of the Address and return the Address
-func (a API) GetAccount(id Address) (Account, error) {
-	return a.Store.GetAccount(id)
+func (a API) GetAccount(foreignID string) (AccountPublic, error) {
+	acc, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return AccountPublic{}, err
+	}
+	return acc.GetPublicInfo(), nil
+}
+
+func (a API) GetAccountByAddress(id Address) (Account, error) {
+	return a.Store.GetAccountByAddress(id)
 }
