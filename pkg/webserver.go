@@ -56,29 +56,22 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 }
 
 func (t PaymentAPIService) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	type Alias Invoice
-	type InvoiceWithForeignID struct {
-		Alias
-		// ID is now a string type instead of an address type, since we're accepting foreignIDs
-		ID string `json:"id"`
-	}
-	// bunch of fancy Go type magic to replace Invoice's ID field of type Address with a string type
-	var o InvoiceWithForeignID
+	var o Invoice
 	err := json.NewDecoder(r.Body).Decode(&o)
-	if err != nil {
-		fmt.Fprintf(w, "error: %v", err)
-	}
-
-	account, err := t.api.GetAccount(o.ID)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
 
-	invoice := Invoice(o.Alias)
-	invoice.ID = account.Address
+	// o.ID right now is actually the foreignID, so convert it to the address
+	account, err := t.api.GetAccount(string(o.ID))
+	if err != nil {
+		fmt.Fprintf(w, "error: %v", err)
+		return
+	}
+	o.ID = account.Address
 
-	err = t.api.StoreInvoice(invoice)
+	err = t.api.StoreInvoice(o)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 	}
@@ -95,6 +88,7 @@ func (t PaymentAPIService) getInvoice(w http.ResponseWriter, r *http.Request, p 
 	invoice, err := t.api.GetInvoice(Address(id))
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	b, err := json.Marshal(invoice)
 	if err != nil {
@@ -128,6 +122,7 @@ func (t PaymentAPIService) getAccount(w http.ResponseWriter, r *http.Request, p 
 	acc, err := t.api.GetAccount(id)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	b, err := json.Marshal(acc)
 	if err != nil {
@@ -147,6 +142,7 @@ func (t PaymentAPIService) getAccountByAddress(w http.ResponseWriter, r *http.Re
 	acc, err := t.api.GetAccountByAddress(Address(id))
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	b, err := json.Marshal(acc)
 	if err != nil {
