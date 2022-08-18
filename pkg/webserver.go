@@ -56,12 +56,29 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 }
 
 func (t PaymentAPIService) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	var o Invoice
+	type Alias Invoice
+	type InvoiceWithForeignID struct {
+		Alias
+		// ID is now a string type instead of an address type, since we're accepting foreignIDs
+		ID string `json:"id"`
+	}
+	// bunch of fancy Go type magic to replace Invoice's ID field of type Address with a string type
+	var o InvoiceWithForeignID
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 	}
-	err = t.api.StoreInvoice(o)
+
+	account, err := t.api.GetAccount(o.ID)
+	if err != nil {
+		fmt.Fprintf(w, "error: %v", err)
+		return
+	}
+
+	invoice := Invoice(o.Alias)
+	invoice.ID = account.Address
+
+	err = t.api.StoreInvoice(invoice)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 	}
