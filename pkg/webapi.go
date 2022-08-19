@@ -26,7 +26,7 @@ func NewWebAPI(config Config) (WebAPI, error) {
 	}
 	// TODO: this uses a mock store
 	api := NewAPI(store.NewMock(), l1)
-	return WebAPI{port: config.PaymentService.Port, api: api}, nil
+	return WebAPI{port: config.WebAPI.Port, api: api}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {

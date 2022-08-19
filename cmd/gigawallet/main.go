@@ -20,7 +20,7 @@ func main() {
 		conductor.HookSignals(),
 		conductor.Noisy(),
 	)
-	p, err := giga.NewPaymentAPIService(conf)
+	p, err := giga.NewWebAPI(conf)
 	if err != nil {
 		panic(err)
 	}
