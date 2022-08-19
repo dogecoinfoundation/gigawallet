@@ -23,6 +23,13 @@ func (d L1Libdogecoin) MakeAddress() (giga.Address, giga.Privkey, error) {
 	return giga.Address(pub), giga.Privkey(priv), nil
 }
 
+func (d L1Libdogecoin) MakeChildAddress(privkey giga.Privkey) (giga.Address, error) {
+	libdogecoin.W_context_start()
+	pub := libdogecoin.W_generate_derived_hd_pub_key(string(privkey))
+	libdogecoin.W_context_stop()
+	return giga.Address(pub), nil
+}
+
 func (d L1Libdogecoin) Send(txn giga.Txn) error {
 	return nil
 }

@@ -32,8 +32,8 @@ func NewPaymentAPIService(config Config) (PaymentAPIService, error) {
 func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
 		mux := httprouter.New()
-		mux.POST("/invoice", t.createInvoice)
-		mux.GET("/invoice/:id", t.getInvoice)
+		mux.POST("/invoice/:foreignID", t.createInvoice)
+		mux.GET("/invoice/:invoiceID", t.getInvoice)
 		mux.POST("/account/:foreignID", t.createAccount)
 		mux.GET("/account/:foreignID", t.getAccount)
 		mux.GET("/account/byaddress/:address", t.getAccountByAddress) // TODO: figure out some way to to merge this and the above
@@ -55,34 +55,38 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 	return nil
 }
 
+// createInvoice returns the ID of the created Invoice (which is the one-time address for this transaction) for the foreignID in the URL and the InvoiceCreateRequest in the body
 func (t PaymentAPIService) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	var o Invoice
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		fmt.Fprintf(w, "error: missing foreign ID")
+		return
+	}
+	var o InvoiceCreateRequest
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
-
-	// o.ID right now is actually the foreignID, so convert it to the address
-	account, err := t.api.GetAccount(string(o.ID))
+	i, err := t.api.CreateInvoice(o, foreignID)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
-	o.ID = account.Address
-
-	err = t.api.StoreInvoice(o)
+	b, err := json.Marshal(i.ID)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
+	fmt.Fprintf(w, string(b))
 }
 
-// getInvoice is responsible for returning the current status of an invoice with the id in the URL
+// getInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL
 func (t PaymentAPIService) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	// the id is the address of the invoice
-	id := p.ByName("id")
+	// the invoiceID is the address of the invoice
+	id := p.ByName("invoiceID")
 	if id == "" {
-		fmt.Fprintf(w, "error: missing foreignID")
+		fmt.Fprintf(w, "error: missing invoice ID")
 		return
 	}
 	invoice, err := t.api.GetInvoice(Address(id))
@@ -101,10 +105,10 @@ func (t PaymentAPIService) getInvoice(w http.ResponseWriter, r *http.Request, p 
 func (t PaymentAPIService) createAccount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		fmt.Fprintf(w, "error: missing foreignID")
+		fmt.Fprintf(w, "error: missing foreign ID")
 		return
 	}
-	addr, err := t.api.MakeAccount(foreignID)
+	addr, err := t.api.CreateAccount(foreignID)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 	}
@@ -116,7 +120,7 @@ func (t PaymentAPIService) getAccount(w http.ResponseWriter, r *http.Request, p 
 	// the id is the address of the invoice
 	id := p.ByName("foreignID")
 	if id == "" {
-		fmt.Fprintf(w, "error: missing foreignID")
+		fmt.Fprintf(w, "error: missing foreign ID")
 		return
 	}
 	acc, err := t.api.GetAccount(id)
@@ -133,10 +137,10 @@ func (t PaymentAPIService) getAccount(w http.ResponseWriter, r *http.Request, p 
 
 // getAccountByAddress returns the public info of the account with the address in the URL
 func (t PaymentAPIService) getAccountByAddress(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	// the id is the address of the invoice
+	// address of the account
 	id := p.ByName("address")
 	if id == "" {
-		fmt.Fprintf(w, "error: missing id")
+		fmt.Fprintf(w, "error: missing account address")
 		return
 	}
 	acc, err := t.api.GetAccountByAddress(Address(id))

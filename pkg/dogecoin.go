@@ -11,6 +11,7 @@ import (
 // will be implemented via RPC/ZMQ comms to the Dogecoin Core APIs.
 type L1 interface {
 	MakeAddress() (Address, Privkey, error)
+	MakeChildAddress(privkey Privkey) (Address, error)
 	Send(Txn) error
 }
 

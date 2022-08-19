@@ -16,6 +16,10 @@ func (d L1Mock) MakeAddress() (giga.Address, giga.Privkey, error) {
 	return "mockAddress", "mockPrivkey", nil
 }
 
+func (d L1Mock) MakeChildAddress(privkey giga.Privkey) (giga.Address, error) {
+	return "mockChildAddress", nil
+}
+
 func (d L1Mock) Send(txn giga.Txn) error {
 	return nil
 }
