@@ -12,24 +12,24 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
-// PaymentAPIService implements tjstebbing/conductor.Service
-type PaymentAPIService struct {
+// WebAPI implements tjstebbing/conductor.Service
+type WebAPI struct {
 	srv  *http.Server
 	port string
 	api  API
 }
 
-func NewPaymentAPIService(config Config) (PaymentAPIService, error) {
+func NewWebAPI(config Config) (WebAPI, error) {
 	l1, err := dogecoin.NewL1Libdogecoin(config)
 	if err != nil {
-		return PaymentAPIService{}, err
+		return WebAPI{}, err
 	}
 	// TODO: this uses a mock store
 	api := NewAPI(store.NewMock(), l1)
-	return PaymentAPIService{port: config.PaymentService.Port, api: api}, nil
+	return WebAPI{port: config.PaymentService.Port, api: api}, nil
 }
 
-func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Context) error {
+func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
 		mux := httprouter.New()
 		mux.POST("/invoice/:foreignID", t.createInvoice)
@@ -56,7 +56,7 @@ func (t PaymentAPIService) Run(started, stopped chan bool, stop chan context.Con
 }
 
 // createInvoice returns the ID of the created Invoice (which is the one-time address for this transaction) for the foreignID in the URL and the InvoiceCreateRequest in the body
-func (t PaymentAPIService) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
 		fmt.Fprintf(w, "error: missing foreign ID")
@@ -82,7 +82,7 @@ func (t PaymentAPIService) createInvoice(w http.ResponseWriter, r *http.Request,
 }
 
 // getInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL
-func (t PaymentAPIService) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the invoiceID is the address of the invoice
 	id := p.ByName("invoiceID")
 	if id == "" {
@@ -102,7 +102,7 @@ func (t PaymentAPIService) getInvoice(w http.ResponseWriter, r *http.Request, p 
 }
 
 // createAccount returns the address of the new account with the foreignID in the URL
-func (t PaymentAPIService) createAccount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func (t WebAPI) createAccount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
 		fmt.Fprintf(w, "error: missing foreign ID")
@@ -116,7 +116,7 @@ func (t PaymentAPIService) createAccount(w http.ResponseWriter, r *http.Request,
 }
 
 // getAccount returns the public info of the account with the foreignID in the URL
-func (t PaymentAPIService) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the id is the address of the invoice
 	id := p.ByName("foreignID")
 	if id == "" {
@@ -136,7 +136,7 @@ func (t PaymentAPIService) getAccount(w http.ResponseWriter, r *http.Request, p 
 }
 
 // getAccountByAddress returns the public info of the account with the address in the URL
-func (t PaymentAPIService) getAccountByAddress(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// address of the account
 	id := p.ByName("address")
 	if id == "" {
