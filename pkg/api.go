@@ -53,6 +53,10 @@ func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 	return acc.GetPublicInfo(), nil
 }
 
-func (a API) GetAccountByAddress(id Address) (Account, error) {
-	return a.Store.GetAccountByAddress(id)
+func (a API) GetAccountByAddress(id Address) (AccountPublic, error) {
+	acc, err := a.Store.GetAccountByAddress(id)
+	if err != nil {
+		return AccountPublic{}, err
+	}
+	return acc.GetPublicInfo(), nil
 }
