@@ -20,6 +20,10 @@ func main() {
 		conductor.HookSignals(),
 		conductor.Noisy(),
 	)
-	c.Service("Payment API", giga.NewPaymentAPIService(conf))
+	p, err := giga.NewWebAPI(conf)
+	if err != nil {
+		panic(err)
+	}
+	c.Service("Payment API", p)
 	<-c.Start()
 }

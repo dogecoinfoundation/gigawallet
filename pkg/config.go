@@ -10,7 +10,7 @@ type Config struct {
 		Dogecoind string `default:"testnet" required:"true" env:"network"`
 	}
 
-	PaymentService struct {
+	WebAPI struct {
 		Port string `default:"8080" env:"port"`
 	}
 

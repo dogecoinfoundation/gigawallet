@@ -29,14 +29,18 @@ type L1CoreRPC struct {
 	client *rpc.Client
 }
 
-func (d L1CoreRPC) MakeAddress() (giga.Address, error) {
+func (l L1CoreRPC) MakeAddress() (giga.Address, giga.Privkey, error) {
 	// res := map[string]struct{}{}
 	res := ""
-	err := d.client.Call("getrpcinfo", nil, &res)
+	err := l.client.Call("getrpcinfo", nil, &res)
 	fmt.Println(res, err)
-	return giga.Address{"foo", "bar"}, nil
+	return "foo", "bar", nil
 }
 
-func (d L1CoreRPC) Send(txn giga.Txn) error {
+func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey) (giga.Address, error) {
+	return "foo", nil
+}
+
+func (l L1CoreRPC) Send(txn giga.Txn) error {
 	return nil
 }

@@ -10,24 +10,36 @@ import (
 // Go binding for the libdogecoin project, however to begin with
 // will be implemented via RPC/ZMQ comms to the Dogecoin Core APIs.
 type L1 interface {
-	MakeAddress() (Address, error)
+	MakeAddress() (Address, Privkey, error)
+	MakeChildAddress(privkey Privkey) (Address, error)
 	Send(Txn) error
 }
 
 type Address string
+type Privkey string
 
 type Account struct {
-	PrivKey string
-	PubKey  string
+	Address   Address
+	Privkey   Privkey
+	ForeignID string
+}
+
+func (a Account) GetPublicInfo() AccountPublic {
+	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID}
+}
+
+type AccountPublic struct {
+	Address   Address
+	ForeignID string
 }
 
 type Txn struct{}
 
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
-	ID     Address
-	Vendor string `json:"vendor"`
-	Items  []Item `json:"items"`
+	ID     Address `json:"id"`
+	Vendor string  `json:"vendor"`
+	Items  []Item  `json:"items"`
 }
 
 type Item struct {

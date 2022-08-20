@@ -8,6 +8,8 @@ type Store interface {
 
 	// StoreAccount stores an account.
 	StoreAccount(account Account) error
-	// GetAccount returns the account with the given ID.
-	GetAccount(pubkey string) (Account, error)
+	// GetAccount returns the account with the given ForeignID.
+	GetAccount(foreignID string) (Account, error)
+	// GetAccountByAddress returns the account with the given Address.
+	GetAccountByAddress(id Address) (Account, error)
 }
