@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"os"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -20,7 +21,11 @@ func main() {
 		conductor.HookSignals(),
 		conductor.Noisy(),
 	)
-	p, err := giga.NewWebAPI(conf)
+	l1, err := dogecoin.NewL1Libdogecoin(conf)
+	if err != nil {
+		panic(err)
+	}
+	p, err := giga.NewWebAPI(conf, l1, store.NewMock())
 	if err != nil {
 		panic(err)
 	}

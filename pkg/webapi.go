@@ -7,8 +7,6 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
-	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -19,14 +17,8 @@ type WebAPI struct {
 	api  API
 }
 
-func NewWebAPI(config Config) (WebAPI, error) {
-	l1, err := dogecoin.NewL1Libdogecoin(config)
-	if err != nil {
-		return WebAPI{}, err
-	}
-	// TODO: this uses a mock store
-	api := NewAPI(store.NewMock(), l1)
-	return WebAPI{port: config.WebAPI.Port, api: api}, nil
+func NewWebAPI(config Config, l1 L1, store Store) (WebAPI, error) {
+	return WebAPI{port: config.WebAPI.Port, api: NewAPI(store, l1)}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {
