@@ -15,13 +15,13 @@ type ConnectEnvelope struct {
 	ServiceIcon    string `json:"service_icon"`
 	ServiceGateway string `json:"service_gateway"`
 	ServiceKey     string `json:"service_key"`
-	Payload        string `json:"payload"`
+	Payload        []byte `json:"payload"` // the json package will automatically base64 encode and decode this
 	Hash           string `json:"hash"`
 }
 
 type ConnectRequest struct {
 	Type       string          `json:"type"`
-	Id         string          `json:"request_id"`
+	ID         string          `json:"request_id"`
 	Address    string          `json:"address"`
 	Total      decimal.Decimal `json:"Total"`
 	Initiated  time.Time       `json:"initiated"`
@@ -31,11 +31,10 @@ type ConnectRequest struct {
 
 type ConnectItem struct {
 	Type        string          `json:"type"`
-	Id          string          `json:"id"`
+	ID          string          `json:"item_id"`
 	Thumb       string          `json:"thumb"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	UnitCount   int             `json:"unit_count"`
 	UnitCost    decimal.Decimal `json:"unit_cost"`
-	Total       decimal.Decimal `json:"total"`
 }
