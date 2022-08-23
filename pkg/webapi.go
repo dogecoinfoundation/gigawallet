@@ -28,7 +28,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		mux.GET("/invoice/:invoiceID", t.getInvoice)
 		mux.POST("/account/:foreignID", t.createAccount)
 		mux.GET("/account/:foreignID", t.getAccount)
-		mux.GET("/account/byaddress/:address", t.getAccountByAddress) // TODO: figure out some way to to merge this and the above
+		mux.GET("/accountbyaddr/:address", t.getAccountByAddress) // TODO: figure out some way to to merge this and the above
 
 		t.srv = &http.Server{Addr: ":" + t.port, Handler: mux}
 		go func() {
@@ -89,6 +89,7 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 	b, err := json.Marshal(invoice)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(b))
 }
@@ -103,6 +104,7 @@ func (t WebAPI) createAccount(w http.ResponseWriter, r *http.Request, p httprout
 	addr, err := t.api.CreateAccount(foreignID)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(addr))
 }
@@ -123,6 +125,7 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 	b, err := json.Marshal(acc)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(b))
 }
@@ -143,6 +146,7 @@ func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p ht
 	b, err := json.Marshal(acc)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(b))
 }

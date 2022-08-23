@@ -1,5 +1,7 @@
 package giga
 
+import "errors"
+
 type API struct {
 	Store Store
 	L1    L1
@@ -33,6 +35,10 @@ func (a API) GetInvoice(id Address) (Invoice, error) {
 }
 
 func (a API) CreateAccount(foreignID string) (Address, error) {
+	acc, err := a.Store.GetAccount(foreignID)
+	if err == nil {
+		return "", errors.New("account already exists with address " + string(acc.Address))
+	}
 	addr, priv, err := a.L1.MakeAddress()
 	if err != nil {
 		return "", err

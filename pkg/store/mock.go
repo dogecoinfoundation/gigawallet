@@ -19,7 +19,11 @@ type Mock struct {
 
 // NewMock returns a giga.PaymentsStore implementor that stores orders in memory
 func NewMock() Mock {
-	return Mock{}
+	return Mock{
+		invoices:          make(map[giga.Address]giga.Invoice, 10),
+		accounts:          make(map[string]giga.Account, 10),
+		accountsByAddress: make(map[giga.Address]giga.Account, 10),
+	}
 }
 
 func (m Mock) StoreInvoice(invoice giga.Invoice) error {
