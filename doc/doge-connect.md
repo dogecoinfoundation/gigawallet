@@ -12,15 +12,15 @@ sign and HTTP/REST APIs to manage payment flow.
 
 ## DogeConnect Envelope
 
-```js
+```json
 {
-  type: "dc:0.1:envelope",
-  service: "My Service Name", 
-  service_icon: "https://example.com/icon.png",
-  service_gateway: "https://example.com/payments",
-  service_key: "6JWBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAUuC",
-  payload: "base64 encoded JSON"
-  hash:  "payload hash (from service_key)"
+  "type": "dc:0.1:envelope", 
+  "service": "My Service Name",
+  "service_icon": "https://example.com/icon.png",
+  "service_gateway": "https://example.com/payments",
+  "service_key": "6JWBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAUuC",
+  "payload": "base64 encoded JSON",
+  "hash":  "payload hash (from service_key)"
 }
 ```
 
@@ -113,24 +113,23 @@ to a user-agent. The payload can take the form of a number of payment options:
 
 ## Payment Request
 
-```js
+```json
 {
-  type: "dc:0.1:payment_request",
-  request_id: "8TSBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAVu9",
-  address: "wqd6ksZyfTVakMS6iYSAVu98TSBrzyPQnvZnob7JVvq85PYcCt8",
-  amount: 123.45,
-  initiated: "2022-03-29T22:18:26.625Z",
-  timeout_sec: 900,
-  items: [
+  "type": "dc:0.1:payment_request",
+  "request_id": "8TSBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAVu9",
+  "address": "wqd6ksZyfTVakMS6iYSAVu98TSBrzyPQnvZnob7JVvq85PYcCt8",
+  "total": 123.45,
+  "initiated": "2022-03-29T22:18:26.625Z",
+  "timeout_sec": 900,
+  "items": [
     {
-      type: "dc:0.1:payment_item",
-      item_id: "123456",
-      item_thumb: "https://example.com/123456/thumb.png",
-      name: "Example Item",
-      description: "A rather nice Example Item",
-      unit_count: 1,
-      unit_amount: "50.0",
-      amount: "50.0"
+      "type": "dc:0.1:payment_item",
+      "item_id": "123456",
+      "thumb": "https://example.com/123456/thumb.png",
+      "name": "Example Item",
+      "description": "A rather nice Example Item",
+      "unit_count": 1,
+      "unit_amount": 50.0
     }, 
     ...
   ]
@@ -142,29 +141,29 @@ Docs TBD
 
 ## Donation Request
 
-```js
+```json
 {
-  type: "dc:0.1:donation_request",
-  request_id: "8TSBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAVu9",
-  address: "wqd6ksZyfTVakMS6iYSAVu98TSBrzyPQnvZnob7JVvq85PYcCt8",
-  initiated: "2022-03-29T22:18:26.625Z",
-  modes: ["OPTIONS_SINGLE", "ANY", "COMMENT"],
-  options : [
+  "type": "dc:0.1:donation_request",
+  "request_id": "8TSBrzyPQnvZnob7JVvq85PYcCt8wqd6ksZyfTVakMS6iYSAVu9",
+  "address": "wqd6ksZyfTVakMS6iYSAVu98TSBrzyPQnvZnob7JVvq85PYcCt8",
+  "initiated": "2022-03-29T22:18:26.625Z",
+  "modes": ["OPTIONS_SINGLE", "ANY", "COMMENT"],
+  "options": [
     {
-      type: "dc:0.1:donation_option",
-      option_id: "123456",
-      item_thumb: "https://example.com/123456/thumb.png",
-      name: "High Roller",
-      description: "Your donation will support Example Org for 3 months",
-      amount: "5000000.0"
+      "type": "dc:0.1:donation_option",
+      "option_id": 123456,
+      "item_thumb": "https://example.com/123456/thumb.png",
+      "name": "High Roller",
+      "description": "Your donation will support Example Org for 3 months",
+      "amount": 5000000.0
     }, 
     {
-      type: "dc:0.1:donation_option",
-      option_id: "456789",
-      item_thumb: "https://example.com/456789/thumb.png",
-      name: "bread'n'Butter Backer",
-      description: "Your donation contributes to Example Cause",
-      amount: "5000.0"
+      "type": "dc:0.1:donation_option",
+      "option_id": 456789,
+      "item_thumb": "https://example.com/456789/thumb.png",
+      "name": "bread'n'Butter Backer",
+      "description": "Your donation contributes to Example Cause",
+      "amount": 5000.0
     }, 
     ...
   ]

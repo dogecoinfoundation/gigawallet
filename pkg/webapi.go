@@ -7,8 +7,6 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
-	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -19,14 +17,8 @@ type WebAPI struct {
 	api  API
 }
 
-func NewWebAPI(config Config) (WebAPI, error) {
-	l1, err := dogecoin.NewL1Libdogecoin(config)
-	if err != nil {
-		return WebAPI{}, err
-	}
-	// TODO: this uses a mock store
-	api := NewAPI(store.NewMock(), l1)
-	return WebAPI{port: config.WebAPI.Port, api: api}, nil
+func NewWebAPI(config Config, l1 L1, store Store) (WebAPI, error) {
+	return WebAPI{port: config.WebAPI.Port, api: NewAPI(store, l1)}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {
@@ -36,7 +28,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		mux.GET("/invoice/:invoiceID", t.getInvoice)
 		mux.POST("/account/:foreignID", t.createAccount)
 		mux.GET("/account/:foreignID", t.getAccount)
-		mux.GET("/account/byaddress/:address", t.getAccountByAddress) // TODO: figure out some way to to merge this and the above
+		mux.GET("/accountbyaddr/:address", t.getAccountByAddress) // TODO: figure out some way to to merge this and the above
 
 		t.srv = &http.Server{Addr: ":" + t.port, Handler: mux}
 		go func() {
@@ -97,6 +89,7 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 	b, err := json.Marshal(invoice)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(b))
 }
@@ -111,6 +104,7 @@ func (t WebAPI) createAccount(w http.ResponseWriter, r *http.Request, p httprout
 	addr, err := t.api.CreateAccount(foreignID)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(addr))
 }
@@ -131,6 +125,7 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 	b, err := json.Marshal(acc)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(b))
 }
@@ -151,6 +146,7 @@ func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p ht
 	b, err := json.Marshal(acc)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
+		return
 	}
 	fmt.Fprintf(w, string(b))
 }
