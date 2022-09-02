@@ -19,12 +19,12 @@ func (e ZMQEmitter) Subscribe(ch chan<- giga.NodeEvent) {
 	e.channels = append(e.channels, ch)
 }
 
-func NewZMQEmitter(nodeURL string) (ZMQEmitter, error) {
+func NewZMQEmitter(config giga.Config) (ZMQEmitter, error) {
 	sock, err := zmq4.NewSocket(zmq4.SUB)
 	if err != nil {
 		return ZMQEmitter{}, err
 	}
-	err = sock.Connect(nodeURL)
+	err = sock.Connect("tcp://" + config.Dogecoind[config.Gigawallet.Dogecoind].Host + ":" + config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort)
 	if err != nil {
 		return ZMQEmitter{}, err
 	}

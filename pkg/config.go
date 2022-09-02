@@ -16,10 +16,11 @@ type Config struct {
 
 	// info for connecting to dogecoin-core daemon
 	Dogecoind map[string]struct {
-		Rpcaddr string `default:"localhost"`
-		Rpcport int    `default:"44555"`
-		Rpcpass string `default:"gigawallet"`
-		Rpcuser string `default:"gigawallet"`
+		Host    string `default:"localhost"`
+		ZMQPort string `default:"28332"`
+		RPCPort int    `default:"44555"`
+		RPCPass string `default:"gigawallet"`
+		RPCUser string `default:"gigawallet"`
 	}
 }
 

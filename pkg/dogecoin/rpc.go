@@ -14,7 +14,7 @@ var _ giga.L1 = L1CoreRPC{}
 // NewDogecoinCoreRPC returns a giga.L1 implementor that uses dogecoin-core's RPC
 func NewDogecoinCoreRPC(config giga.Config) (L1CoreRPC, error) {
 	// Connect to the dogecoin daemon
-	addr := fmt.Sprintf("%s:%d", config.Dogecoind["testnet"].Rpcaddr, config.Dogecoind["testnet"].Rpcport)
+	addr := fmt.Sprintf("%s:%d", config.Dogecoind[config.Gigawallet.Dogecoind].Host, config.Dogecoind[config.Gigawallet.Dogecoind].RPCPort)
 	fmt.Println("Dialing:", addr)
 	c, err := jsonrpc.Dial("tcp", addr)
 	if err != nil {
