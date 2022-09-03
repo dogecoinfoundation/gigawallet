@@ -14,6 +14,16 @@ type SQLite struct {
 	db *sql.DB
 }
 
+func (s SQLite) MarkInvoiceAsPaid(id giga.Address) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s SQLite) GetPendingInvoices() (<-chan giga.Invoice, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // NewSQLite returns a giga.PaymentsStore implementor that uses sqlite
 func NewSQLite(fileName string) (SQLite, error) {
 	db, err := sql.Open("sqlite3", fileName)

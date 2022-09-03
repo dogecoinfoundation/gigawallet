@@ -4,22 +4,22 @@ import "strings"
 
 type Confirmer struct {
 	nec         chan NodeEvent
-	listeners   []chan<- string
-	txWatchlist map[string]bool
+	txWatchlist map[string]func()
 }
 
 func NewConfirmer(conf Config, ne NodeEmitter) *Confirmer {
 	result := &Confirmer{nec: make(chan NodeEvent, 1)}
 	ne.Subscribe(result.nec)
-	go notifyConfirmer(result, conf)
+	go notifyConfirmer(result, conf.Gigawallet.ConfirmationsNeeded)
 	return result
 }
 
-func (c *Confirmer) Watch(txid string) {
-	c.txWatchlist[txid] = true
+// AfterConfirmation calls a function after a transaction is confirmed.
+func (c *Confirmer) AfterConfirmation(txid string, funcToCall func()) {
+	c.txWatchlist[txid] = funcToCall
 }
 
-func notifyConfirmer(result *Confirmer, conf Config) {
+func notifyConfirmer(result *Confirmer, confirmationsNeeded int) {
 	type txInfo struct {
 		id            string
 		foundInBlock  bool
@@ -32,7 +32,7 @@ func notifyConfirmer(result *Confirmer, conf Config) {
 		e := <-result.nec
 		switch e.Type {
 		case TX:
-			if result.txWatchlist[e.ID] {
+			if result.txWatchlist[e.ID] != nil {
 				rawTxToInfo[e.Data] = &txInfo{id: e.ID, foundInBlock: false, confirmations: 0}
 			}
 		case Block:
@@ -45,17 +45,11 @@ func notifyConfirmer(result *Confirmer, conf Config) {
 				if info.foundInBlock {
 					info.confirmations++
 				}
-				if info.confirmations >= conf.Gigawallet.ConfirmationsNeeded {
-					for i := range result.listeners {
-						result.listeners[i] <- info.id
-					}
+				if info.confirmations >= confirmationsNeeded {
+					result.txWatchlist[info.id]() // call the user's function
 					delete(rawTxToInfo, raw)
 				}
 			}
 		}
 	}
-}
-
-func (c *Confirmer) Subscribe(ch chan<- string) {
-	c.listeners = append(c.listeners, ch)
 }
