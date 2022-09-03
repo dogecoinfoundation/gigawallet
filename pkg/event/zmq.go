@@ -8,32 +8,32 @@ import (
 )
 
 // interface guard ensures L1Mock implements giga.L1
-var _ giga.NodeEmitter = ZMQEmitter{}
+var _ giga.NodeEmitter = &ZMQEmitter{}
 
 type ZMQEmitter struct {
-	sock     *zmq4.Socket
-	channels []chan<- giga.NodeEvent
+	sock      *zmq4.Socket
+	listeners []chan<- giga.NodeEvent
 }
 
-func (e ZMQEmitter) Subscribe(ch chan<- giga.NodeEvent) {
-	e.channels = append(e.channels, ch)
+func (e *ZMQEmitter) Subscribe(ch chan<- giga.NodeEvent) {
+	e.listeners = append(e.listeners, ch)
 }
 
-func NewZMQEmitter(config giga.Config) (ZMQEmitter, error) {
+func NewZMQEmitter(config giga.Config) (*ZMQEmitter, error) {
 	sock, err := zmq4.NewSocket(zmq4.SUB)
 	if err != nil {
-		return ZMQEmitter{}, err
+		return &ZMQEmitter{}, err
 	}
 	err = sock.Connect("tcp://" + config.Dogecoind[config.Gigawallet.Dogecoind].Host + ":" + config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort)
 	if err != nil {
-		return ZMQEmitter{}, err
+		return &ZMQEmitter{}, err
 	}
 	err = subscribeAll(sock, "hashtx", "rawtx", "rawblock")
 	if err != nil {
-		return ZMQEmitter{}, err
+		return &ZMQEmitter{}, err
 	}
 
-	result := ZMQEmitter{sock: sock, channels: make([]chan<- giga.NodeEvent, 0, 10)}
+	result := &ZMQEmitter{sock: sock, listeners: make([]chan<- giga.NodeEvent, 0, 10)}
 
 	go func() {
 		for {
@@ -58,7 +58,7 @@ func NewZMQEmitter(config giga.Config) (ZMQEmitter, error) {
 				e.Type = giga.Block
 				e.Data = toHex(msg[1])
 			}
-			for _, ch := range result.channels {
+			for _, ch := range result.listeners {
 				ch <- e
 			}
 		}

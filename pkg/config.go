@@ -7,7 +7,8 @@ import (
 type Config struct {
 	Gigawallet struct {
 		// key for which Dogecoind struct to use
-		Dogecoind string `default:"testnet" required:"true" env:"network"`
+		Dogecoind           string `default:"testnet" required:"true" env:"network"`
+		ConfirmationsNeeded int    `default:"60" required:"false"`
 	}
 
 	WebAPI struct {
