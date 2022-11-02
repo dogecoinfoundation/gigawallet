@@ -38,6 +38,7 @@ type Txn struct{}
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
 	ID     Address `json:"id"`
+	TXID   string  `json:"txid"`
 	Vendor string  `json:"vendor"`
 	Items  []Item  `json:"items"`
 }

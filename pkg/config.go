@@ -7,7 +7,8 @@ import (
 type Config struct {
 	Gigawallet struct {
 		// key for which Dogecoind struct to use
-		Dogecoind string `default:"testnet" required:"true" env:"network"`
+		Dogecoind           string `default:"testnet" required:"true" env:"network"`
+		ConfirmationsNeeded int    `default:"60" required:"false"`
 	}
 
 	WebAPI struct {
@@ -16,10 +17,11 @@ type Config struct {
 
 	// info for connecting to dogecoin-core daemon
 	Dogecoind map[string]struct {
-		Rpcaddr string `default:"localhost"`
-		Rpcport int    `default:"44555"`
-		Rpcpass string `default:"gigawallet"`
-		Rpcuser string `default:"gigawallet"`
+		Host    string `default:"localhost"`
+		ZMQPort string `default:"28332"`
+		RPCPort int    `default:"44555"`
+		RPCPass string `default:"gigawallet"`
+		RPCUser string `default:"gigawallet"`
 	}
 }
 

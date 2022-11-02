@@ -17,6 +17,16 @@ type Mock struct {
 	accountsByAddress map[giga.Address]giga.Account
 }
 
+func (m Mock) MarkInvoiceAsPaid(id giga.Address) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m Mock) GetPendingInvoices() (<-chan giga.Invoice, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // NewMock returns a giga.PaymentsStore implementor that stores orders in memory
 func NewMock() Mock {
 	return Mock{

@@ -7,6 +7,7 @@ require (
 	github.com/jinzhu/configor v1.2.1
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.14
+	github.com/pebbe/zmq4 v1.2.9
 	github.com/shopspring/decimal v1.3.1
 	github.com/tjstebbing/conductor v1.0.0
 )
