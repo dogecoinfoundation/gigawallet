@@ -16,3 +16,5 @@ require (
 	github.com/BurntSushi/toml v0.3.1 // indirect
 	gopkg.in/yaml.v2 v2.2.2 // indirect
 )
+
+replace github.com/jaxlotl/go-libdogecoin => /Users/raffe/code/go-libdogecoin

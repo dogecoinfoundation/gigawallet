@@ -1,43 +1,53 @@
-package event
+package receiver
 
 import (
+	"context"
 	"encoding/hex"
+	"fmt"
+	"log"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/pebbe/zmq4"
 )
 
-// interface guard ensures L1Mock implements giga.L1
-var _ giga.NodeEmitter = &ZMQEmitter{}
+// interface guard ensures ZMQEmitter implements giga.NodeEmitter
+var _ giga.NodeEmitter = &ZMQReceiver{}
 
-type ZMQEmitter struct {
-	sock      *zmq4.Socket
-	listeners []chan<- giga.NodeEvent
+type ZMQReceiver struct {
+	sock        *zmq4.Socket
+	listeners   []chan<- giga.NodeEvent
+	nodeAddress string
 }
 
-func (e *ZMQEmitter) Subscribe(ch chan<- giga.NodeEvent) {
+func (e *ZMQReceiver) Subscribe(ch chan<- giga.NodeEvent) {
 	e.listeners = append(e.listeners, ch)
 }
 
-func NewZMQEmitter(config giga.Config) (*ZMQEmitter, error) {
+func NewZMQReceiver(config giga.Config) (*ZMQReceiver, error) {
+	return &ZMQReceiver{
+		listeners:   make([]chan<- giga.NodeEvent, 0, 10),
+		nodeAddress: "tcp://" + config.Dogecoind[config.Gigawallet.Dogecoind].Host + ":" + config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort,
+	}, nil
+}
+
+func (z ZMQReceiver) Run(started, stopped chan bool, stop chan context.Context) error {
 	sock, err := zmq4.NewSocket(zmq4.SUB)
 	if err != nil {
-		return &ZMQEmitter{}, err
+		return err
 	}
-	err = sock.Connect("tcp://" + config.Dogecoind[config.Gigawallet.Dogecoind].Host + ":" + config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort)
+	log.Println("ZMQ: connecting to:", z.nodeAddress)
+	err = sock.Connect(z.nodeAddress)
 	if err != nil {
-		return &ZMQEmitter{}, err
+		return err
 	}
 	err = subscribeAll(sock, "hashtx", "rawtx", "rawblock")
 	if err != nil {
-		return &ZMQEmitter{}, err
+		return err
 	}
-
-	result := &ZMQEmitter{sock: sock, listeners: make([]chan<- giga.NodeEvent, 0, 10)}
-
 	go func() {
+		started <- true
 		for {
-			msg, err := sock.RecvMessageBytes(0)
+			msg, err := z.sock.RecvMessageBytes(0)
 			if err != nil {
 				panic("zmq error: " + err.Error())
 			}
@@ -46,7 +56,7 @@ func NewZMQEmitter(config giga.Config) (*ZMQEmitter, error) {
 			case "hashtx":
 				e.Type = giga.TX
 				e.ID = toHex(msg[1])
-				msg, err = sock.RecvMessageBytes(0)
+				msg, err = z.sock.RecvMessageBytes(0)
 				if err != nil {
 					panic("zmq error: " + err.Error())
 				}
@@ -58,13 +68,13 @@ func NewZMQEmitter(config giga.Config) (*ZMQEmitter, error) {
 				e.Type = giga.Block
 				e.Data = toHex(msg[1])
 			}
-			for _, ch := range result.listeners {
+			fmt.Printf("ZMQ=> %+v", e)
+			for _, ch := range z.listeners {
 				ch <- e
 			}
 		}
 	}()
-
-	return result, nil
+	return nil
 }
 
 func toHex(b []byte) string {

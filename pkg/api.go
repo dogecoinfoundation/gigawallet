@@ -22,6 +22,9 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 		return Invoice{}, err
 	}
 	invoiceID, err := a.L1.MakeChildAddress(acc.Privkey)
+	if err != nil {
+		return Invoice{}, err
+	}
 	i := Invoice{ID: invoiceID, Vendor: request.Vendor, Items: request.Items}
 	err = a.Store.StoreInvoice(i)
 	if err != nil {
