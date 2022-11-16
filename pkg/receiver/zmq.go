@@ -67,12 +67,16 @@ func (z ZMQReceiver) Run(started, stopped chan bool, stop chan context.Context) 
 				rawtx := toHex(msg[1])
 				fmt.Printf("ZMQ=> TX id=%s rawtx=%s\n", id, rawtx)
 				z.notify(giga.TX, id, rawtx)
+			case "hashblock":
+				id := toHex(msg[1])
+				fmt.Printf("ZMQ=> Block id=%s\n", id)
+				z.notify(giga.TX, id, "")
 			case "rawblock":
 				block := toHex(msg[1])
 				fmt.Printf("ZMQ=> Block %s\n", block)
 				z.notify(giga.Block, "", block)
 			default:
-				fmt.Printf("ZMQ=> %s\n", tag)
+				fmt.Printf("ZMQ=> %s ??\n", tag)
 			}
 		}
 	}()
