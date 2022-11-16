@@ -26,7 +26,7 @@ func (e *ZMQReceiver) Subscribe(ch chan<- giga.NodeEvent) {
 func NewZMQReceiver(config giga.Config) (*ZMQReceiver, error) {
 	return &ZMQReceiver{
 		listeners:   make([]chan<- giga.NodeEvent, 0, 10),
-		nodeAddress: "tcp://" + config.Dogecoind[config.Gigawallet.Dogecoind].Host + ":" + config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort,
+		nodeAddress: fmt.Sprintf("tcp://%s:%d", config.Dogecoind[config.Gigawallet.Dogecoind].Host, config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort),
 	}, nil
 }
 
@@ -35,12 +35,14 @@ func (z ZMQReceiver) Run(started, stopped chan bool, stop chan context.Context) 
 	if err != nil {
 		return err
 	}
+	z.sock = sock
 	log.Println("ZMQ: connecting to:", z.nodeAddress)
 	err = sock.Connect(z.nodeAddress)
 	if err != nil {
 		return err
 	}
-	err = subscribeAll(sock, "hashtx", "rawtx", "rawblock")
+	// err = subscribeAll(sock, "hashtx", "rawtx", "rawblock")
+	err = sock.SetSubscribe("") // enable all messages.
 	if err != nil {
 		return err
 	}
@@ -51,30 +53,39 @@ func (z ZMQReceiver) Run(started, stopped chan bool, stop chan context.Context) 
 			if err != nil {
 				panic("zmq error: " + err.Error())
 			}
-			e := giga.NodeEvent{}
-			switch string(msg[0]) {
+			tag := string(msg[0])
+			switch tag {
 			case "hashtx":
-				e.Type = giga.TX
-				e.ID = toHex(msg[1])
+				id := toHex(msg[1])
 				msg, err = z.sock.RecvMessageBytes(0)
 				if err != nil {
-					panic("zmq error: " + err.Error())
+					panic(fmt.Sprintf("zmq error: (hashtx %s): %v\n", id, err.Error()))
 				}
 				if string(msg[0]) != "rawtx" {
-					panic("expected rawtx after hashtx")
+					panic(fmt.Sprintf("zmq error: expected rawtx after hashtx %s", id))
 				}
-				e.Data = toHex(msg[1])
+				rawtx := toHex(msg[1])
+				fmt.Printf("ZMQ=> TX id=%s rawtx=%s\n", id, rawtx)
+				z.notify(giga.TX, id, rawtx)
 			case "rawblock":
-				e.Type = giga.Block
-				e.Data = toHex(msg[1])
-			}
-			fmt.Printf("ZMQ=> %+v", e)
-			for _, ch := range z.listeners {
-				ch <- e
+				block := toHex(msg[1])
+				fmt.Printf("ZMQ=> Block %s\n", block)
+				z.notify(giga.Block, "", block)
+			default:
+				fmt.Printf("ZMQ=> %s\n", tag)
 			}
 		}
 	}()
 	return nil
+}
+
+func (z ZMQReceiver) notify(tag giga.NodeEventType, id string, data string) {
+	e := giga.NodeEvent{
+		Type: tag, ID: id, Data: data,
+	}
+	for _, ch := range z.listeners {
+		ch <- e
+	}
 }
 
 func toHex(b []byte) string {

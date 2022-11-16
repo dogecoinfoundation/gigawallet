@@ -1,7 +1,7 @@
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/jaxlotl/go-libdogecoin v0.0.40 h1:4ECZEqmc1Qu9XCN8weCh5KBUjEF9QrX8SfoIPplOtI4=
-github.com/jaxlotl/go-libdogecoin v0.0.40/go.mod h1:EQqGnvVuBbe2AOZg6UTL3quISqwCp04iRu34XeDDP4M=
+github.com/dogeorg/go-libdogecoin v0.0.42 h1:ej8yPq52UXQYuH3TGBkNkPn/h4cH3DLwNPwJnjbf+/w=
+github.com/dogeorg/go-libdogecoin v0.0.42/go.mod h1:1ByEB/S1JNzgYy3bwZfeTXf+3683dxALhmYbw4B/4B0=
 github.com/jinzhu/configor v1.2.1 h1:OKk9dsR8i6HPOCZR8BcMtcEImAFjIhbJFZNyn5GCZko=
 github.com/jinzhu/configor v1.2.1/go.mod h1:nX89/MOmDba7ZX7GCyU/VIaQ2Ar2aizBl2d3JLF/rDc=
 github.com/julienschmidt/httprouter v1.3.0 h1:U0609e9tgbseu3rBINet9P48AI/D3oJs4dN7jwJOQ1U=

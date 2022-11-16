@@ -6,7 +6,7 @@ import (
 
 type NodeConfig struct {
 	Host    string `default:"localhost"`
-	ZMQPort string `default:"28332"`
+	ZMQPort int    `default:"28332"`
 	RPCPort int    `default:"44555"`
 	RPCPass string `default:"gigawallet"`
 	RPCUser string `default:"gigawallet"`
