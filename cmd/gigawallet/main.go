@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dogecoinfoundation/gigawallet/pkg/store"
-
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
 	"github.com/dogecoinfoundation/gigawallet/pkg/core"
