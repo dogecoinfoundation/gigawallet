@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"os"
+
+	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
@@ -25,7 +26,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	p, err := giga.NewWebAPI(conf, l1, store.NewMock())
+
+	st, err := store.NewSQLite("gigawallet.db")
+	if err != nil {
+		panic(err)
+	}
+	defer st.Close()
+
+	p, err := giga.NewWebAPI(conf, l1, st)
 	if err != nil {
 		panic(err)
 	}
