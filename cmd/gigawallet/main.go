@@ -8,8 +8,8 @@ import (
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
+	"github.com/dogecoinfoundation/gigawallet/pkg/core"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
-	"github.com/dogecoinfoundation/gigawallet/pkg/receiver"
 	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"github.com/tjstebbing/conductor"
 )
@@ -49,7 +49,7 @@ func main() {
 	}
 	defer store.Close()
 
-	cf, err := broker.NewConfirmer(conf)
+	cf, err := broker.NewTxnConfirmer(conf)
 	if err != nil {
 		panic(err)
 	}
@@ -58,7 +58,7 @@ func main() {
 	pb := broker.NewPaymentBroker(conf, store)
 	c.Service("Payment Broker", pb)
 
-	z, err := receiver.NewZMQReceiver(conf)
+	z, err := core.NewCoreReceiver(conf)
 	if err != nil {
 		panic(err)
 	}

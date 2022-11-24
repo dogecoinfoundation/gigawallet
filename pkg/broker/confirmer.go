@@ -7,7 +7,7 @@ import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 )
 
-type Confirmer struct {
+type TxnConfirmer struct {
 	ReceiveFromNode     chan giga.NodeEvent
 	ReceiveFromBroker   chan BrokerEvent
 	listeners           []chan<- BrokerEvent
@@ -20,16 +20,16 @@ type Confirmer struct {
  * Confirmer receives txn_ids or invoice_ids from Store ???
  * Confirmer sends
  */
-func NewConfirmer(conf giga.Config) (*Confirmer, error) {
-	result := &Confirmer{ReceiveFromNode: make(chan giga.NodeEvent, 100), confirmationsNeeded: conf.Gigawallet.ConfirmationsNeeded}
+func NewTxnConfirmer(conf giga.Config) (*TxnConfirmer, error) {
+	result := &TxnConfirmer{ReceiveFromNode: make(chan giga.NodeEvent, 100), confirmationsNeeded: conf.Gigawallet.ConfirmationsNeeded}
 	return result, nil
 }
 
-func (c *Confirmer) Subscribe(ch chan<- BrokerEvent) {
+func (c *TxnConfirmer) Subscribe(ch chan<- BrokerEvent) {
 	c.listeners = append(c.listeners, ch)
 }
 
-func (c *Confirmer) Run(started, stopped chan bool, stop chan context.Context) error {
+func (c *TxnConfirmer) Run(started, stopped chan bool, stop chan context.Context) error {
 	type txInfo struct {
 		id            string
 		foundInBlock  bool

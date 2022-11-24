@@ -1,4 +1,4 @@
-package receiver
+package core
 
 import (
 	"context"
@@ -11,26 +11,26 @@ import (
 )
 
 // interface guard ensures ZMQEmitter implements giga.NodeEmitter
-var _ giga.NodeEmitter = &ZMQReceiver{}
+var _ giga.NodeEmitter = &CoreReceiver{}
 
-type ZMQReceiver struct {
+type CoreReceiver struct {
 	sock        *zmq4.Socket
 	listeners   []chan<- giga.NodeEvent
 	nodeAddress string
 }
 
-func (e *ZMQReceiver) Subscribe(ch chan<- giga.NodeEvent) {
+func (e *CoreReceiver) Subscribe(ch chan<- giga.NodeEvent) {
 	e.listeners = append(e.listeners, ch)
 }
 
-func NewZMQReceiver(config giga.Config) (*ZMQReceiver, error) {
-	return &ZMQReceiver{
+func NewCoreReceiver(config giga.Config) (*CoreReceiver, error) {
+	return &CoreReceiver{
 		listeners:   make([]chan<- giga.NodeEvent, 0, 10),
 		nodeAddress: fmt.Sprintf("tcp://%s:%d", config.Dogecoind[config.Gigawallet.Dogecoind].Host, config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort),
 	}, nil
 }
 
-func (z ZMQReceiver) Run(started, stopped chan bool, stop chan context.Context) error {
+func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context) error {
 	sock, err := zmq4.NewSocket(zmq4.SUB)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func (z ZMQReceiver) Run(started, stopped chan bool, stop chan context.Context) 
 	return nil
 }
 
-func (z ZMQReceiver) notify(tag giga.NodeEventType, id string, data string) {
+func (z CoreReceiver) notify(tag giga.NodeEventType, id string, data string) {
 	e := giga.NodeEvent{
 		Type: tag, ID: id, Data: data,
 	}
