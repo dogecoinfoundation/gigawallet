@@ -8,16 +8,16 @@ import (
 )
 
 type PaymentBroker struct {
-	Receive   chan BrokerEvent
-	listeners []chan<- BrokerEvent
+	Receive   chan giga.BrokerEvent
+	listeners []chan<- giga.BrokerEvent
 	store     giga.Store
 }
 
 func NewPaymentBroker(config giga.Config, s giga.Store) PaymentBroker {
-	return PaymentBroker{Receive: make(chan BrokerEvent, 100), store: s}
+	return PaymentBroker{Receive: make(chan giga.BrokerEvent, 100), store: s}
 }
 
-func (p *PaymentBroker) Subscribe(ch chan<- BrokerEvent) {
+func (p *PaymentBroker) Subscribe(ch chan<- giga.BrokerEvent) {
 	p.listeners = append(p.listeners, ch)
 }
 
@@ -33,11 +33,11 @@ func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context
 			select {
 			case e := <-p.Receive:
 				switch e.Type {
-				case NewInvoice:
+				case giga.NewInvoice:
 					// from New Invoice API or GetPendingInvoices
 					// forward the invoice to the Confirmer [RACE vs ZMQ]
-					p.sendEvent(BrokerEvent{Type: NewInvoice, ID: e.ID})
-				case InvoiceConfirmed:
+					p.sendEvent(giga.BrokerEvent{Type: giga.NewInvoice, ID: e.ID})
+				case giga.InvoiceConfirmed:
 					// from Confirmer
 					err := p.store.MarkInvoiceAsPaid(giga.Address(e.ID))
 					if err != nil {
@@ -46,7 +46,7 @@ func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context
 					}
 				}
 			case e := <-storedInvoices:
-				p.sendEvent(BrokerEvent{Type: NewInvoice, ID: string(e.ID)})
+				p.sendEvent(giga.BrokerEvent{Type: giga.NewInvoice, ID: string(e.ID)})
 			case <-stop:
 				stopped <- true
 				return
@@ -56,7 +56,7 @@ func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context
 	return nil
 }
 
-func (p PaymentBroker) sendEvent(e BrokerEvent) {
+func (p PaymentBroker) sendEvent(e giga.BrokerEvent) {
 	for _, ch := range p.listeners {
 		ch <- e
 	}

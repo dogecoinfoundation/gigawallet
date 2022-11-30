@@ -1,4 +1,4 @@
-package broker
+package giga
 
 type BrokerEventType int
 

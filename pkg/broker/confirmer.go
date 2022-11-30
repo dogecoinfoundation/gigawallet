@@ -9,8 +9,8 @@ import (
 
 type TxnConfirmer struct {
 	ReceiveFromNode     chan giga.NodeEvent
-	ReceiveFromBroker   chan BrokerEvent
-	listeners           []chan<- BrokerEvent
+	ReceiveFromBroker   chan giga.BrokerEvent
+	listeners           []chan<- giga.BrokerEvent
 	confirmationsNeeded int
 }
 
@@ -25,7 +25,7 @@ func NewTxnConfirmer(conf giga.Config) (*TxnConfirmer, error) {
 	return result, nil
 }
 
-func (c *TxnConfirmer) Subscribe(ch chan<- BrokerEvent) {
+func (c *TxnConfirmer) Subscribe(ch chan<- giga.BrokerEvent) {
 	c.listeners = append(c.listeners, ch)
 }
 
@@ -45,7 +45,7 @@ func (c *TxnConfirmer) Run(started, stopped chan bool, stop chan context.Context
 			select {
 			case e := <-c.ReceiveFromBroker:
 				switch e.Type {
-				case NewInvoice:
+				case giga.NewInvoice:
 					txWatchlist[e.ID] = true
 				}
 			case e := <-c.ReceiveFromNode:
@@ -65,7 +65,7 @@ func (c *TxnConfirmer) Run(started, stopped chan bool, stop chan context.Context
 							info.confirmations++
 						}
 						if info.confirmations >= c.confirmationsNeeded {
-							e := BrokerEvent{Type: InvoiceConfirmed, ID: info.id}
+							e := giga.BrokerEvent{Type: giga.InvoiceConfirmed, ID: info.id}
 							for _, ch := range c.listeners {
 								ch <- e
 							}
