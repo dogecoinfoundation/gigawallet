@@ -37,7 +37,7 @@ func (l L1CoreRPC) MakeAddress() (giga.Address, giga.Privkey, error) {
 	return "foo", "bar", nil
 }
 
-func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey) (giga.Address, error) {
+func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
 	return "foo", nil
 }
 

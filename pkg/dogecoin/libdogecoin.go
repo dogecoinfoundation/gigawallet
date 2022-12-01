@@ -23,9 +23,13 @@ func (l L1Libdogecoin) MakeAddress() (giga.Address, giga.Privkey, error) {
 	return giga.Address(pub), giga.Privkey(priv), nil
 }
 
-func (l L1Libdogecoin) MakeChildAddress(privkey giga.Privkey) (giga.Address, error) {
+func (l L1Libdogecoin) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
 	libdogecoin.W_context_start()
-	pub := libdogecoin.W_generate_derived_hd_pub_key(string(privkey))
+	// this API is a bit odd: it returns the "extended public key"
+	// which you can think of as a coordinate in the HD Wallet key-space.
+	hd_node := libdogecoin.W_get_derived_hd_address(string(privkey), 0, isInternal, addressIndex, false)
+	// derive the dogecoin address (hash) from the extended public-key
+	pub := libdogecoin.W_generate_derived_hd_pub_key(hd_node)
 	libdogecoin.W_context_stop()
 	return giga.Address(pub), nil
 }

@@ -11,7 +11,7 @@ import (
 // will be implemented via RPC/ZMQ comms to the Dogecoin Core APIs.
 type L1 interface {
 	MakeAddress() (Address, Privkey, error)
-	MakeChildAddress(privkey Privkey) (Address, error)
+	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
 	Send(Txn) error
 }
 
@@ -19,9 +19,11 @@ type Address string
 type Privkey string
 
 type Account struct {
-	Address   Address
-	Privkey   Privkey
-	ForeignID string
+	Address         Address
+	Privkey         Privkey
+	ForeignID       string
+	NextInternalKey uint32
+	NextExternalKey uint32
 }
 
 func (a Account) GetPublicInfo() AccountPublic {
@@ -37,10 +39,15 @@ type Txn struct{}
 
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
-	ID     Address `json:"id"`
-	TXID   string  `json:"txid"`
-	Vendor string  `json:"vendor"`
-	Items  []Item  `json:"items"`
+	ID      Address `json:"id"`
+	Account string  `json:"account"` // ForeignID or Address?
+	TXID    string  `json:"txid"`
+	Vendor  string  `json:"vendor"`
+	Items   []Item  `json:"items"`
+	// These are used internally to track invoice status.
+	KeyIndex      uint32 // which HD Wallet child-key was generated
+	BlockID       string // transaction seen in this mined block
+	Confirmations int32  // number of confirmed blocks (since block_id)
 }
 
 type Item struct {

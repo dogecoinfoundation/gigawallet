@@ -16,7 +16,7 @@ func (l L1Mock) MakeAddress() (giga.Address, giga.Privkey, error) {
 	return "mockAddress", "mockPrivkey", nil
 }
 
-func (l L1Mock) MakeChildAddress(privkey giga.Privkey) (giga.Address, error) {
+func (l L1Mock) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
 	return "mockChildAddress", nil
 }
 

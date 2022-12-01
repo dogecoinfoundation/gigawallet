@@ -55,25 +55,26 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		fmt.Fprintf(w, "error: missing foreign ID")
+		http.Error(w, "error: missing foreign ID", http.StatusBadRequest)
 		return
 	}
 	var o InvoiceCreateRequest
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
-		fmt.Fprintf(w, "error: %v", err)
+		http.Error(w, fmt.Sprintf("bad request body: %v", err), http.StatusBadRequest)
 		return
 	}
 	i, err := t.api.CreateInvoice(o, foreignID)
 	if err != nil {
-		fmt.Fprintf(w, "error: %v", err)
+		http.Error(w, fmt.Sprintf("error: %v", err), http.StatusInternalServerError)
 		return
 	}
 	b, err := json.Marshal(i.ID)
 	if err != nil {
-		fmt.Fprintf(w, "error: %v", err)
+		http.Error(w, fmt.Sprintf("error: %v", err), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", string(b))
 }
 
@@ -95,6 +96,7 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", string(b))
 }
 
@@ -131,6 +133,7 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", string(b))
 }
 
@@ -152,5 +155,6 @@ func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p ht
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", string(b))
 }
