@@ -3,7 +3,7 @@ package dogecoin
 import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 
-	"github.com/jaxlotl/go-libdogecoin"
+	"github.com/dogeorg/go-libdogecoin"
 )
 
 // interface guard ensures L1Libdogecoin implements giga.L1

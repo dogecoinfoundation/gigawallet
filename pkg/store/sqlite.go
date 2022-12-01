@@ -36,7 +36,8 @@ func (s SQLite) MarkInvoiceAsPaid(id giga.Address) error {
 
 func (s SQLite) GetPendingInvoices() (<-chan giga.Invoice, error) {
 	//TODO implement me
-	panic("implement me")
+	log.Print("GetPendingInvoices: not implemented")
+	return make(chan giga.Invoice), nil
 }
 
 // NewSQLite returns a giga.PaymentsStore implementor that uses sqlite
@@ -94,7 +95,7 @@ func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return giga.Invoice{id, vendor, []giga.Item{}}, nil
+	return giga.Invoice{ID: id, TXID: "", Vendor: vendor, Items: []giga.Item{}}, nil
 }
 
 func (s SQLite) StoreAccount(acc giga.Account) error {
@@ -134,7 +135,7 @@ func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return giga.Account{address, privkey, foreign_id}, nil
+	return giga.Account{Address: address, Privkey: privkey, ForeignID: foreign_id}, nil
 }
 
 func (s SQLite) GetAccountByAddress(id giga.Address) (giga.Account, error) {

@@ -4,13 +4,15 @@
   dogecoind = "testnet"  # which dogecoind to connect to
 
 [dogecoind.testnet]
-  rpcaddr = "localhost"
+  host    = "localhost"
+  zmqport = 28332
   rpcport = 44555
   rpcpass = "gigawallet"
   rpcuser = "gigawallet"
 
 [dogecoind.mainnet]
-  rpcaddr = "localhost"
+  host    = "localhost"
+  zmqport = 28332
   rpcport = 22555
   rpcpass = "gigawallet"
   rpcuser = "gigawallet"

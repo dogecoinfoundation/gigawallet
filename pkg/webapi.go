@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/tjstebbing/conductor"
 )
 
 // WebAPI implements tjstebbing/conductor.Service
@@ -16,6 +17,9 @@ type WebAPI struct {
 	port string
 	api  API
 }
+
+// interface guard ensures WebAPI implements conductor.Service
+var _ conductor.Service = WebAPI{}
 
 func NewWebAPI(config Config, l1 L1, store Store) (WebAPI, error) {
 	return WebAPI{port: config.WebAPI.Port, api: NewAPI(store, l1)}, nil
@@ -70,7 +74,7 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
-	fmt.Fprintf(w, string(b))
+	fmt.Fprintf(w, "%s", string(b))
 }
 
 // getInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL
@@ -91,7 +95,7 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
-	fmt.Fprintf(w, string(b))
+	fmt.Fprintf(w, "%s", string(b))
 }
 
 // createAccount returns the address of the new account with the foreignID in the URL
@@ -106,7 +110,7 @@ func (t WebAPI) createAccount(w http.ResponseWriter, r *http.Request, p httprout
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
-	fmt.Fprintf(w, string(addr))
+	fmt.Fprintf(w, "%s", string(addr))
 }
 
 // getAccount returns the public info of the account with the foreignID in the URL
@@ -127,7 +131,7 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
-	fmt.Fprintf(w, string(b))
+	fmt.Fprintf(w, "%s", string(b))
 }
 
 // getAccountByAddress returns the public info of the account with the address in the URL
@@ -148,5 +152,5 @@ func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p ht
 		fmt.Fprintf(w, "error: %v", err)
 		return
 	}
-	fmt.Fprintf(w, string(b))
+	fmt.Fprintf(w, "%s", string(b))
 }

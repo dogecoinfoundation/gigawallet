@@ -1,4 +1,4 @@
-package dogecoin
+package core
 
 import (
 	"fmt"
