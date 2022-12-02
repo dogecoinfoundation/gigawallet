@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS account (
 );
 
 CREATE TABLE IF NOT EXISTS invoice (
+	invoice_address TEXT NOT NULL,
 	account_address TEXT NOT NULL,
 	txn_id TEXT NOT NULL,
 	vendor TEXT NOT NULL,
@@ -75,7 +76,7 @@ func (s SQLite) StoreInvoice(inv giga.Invoice) error {
 		log.Fatal(err)
 	}
 
-	stmt, err := tx.Prepare("insert into invoice(account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := tx.Prepare("insert into invoice(invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -86,19 +87,19 @@ func (s SQLite) StoreInvoice(inv giga.Invoice) error {
 		log.Fatal(err)
 	}
 
-	_, err = stmt.Exec(inv.ID, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
+	_, err = stmt.Exec(inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	update, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where foreign_id = ?")
+	update, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer stmt.Close()
 
 	// update Account to mark KeyIndex as used.
-	res, err := update.Exec(inv.Account, inv.KeyIndex+1)
+	res, err := update.Exec(inv.KeyIndex+1, inv.Account)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -118,15 +119,16 @@ func (s SQLite) StoreInvoice(inv giga.Invoice) error {
 }
 
 func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
-	row := s.db.QueryRow("SELECT account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ?", addr)
+	row := s.db.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
 	var id giga.Address
+	var account giga.Address
 	var tx_id string
 	var vendor string
 	var items_json string
 	var key_index uint32
 	var block_id string
 	var confirmations int32
-	err := row.Scan(&id, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations)
+	err := row.Scan(&id, &account, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations)
 	if err == sql.ErrNoRows {
 		return giga.Invoice{}, err
 	}
@@ -140,6 +142,7 @@ func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 	}
 	return giga.Invoice{
 		ID:            id,
+		Account:       account,
 		TXID:          tx_id,
 		Vendor:        vendor,
 		Items:         items,
