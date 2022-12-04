@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -13,12 +15,20 @@ var SETUP_SQL string = `
 CREATE TABLE IF NOT EXISTS account (
 	foreign_id TEXT NOT NULL UNIQUE,
 	address TEXT NOT NULL UNIQUE,
-	privkey TEXT NOT NULL
+	privkey TEXT NOT NULL,
+	next_int_key INTEGER NOT NULL,
+	next_ext_key INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS invoice (
+	invoice_address TEXT NOT NULL,
 	account_address TEXT NOT NULL,
-	vendor TEXT
+	txn_id TEXT NOT NULL,
+	vendor TEXT NOT NULL,
+	items TEXT NOT NULL,
+	key_index INTEGER NOT NULL,
+	block_id TEXT NOT NULL,
+	confirmations INTEGER NOT NULL
 );
 `
 
@@ -66,15 +76,39 @@ func (s SQLite) StoreInvoice(inv giga.Invoice) error {
 		log.Fatal(err)
 	}
 
-	stmt, err := tx.Prepare("insert into invoice(account_address, vendor) values(?, ?)")
+	stmt, err := tx.Prepare("insert into invoice(invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(inv.ID, inv.Vendor)
+	items_b, err := json.Marshal(inv.Items)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	_, err = stmt.Exec(inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	update, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stmt.Close()
+
+	// update Account to mark KeyIndex as used.
+	res, err := update.Exec(inv.KeyIndex+1, inv.Account)
+	if err != nil {
+		log.Fatal(err)
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if num_rows < 1 {
+		return fmt.Errorf("unknown account: %s", inv.Account)
 	}
 
 	err = tx.Commit()
@@ -85,17 +119,37 @@ func (s SQLite) StoreInvoice(inv giga.Invoice) error {
 }
 
 func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
-	row := s.db.QueryRow("SELECT account_address, vendor FROM invoice WHERE account_address = ?", addr)
+	row := s.db.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
 	var id giga.Address
+	var account giga.Address
+	var tx_id string
 	var vendor string
-	err := row.Scan(&id, &vendor)
+	var items_json string
+	var key_index uint32
+	var block_id string
+	var confirmations int32
+	err := row.Scan(&id, &account, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations)
 	if err == sql.ErrNoRows {
 		return giga.Invoice{}, err
 	}
 	if err != nil {
 		log.Fatal(err)
 	}
-	return giga.Invoice{ID: id, TXID: "", Vendor: vendor, Items: []giga.Item{}}, nil
+	var items []giga.Item
+	err = json.Unmarshal([]byte(items_json), &items)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return giga.Invoice{
+		ID:            id,
+		Account:       account,
+		TXID:          tx_id,
+		Vendor:        vendor,
+		Items:         items,
+		KeyIndex:      key_index,
+		BlockID:       block_id,
+		Confirmations: confirmations,
+	}, nil
 }
 
 func (s SQLite) StoreAccount(acc giga.Account) error {
@@ -104,13 +158,13 @@ func (s SQLite) StoreAccount(acc giga.Account) error {
 		log.Fatal(err)
 	}
 
-	stmt, err := tx.Prepare("insert into account(foreign_id, address, privkey) values(?, ?, ?)")
+	stmt, err := tx.Prepare("insert into account(foreign_id, address, privkey, next_int_key, next_ext_key) values(?, ?, ?, ?, ?)")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey)
+	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -123,19 +177,27 @@ func (s SQLite) StoreAccount(acc giga.Account) error {
 }
 
 func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
-	row := s.db.QueryRow("SELECT foreign_id, address, privkey FROM account WHERE foreign_id = ?", foreignID)
+	row := s.db.QueryRow("SELECT foreign_id, address, privkey, next_int_key, next_ext_key FROM account WHERE foreign_id = ?", foreignID)
 
 	var foreign_id string
 	var address giga.Address
 	var privkey giga.Privkey
-	err := row.Scan(&foreign_id, &address, &privkey)
+	var next_int_key uint32
+	var next_ext_key uint32
+	err := row.Scan(&foreign_id, &address, &privkey, &next_int_key, &next_ext_key)
 	if err == sql.ErrNoRows {
 		return giga.Account{}, err
 	}
 	if err != nil {
 		log.Fatal(err)
 	}
-	return giga.Account{Address: address, Privkey: privkey, ForeignID: foreign_id}, nil
+	return giga.Account{
+		Address:         address,
+		Privkey:         privkey,
+		ForeignID:       foreign_id,
+		NextInternalKey: next_int_key,
+		NextExternalKey: next_ext_key,
+	}, nil
 }
 
 func (s SQLite) GetAccountByAddress(id giga.Address) (giga.Account, error) {

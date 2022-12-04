@@ -21,11 +21,12 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 	if err != nil {
 		return Invoice{}, err
 	}
-	invoiceID, err := a.L1.MakeChildAddress(acc.Privkey)
+	keyIndex := acc.NextExternalKey
+	invoiceID, err := a.L1.MakeChildAddress(acc.Privkey, keyIndex, false)
 	if err != nil {
 		return Invoice{}, err
 	}
-	i := Invoice{ID: invoiceID, Vendor: request.Vendor, Items: request.Items}
+	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex}
 	err = a.Store.StoreInvoice(i)
 	if err != nil {
 		return Invoice{}, err
