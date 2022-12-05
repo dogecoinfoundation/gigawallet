@@ -1,6 +1,10 @@
 package giga
 
-import "errors"
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+)
 
 type API struct {
 	Store Store
@@ -26,7 +30,15 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 	if err != nil {
 		return Invoice{}, err
 	}
-	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex}
+	// generate an access token
+	b := make([]byte, 16)
+	_, err = rand.Read(b)
+	if err != nil {
+		return Invoice{}, err
+	}
+	token := base64.URLEncoding.EncodeToString(b)
+
+	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, AccessToken: token, KeyIndex: keyIndex}
 	err = a.Store.StoreInvoice(i)
 	if err != nil {
 		return Invoice{}, err

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/tjstebbing/conductor"
@@ -29,7 +30,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 	go func() {
 		mux := httprouter.New()
 		mux.POST("/invoice/:foreignID", t.createInvoice)
-		mux.GET("/invoice/:invoiceID", t.getInvoice)
+		mux.GET("/invoice/:invoiceID", t.protectInvoiceRoute(t.getInvoice))
 		mux.POST("/account/:foreignID", t.createAccount)
 		mux.GET("/account/:foreignID", t.getAccount)
 		mux.GET("/accountbyaddr/:address", t.getAccountByAddress) // TODO: figure out some way to to merge this and the above
@@ -86,7 +87,7 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 		fmt.Fprintf(w, "error: missing invoice ID")
 		return
 	}
-	invoice, err := t.api.GetInvoice(Address(id))
+	invoice, r, err := t.getRequestCachedInvoice(Address(id), r)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v", err)
 		return
@@ -157,4 +158,47 @@ func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", string(b))
+}
+
+/* Readthrough cache for invoice on the Request, specifically for webapi only */
+type InvoiceCtxKey string
+
+func (t WebAPI) getRequestCachedInvoice(id Address, r *http.Request) (Invoice, *http.Request, error) {
+	// found the invoice on the Request.Context, move on
+	if v := r.Context().Value(InvoiceCtxKey("inv")); v != nil {
+		fmt.Println("Fetched Inv from cache")
+		return v.(Invoice), r, nil
+	}
+	// Need to fetch and cache an invoice
+	invoice, err := t.api.GetInvoice(id)
+	if err != nil {
+		return Invoice{}, r, err
+	}
+	fmt.Println("Fetched Inv fresh")
+	return invoice, r.Clone(context.WithValue(r.Context(), InvoiceCtxKey("inv"), invoice)), nil
+}
+
+/* Wraps a route handler and ensures Authorization header matches invoice token */
+func (t WebAPI) protectInvoiceRoute(h httprouter.Handle) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		id := p.ByName("invoiceID")
+		if id == "" {
+			fmt.Fprintf(w, "error: missing invoice ID")
+			return
+		}
+		invoice, r, err := t.getRequestCachedInvoice(Address(id), r)
+		if err != nil {
+			fmt.Fprintf(w, "error: invoice not found")
+			return
+		}
+
+		//Check authorization header matches
+		bits := strings.Split(strings.ToUpper(r.Header.Get("Authorization")), "TOKEN ")
+		if len(bits) == 2 && invoice.AccessToken == bits[1] {
+			h(w, r, p)
+			return
+		}
+
+		fmt.Fprintf(w, "error: invalid access token for invoice")
+	}
 }

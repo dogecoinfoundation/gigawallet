@@ -39,11 +39,12 @@ type Txn struct{}
 
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
-	ID      Address `json:"id"`
-	Account Address `json:"account"` // from Account.Address
-	TXID    string  `json:"txid"`
-	Vendor  string  `json:"vendor"`
-	Items   []Item  `json:"items"`
+	ID          Address `json:"id"`
+	Account     Address `json:"account"` // from Account.Address
+	TXID        string  `json:"txid"`
+	Vendor      string  `json:"vendor"`
+	Items       []Item  `json:"items"`
+	AccessToken string  `json:"access_token"` // used to authenticate public API requests
 	// These are used internally to track invoice status.
 	KeyIndex      uint32 // which HD Wallet child-key was generated
 	BlockID       string // transaction seen in this mined block
