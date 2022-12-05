@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/tjstebbing/conductor"
@@ -29,7 +30,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 	go func() {
 		mux := httprouter.New()
 		mux.POST("/invoice/:foreignID", t.createInvoice)
-		mux.GET("/invoice/:invoiceID", t.getInvoice)
+		mux.GET("/invoice/:invoiceID", t.protectInvoiceRoute(t.getInvoice))
 		mux.POST("/account/:foreignID", t.createAccount)
 		mux.GET("/account/:foreignID", t.getAccount)
 		mux.GET("/accountbyaddr/:address", t.getAccountByAddress) // TODO: figure out some way to to merge this and the above
@@ -157,4 +158,29 @@ func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "%s", string(b))
+}
+
+/* Wraps a route handler and ensures Authorization header matches invoice token */
+func (t WebAPI) protectInvoiceRoute(h httprouter.Handle) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		id := p.ByName("invoiceID")
+		if id == "" {
+			fmt.Fprintf(w, "error: missing invoice ID")
+			return
+		}
+		invoice, err := t.api.GetInvoice(Address(id))
+		if err != nil {
+			fmt.Fprintf(w, "error: invoice not found")
+			return
+		}
+
+		//Check authorization header matches
+		bits := strings.Split(strings.ToUpper(r.Header.Get("Authorization")), "TOKEN ")
+		if len(bits) == 2 && invoice.AccessToken == bits[1] {
+			h(w, r, p)
+			return
+		}
+
+		fmt.Fprintf(w, "error: invalid access token for invoice")
+	}
 }
