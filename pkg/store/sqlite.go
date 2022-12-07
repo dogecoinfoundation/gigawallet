@@ -159,6 +159,10 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
 	rows_found := 0
 	rows, err := s.db.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error querying invoices: %v", err)
+	}
+	defer rows.Close()
 	for rows.Next() {
 		inv := giga.Invoice{Account: account}
 		var items_json string
@@ -176,6 +180,9 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 			next_cursor = after_this // NB. starting cursor for next call
 		}
 		rows_found++
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return nil, 0, fmt.Errorf("error querying invoices: %v", err)
 	}
 	if rows_found < limit {
 		// in this backend, we know there are no more rows to follow.
