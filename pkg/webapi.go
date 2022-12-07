@@ -138,15 +138,6 @@ func (t WebAPI) getAccountByAddress(w http.ResponseWriter, r *http.Request, p ht
 	t.sendResponse(w, acc)
 }
 
-type WebError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type WebErrorResponse struct {
-	Error WebError `json:"error"`
-}
-
 func (t WebAPI) sendResponse(w http.ResponseWriter, payload any) {
 	// note: w.Header after this, so we can call t.sendError
 	b, err := json.Marshal(payload)
@@ -159,17 +150,10 @@ func (t WebAPI) sendResponse(w http.ResponseWriter, payload any) {
 }
 
 func (t WebAPI) sendError(w http.ResponseWriter, statusCode int, code string, message string) {
-	// note: w.Header here, because we always write a response.
+	// would prefer to use json.Marshal, but this avoids the need
+	// to handle encoding errors arising from json.Marshal itself!
+	encoded := fmt.Sprintf("{\"error\":{\"code\":%q,\"message\":%q}}", code, message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	payload := &WebErrorResponse{
-		Error: WebError{Code: code, Message: message},
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		fmt.Fprintf(w, "[!] error sending %d (%s) error: %v", statusCode, code, err)
-		w.Write([]byte("{error:{code:\"marshal\"}}"))
-		return
-	}
-	w.Write(b)
+	w.Write([]byte(encoded))
 }
