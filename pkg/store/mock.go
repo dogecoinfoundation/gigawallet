@@ -52,6 +52,10 @@ func (m Mock) GetInvoice(id giga.Address) (giga.Invoice, error) {
 	return v, nil
 }
 
+func (m Mock) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return
+}
+
 func (m Mock) StoreAccount(account giga.Account) error {
 	m.accounts[account.ForeignID] = account
 	m.accountsByAddress[account.Address] = account

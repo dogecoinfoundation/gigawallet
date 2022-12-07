@@ -152,6 +152,38 @@ func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 	}, nil
 }
 
+func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	// MUST order by key_index (or sqlite OID) to support the cursor API:
+	// we need a way to resume the query next time from whatever next_cursor we return,
+	// and the aggregate result SHOULD be stable even as the DB is modified.
+	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
+	rows_found := 0
+	rows, err := s.db.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
+	for rows.Next() {
+		inv := giga.Invoice{Account: account}
+		var items_json string
+		err := rows.Scan(&inv.ID, &inv.TXID, &inv.Vendor, &items_json, &inv.KeyIndex, &inv.BlockID, &inv.Confirmations)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error scanning invoice row: %v", err)
+		}
+		err = json.Unmarshal([]byte(items_json), &inv.Items)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error unmarshalling item JSON: %v", err)
+		}
+		items = append(items, inv)
+		after_this := int(inv.KeyIndex) + 1 // XXX assumes non-hardened HD Key! (from uint32)
+		if after_this > next_cursor {
+			next_cursor = after_this // NB. starting cursor for next call
+		}
+		rows_found++
+	}
+	if rows_found < limit {
+		// in this backend, we know there are no more rows to follow.
+		next_cursor = 0 // meaning "end of query results"
+	}
+	return
+}
+
 func (s SQLite) StoreAccount(acc giga.Account) error {
 	tx, err := s.db.Begin()
 	if err != nil {

@@ -1,6 +1,8 @@
 package giga
 
-import "errors"
+import (
+	"errors"
+)
 
 type API struct {
 	Store Store
@@ -36,6 +38,30 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 
 func (a API) GetInvoice(id Address) (Invoice, error) {
 	return a.Store.GetInvoice(id)
+}
+
+type ListInvoicesResponse struct {
+	Items  []Invoice `json:"items"`
+	Cursor int       `json:"cursor"`
+}
+
+func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoicesResponse, error) {
+	acc, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return ListInvoicesResponse{}, errors.New("account does not exist")
+	}
+	items, next_cursor, err := a.Store.ListInvoices(acc.Address, cursor, limit)
+	if err != nil {
+		return ListInvoicesResponse{}, err
+	}
+	if items == nil {
+		items = []Invoice{} // encoded as '[]' in JSON
+	}
+	r := ListInvoicesResponse{
+		Items:  items,
+		Cursor: next_cursor,
+	}
+	return r, nil
 }
 
 func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error) {
