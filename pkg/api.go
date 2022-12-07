@@ -38,21 +38,24 @@ func (a API) GetInvoice(id Address) (Invoice, error) {
 	return a.Store.GetInvoice(id)
 }
 
-func (a API) CreateAccount(foreignID string) (Address, error) {
+func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error) {
 	acc, err := a.Store.GetAccount(foreignID)
 	if err == nil {
-		return "", errors.New("account already exists with address " + string(acc.Address))
+		if upsert {
+			return acc.GetPublicInfo(), nil
+		}
+		return AccountPublic{}, errors.New("account already exists with address " + string(acc.Address))
 	}
 	addr, priv, err := a.L1.MakeAddress()
 	if err != nil {
-		return "", err
+		return AccountPublic{}, err
 	}
 	account := Account{
 		Address:   addr,
 		ForeignID: foreignID,
 		Privkey:   priv,
 	}
-	return account.Address, a.Store.StoreAccount(account)
+	return account.GetPublicInfo(), a.Store.StoreAccount(account)
 }
 
 func (a API) GetAccount(foreignID string) (AccountPublic, error) {
