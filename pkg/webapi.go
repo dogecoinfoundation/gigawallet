@@ -14,6 +14,7 @@ import (
 // WebAPI implements tjstebbing/conductor.Service
 type WebAPI struct {
 	srv  *http.Server
+	bind string
 	port string
 	api  API
 }
@@ -22,7 +23,7 @@ type WebAPI struct {
 var _ conductor.Service = WebAPI{}
 
 func NewWebAPI(config Config, l1 L1, store Store) (WebAPI, error) {
-	return WebAPI{port: config.WebAPI.Port, api: NewAPI(store, l1)}, nil
+	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: NewAPI(store, l1)}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {

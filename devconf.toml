@@ -1,5 +1,8 @@
 # This config is meant for local development only
 
+[WebAPI]
+  bind = "localhost"  # avoids macOS firewall confirmation!
+
 [gigawallet]
   dogecoind = "testnet"  # which dogecoind to connect to
 

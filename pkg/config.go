@@ -21,6 +21,7 @@ type Config struct {
 
 	WebAPI struct {
 		Port string `default:"8080" env:"port"`
+		Bind string `default:"" env:"bind"` // optional interface IP address
 	}
 
 	Store struct {
