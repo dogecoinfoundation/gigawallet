@@ -72,39 +72,39 @@ func (s SQLite) Close() {
 func (s SQLite) StoreInvoice(inv giga.Invoice) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return dbErr(err, "beginning transaction")
+		return dbErr(err, "StoreInvoice: db.Begin")
 	}
 
 	stmt, err := tx.Prepare("insert into invoice(invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
-		return dbErr(err, "preparing insert")
+		return dbErr(err, "StoreInvoice: tx.Prepare insert")
 	}
 	defer stmt.Close()
 
 	items_b, err := json.Marshal(inv.Items)
 	if err != nil {
-		return dbErr(err, "marshalling JSON")
+		return dbErr(err, "StoreInvoice: json.Marshal items")
 	}
 
 	_, err = stmt.Exec(inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
 	if err != nil {
-		return dbErr(err, "executing insert")
+		return dbErr(err, "StoreInvoice: stmt.Exec insert")
 	}
 
 	update, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
 	if err != nil {
-		return dbErr(err, "preparing update")
+		return dbErr(err, "StoreInvoice: tx.Prepare update")
 	}
 	defer stmt.Close()
 
 	// update Account to mark KeyIndex as used.
 	res, err := update.Exec(inv.KeyIndex+1, inv.Account)
 	if err != nil {
-		return dbErr(err, "executing update")
+		return dbErr(err, "StoreInvoice: update.Exec")
 	}
 	num_rows, err := res.RowsAffected()
 	if err != nil {
-		return dbErr(err, "getting rows updated")
+		return dbErr(err, "StoreInvoice: res.RowsAffected")
 	}
 	if num_rows < 1 {
 		return giga.NewErr(giga.NotFound, "unknown account: %s", inv.Account)
@@ -112,7 +112,7 @@ func (s SQLite) StoreInvoice(inv giga.Invoice) error {
 
 	err = tx.Commit()
 	if err != nil {
-		return dbErr(err, "committing transaction")
+		return dbErr(err, "StoreInvoice: tx.Commit")
 	}
 	return nil
 }
@@ -132,12 +132,12 @@ func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 		return giga.Invoice{}, giga.NewErr(giga.NotFound, "invoice not found: %v", addr)
 	}
 	if err != nil {
-		return giga.Invoice{}, dbErr(err, "row.Scan")
+		return giga.Invoice{}, dbErr(err, "GetInvoice: row.Scan")
 	}
 	var items []giga.Item
 	err = json.Unmarshal([]byte(items_json), &items)
 	if err != nil {
-		return giga.Invoice{}, dbErr(err, "json.Unmarshal")
+		return giga.Invoice{}, dbErr(err, "GetInvoice: json.Unmarshal")
 	}
 	return giga.Invoice{
 		ID:            id,
@@ -159,7 +159,7 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 	rows_found := 0
 	rows, err := s.db.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
 	if err != nil {
-		return nil, 0, dbErr(err, "querying invoices")
+		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -167,11 +167,11 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 		var items_json string
 		err := rows.Scan(&inv.ID, &inv.TXID, &inv.Vendor, &items_json, &inv.KeyIndex, &inv.BlockID, &inv.Confirmations)
 		if err != nil {
-			return nil, 0, dbErr(err, "scanning invoice row")
+			return nil, 0, dbErr(err, "ListInvoices: scanning invoice row")
 		}
 		err = json.Unmarshal([]byte(items_json), &inv.Items)
 		if err != nil {
-			return nil, 0, dbErr(err, "unmarshalling json")
+			return nil, 0, dbErr(err, "ListInvoices: unmarshalling json")
 		}
 		items = append(items, inv)
 		after_this := int(inv.KeyIndex) + 1 // XXX assumes non-hardened HD Key! (from uint32)
@@ -181,7 +181,7 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 		rows_found++
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, 0, dbErr(err, "querying invoices")
+		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
 	}
 	if rows_found < limit {
 		// in this backend, we know there are no more rows to follow.
@@ -193,23 +193,23 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 func (s SQLite) StoreAccount(acc giga.Account) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return dbErr(err, "beginning transaction")
+		return dbErr(err, "StoreAccount: beginning transaction")
 	}
 
 	stmt, err := tx.Prepare("insert into account(foreign_id, address, privkey, next_int_key, next_ext_key) values(?, ?, ?, ?, ?)")
 	if err != nil {
-		return dbErr(err, "preparing insert")
+		return dbErr(err, "StoreAccount: preparing insert")
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
 	if err != nil {
-		return dbErr(err, "executing insert")
+		return dbErr(err, "StoreAccount: executing insert")
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		return dbErr(err, "committing transaction")
+		return dbErr(err, "StoreAccount: committing transaction")
 	}
 	return nil
 }
@@ -222,7 +222,7 @@ func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
 	}
 	if err != nil {
-		return giga.Account{}, dbErr(err, "row.Scan")
+		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
 	}
 	return acc, nil
 }

@@ -83,9 +83,9 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		return
 	}
 	var o InvoiceCreateRequest
-	jerr := json.NewDecoder(r.Body).Decode(&o)
-	if jerr != nil {
-		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", jerr))
+	err := json.NewDecoder(r.Body).Decode(&o)
+	if err != nil {
+		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
 		return
 	}
 	if o.Vendor == "" {
@@ -164,18 +164,18 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	ilimit := 10
 	qs := r.URL.Query()
 	cursor := qs.Get("cursor")
-	var perr error
+	var err error
 	if cursor != "" {
-		icursor, perr = strconv.Atoi(cursor)
-		if perr != nil || icursor < 0 {
+		icursor, err = strconv.Atoi(cursor)
+		if err != nil || icursor < 0 {
 			sendBadRequest(w, "invalid cursor in URL")
 			return
 		}
 	}
 	limit := qs.Get("limit")
 	if limit != "" {
-		ilimit, perr = strconv.Atoi(limit)
-		if perr != nil || ilimit < 1 {
+		ilimit, err = strconv.Atoi(limit)
+		if err != nil || ilimit < 1 {
 			sendBadRequest(w, "invalid limit in URL")
 			return
 		}
@@ -246,10 +246,10 @@ func sendError(w http.ResponseWriter, where string, err error) {
 	var info *ErrorInfo
 	if errors.As(err, &info) {
 		status := HttpStatusForError(info.Code)
-		message := fmt.Sprintf("in %s: %s", where, info.Message)
+		message := fmt.Sprintf("%s: %s", where, info.Message)
 		sendErrorResponse(w, status, info.Code, message)
 	} else {
-		message := fmt.Sprintf("in %s: %s", where, err.Error())
+		message := fmt.Sprintf("%s: %s", where, err.Error())
 		sendErrorResponse(w, http.StatusInternalServerError, UnknownError, message)
 	}
 }
@@ -258,7 +258,7 @@ func sendErrorResponse(w http.ResponseWriter, statusCode int, code ErrorCode, me
 	log.Printf("[!] %s: %s\n", code, message)
 	// would prefer to use json.Marshal, but this avoids the need
 	// to handle encoding errors arising from json.Marshal itself!
-	payload := fmt.Sprintf("{\"error\":{\"code\":%q,\"debug\":%q}}", code, message)
+	payload := fmt.Sprintf("{\"error\":{\"code\":%q,\"message\":%q}}", code, message)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store") // do not cache (Browsers cache GET forever by default)
 	w.WriteHeader(statusCode)

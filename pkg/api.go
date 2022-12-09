@@ -17,17 +17,17 @@ type InvoiceCreateRequest struct {
 func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invoice, error) {
 	acc, err := a.Store.GetAccount(foreignID)
 	if err != nil {
-		return Invoice{}, NewErr(NotFound, "account not found: %v", foreignID) // XXX assumed
+		return Invoice{}, err
 	}
 	keyIndex := acc.NextExternalKey
-	invoiceID, l1err := a.L1.MakeChildAddress(acc.Privkey, keyIndex, false)
-	if l1err != nil {
-		return Invoice{}, NewErr(UnknownError, "MakeChildAddress failed: %v", l1err)
+	invoiceID, err := a.L1.MakeChildAddress(acc.Privkey, keyIndex, false)
+	if err != nil {
+		return Invoice{}, NewErr(UnknownError, "MakeChildAddress failed: %v", err)
 	}
 	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex}
 	err = a.Store.StoreInvoice(i)
 	if err != nil {
-		return Invoice{}, NewErr(UnknownError, "StoreInvoice failed: %v", err)
+		return Invoice{}, err
 	}
 	return i, nil
 }
@@ -35,7 +35,7 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 func (a API) GetInvoice(id Address) (Invoice, error) {
 	inv, err := a.Store.GetInvoice(id)
 	if err != nil {
-		return Invoice{}, NewErr(UnknownError, "GetInvoice failed: %v", err)
+		return Invoice{}, err
 	}
 	return inv, nil
 }
@@ -48,11 +48,11 @@ type ListInvoicesResponse struct {
 func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoicesResponse, error) {
 	acc, err := a.Store.GetAccount(foreignID)
 	if err != nil {
-		return ListInvoicesResponse{}, NewErr(NotFound, "account not found: %v", foreignID) // XXX assumed
+		return ListInvoicesResponse{}, err
 	}
 	items, next_cursor, err := a.Store.ListInvoices(acc.Address, cursor, limit)
 	if err != nil {
-		return ListInvoicesResponse{}, NewErr(UnknownError, "ListInvoices failed: %v", err)
+		return ListInvoicesResponse{}, err
 	}
 	if items == nil {
 		items = []Invoice{} // encoded as '[]' in JSON
@@ -70,7 +70,7 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 		if upsert {
 			return acc.GetPublicInfo(), nil
 		}
-		return AccountPublic{}, NewErr(AlreadyExists, "account already exists: %v", foreignID)
+		return AccountPublic{}, err
 	}
 	addr, priv, err := a.L1.MakeAddress()
 	if err != nil {
@@ -83,7 +83,7 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 	}
 	err = a.Store.StoreAccount(account)
 	if err != nil {
-		return AccountPublic{}, NewErr(UnknownError, "StoreAccount failed: %v", err)
+		return AccountPublic{}, err
 	}
 	return account.GetPublicInfo(), nil
 }
@@ -91,7 +91,7 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 	acc, err := a.Store.GetAccount(foreignID)
 	if err != nil {
-		return AccountPublic{}, NewErr(NotFound, "account not found: %v", foreignID) // XXX assumed
+		return AccountPublic{}, err
 	}
 	return acc.GetPublicInfo(), nil
 }
