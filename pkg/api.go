@@ -17,8 +17,8 @@ type APIErrorCode string
 
 const (
 	NotFound      APIErrorCode = "not-found"
-	AlreadyExists              = "already-exists"
-	UnknownError               = "unknown-error"
+	AlreadyExists APIErrorCode = "already-exists"
+	UnknownError  APIErrorCode = "unknown-error"
 )
 
 type APIError struct {
