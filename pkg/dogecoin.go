@@ -31,8 +31,8 @@ func (a Account) GetPublicInfo() AccountPublic {
 }
 
 type AccountPublic struct {
-	Address   Address
-	ForeignID string
+	Address   Address `json:"id"`
+	ForeignID string  `json:"foreign_id"`
 }
 
 type Txn struct{}
@@ -45,9 +45,9 @@ type Invoice struct {
 	Vendor  string  `json:"vendor"`
 	Items   []Item  `json:"items"`
 	// These are used internally to track invoice status.
-	KeyIndex      uint32 // which HD Wallet child-key was generated
-	BlockID       string // transaction seen in this mined block
-	Confirmations int32  // number of confirmed blocks (since block_id)
+	KeyIndex      uint32 `json:"-"` // which HD Wallet child-key was generated
+	BlockID       string `json:"-"` // transaction seen in this mined block
+	Confirmations int32  `json:"-"` // number of confirmed blocks (since block_id)
 }
 
 type Item struct {
