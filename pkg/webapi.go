@@ -78,29 +78,29 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing invoice ID in URL")
+		sendError(w, 400, "bad-request", "bad request: missing invoice ID in URL")
 		return
 	}
 	var o InvoiceCreateRequest
 	jerr := json.NewDecoder(r.Body).Decode(&o)
 	if jerr != nil {
-		t.sendError(w, 400, "bad-request", fmt.Sprintf("bad request body (expecting JSON): %v", jerr))
+		sendError(w, 400, "bad-request", fmt.Sprintf("bad request body (expecting JSON): %v", jerr))
 		return
 	}
 	if o.Vendor == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing 'vendor' in JSON body")
+		sendError(w, 400, "bad-request", "bad request: missing 'vendor' in JSON body")
 		return
 	}
 	if len(o.Items) < 1 {
-		t.sendError(w, 400, "bad-request", "bad request: missing 'items' in JSON body")
+		sendError(w, 400, "bad-request", "bad request: missing 'items' in JSON body")
 		return
 	}
 	invoice, err := t.api.CreateInvoice(o, foreignID)
 	if err != nil {
-		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateInvoice: %v", err.Message))
+		sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateInvoice: %v", err.Message))
 		return
 	}
-	t.sendResponse(w, invoice)
+	sendResponse(w, invoice)
 }
 
 // getAccountInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL
@@ -108,30 +108,30 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
 		return
 	}
 	// the invoiceID is the address of the invoice
 	id := p.ByName("invoiceID")
 	if id == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing invoice ID")
+		sendError(w, 400, "bad-request", "bad request: missing invoice ID")
 		return
 	}
 	acc, err := t.api.GetAccount(id)
 	if err != nil {
-		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
+		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
 		return
 	}
 	invoice, err := t.api.GetInvoice(Address(id)) // TODO: need a "not found" error-code
 	if err != nil {
-		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
+		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
 		return
 	}
 	if invoice.Account != acc.Address {
-		t.sendError(w, 404, "not-found", "no such invoice in this account")
+		sendError(w, 404, "not-found", "no such invoice in this account")
 		return
 	}
-	t.sendResponse(w, invoice)
+	sendResponse(w, invoice)
 }
 
 // getInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL
@@ -139,15 +139,15 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 	// the invoiceID is the address of the invoice
 	id := p.ByName("invoiceID")
 	if id == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing invoice ID")
+		sendError(w, 400, "bad-request", "bad request: missing invoice ID")
 		return
 	}
 	invoice, err := t.api.GetInvoice(Address(id))
 	if err != nil {
-		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
+		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
 		return
 	}
-	t.sendResponse(w, invoice)
+	sendResponse(w, invoice)
 }
 
 // listInvoices is responsible for returning a list of invoices and their status for an account
@@ -155,7 +155,7 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
 		return
 	}
 	// optional pagination: cursor comes from the previous response (or zero)
@@ -167,7 +167,7 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	if cursor != "" {
 		icursor, perr = strconv.Atoi(cursor)
 		if perr != nil || icursor < 0 {
-			t.sendError(w, 400, "bad-request", "bad request: invalid cursor in URL")
+			sendError(w, 400, "bad-request", "bad request: invalid cursor in URL")
 			return
 		}
 	}
@@ -175,20 +175,20 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	if limit != "" {
 		ilimit, perr = strconv.Atoi(limit)
 		if perr != nil || ilimit < 1 {
-			t.sendError(w, 400, "bad-request", "bad request: invalid limit in URL")
+			sendError(w, 400, "bad-request", "bad request: invalid limit in URL")
 			return
 		}
 		if ilimit > 100 {
-			t.sendError(w, 400, "bad-request", "bad request: invalid limit in URL (cannot be greater than 100)")
+			sendError(w, 400, "bad-request", "bad request: invalid limit in URL (cannot be greater than 100)")
 			return
 		}
 	}
 	invoices, err := t.api.ListInvoices(foreignID, icursor, ilimit)
 	if err != nil {
-		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in ListInvoices: %v", err.Message))
+		sendError(w, 500, string(err.Code), fmt.Sprintf("error in ListInvoices: %v", err.Message))
 		return
 	}
-	t.sendResponse(w, invoices)
+	sendResponse(w, invoices)
 }
 
 // upsertAccount returns the address of the new account with the foreignID in the URL
@@ -196,15 +196,15 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
 		return
 	}
 	acc, err := t.api.CreateAccount(foreignID, true)
 	if err != nil {
-		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateAccount: %v", err.Message))
+		sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateAccount: %v", err.Message))
 		return
 	}
-	t.sendResponse(w, acc)
+	sendResponse(w, acc)
 }
 
 // getAccount returns the public info of the account with the foreignID in the URL
@@ -212,31 +212,31 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 	// the foreignID is a 3rd-party ID for the account
 	id := p.ByName("foreignID")
 	if id == "" {
-		t.sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
 		return
 	}
 	acc, err := t.api.GetAccount(id)
 	if err != nil {
-		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
+		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
 		return
 	}
-	t.sendResponse(w, acc)
+	sendResponse(w, acc)
 }
 
 // Helpers
 
-func (t WebAPI) sendResponse(w http.ResponseWriter, payload any) {
-	// note: w.Header after this, so we can call t.sendError
+func sendResponse(w http.ResponseWriter, payload any) {
+	// note: w.Header after this, so we can call sendError
 	b, err := json.Marshal(payload)
 	if err != nil {
-		t.sendError(w, 500, "marshal", fmt.Sprintf("json.marshal error: %v", err))
+		sendError(w, 500, "marshal", fmt.Sprintf("json.marshal error: %v", err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(b)
 }
 
-func (t WebAPI) sendError(w http.ResponseWriter, statusCode int, code string, message string) {
+func sendError(w http.ResponseWriter, statusCode int, code string, message string) {
 	// would prefer to use json.Marshal, but this avoids the need
 	// to handle encoding errors arising from json.Marshal itself!
 	encoded := fmt.Sprintf("{\"error\":{\"code\":%q,\"message\":%q}}", code, message)
