@@ -49,7 +49,6 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 
 		// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
 		mux.GET("/account/:foreignID/invoices", t.listInvoices)
-		mux.GET("/account/:foreignID/invoices?limit=:limit", t.listInvoices)
 
 		// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 
