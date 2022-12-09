@@ -19,6 +19,4 @@ type Store interface {
 	StoreAccount(account Account) error
 	// GetAccount returns the account with the given ForeignID.
 	GetAccount(foreignID string) (Account, error)
-	// GetAccountByAddress returns the account with the given Address.
-	GetAccountByAddress(id Address) (Account, error)
 }

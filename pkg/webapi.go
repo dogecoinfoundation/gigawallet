@@ -3,6 +3,7 @@ package giga
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -78,26 +79,26 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		sendError(w, 400, "bad-request", "bad request: missing invoice ID in URL")
+		sendBadRequest(w, "missing invoice ID in URL")
 		return
 	}
 	var o InvoiceCreateRequest
 	jerr := json.NewDecoder(r.Body).Decode(&o)
 	if jerr != nil {
-		sendError(w, 400, "bad-request", fmt.Sprintf("bad request body (expecting JSON): %v", jerr))
+		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", jerr))
 		return
 	}
 	if o.Vendor == "" {
-		sendError(w, 400, "bad-request", "bad request: missing 'vendor' in JSON body")
+		sendBadRequest(w, "missing 'vendor' in JSON body")
 		return
 	}
 	if len(o.Items) < 1 {
-		sendError(w, 400, "bad-request", "bad request: missing 'items' in JSON body")
+		sendBadRequest(w, "missing 'items' in JSON body")
 		return
 	}
 	invoice, err := t.api.CreateInvoice(o, foreignID)
 	if err != nil {
-		sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateInvoice: %v", err.Message))
+		sendError(w, "CreateInvoice", err)
 		return
 	}
 	sendResponse(w, invoice)
@@ -108,27 +109,27 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
 	// the invoiceID is the address of the invoice
 	id := p.ByName("invoiceID")
 	if id == "" {
-		sendError(w, 400, "bad-request", "bad request: missing invoice ID")
+		sendBadRequest(w, "missing invoice ID")
 		return
 	}
 	acc, err := t.api.GetAccount(id)
 	if err != nil {
-		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
+		sendError(w, "GetAccount", err)
 		return
 	}
 	invoice, err := t.api.GetInvoice(Address(id)) // TODO: need a "not found" error-code
 	if err != nil {
-		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
+		sendError(w, "GetInvoice", err)
 		return
 	}
 	if invoice.Account != acc.Address {
-		sendError(w, 404, "not-found", "no such invoice in this account")
+		sendErrorResponse(w, 404, NotFound, "no such invoice in this account")
 		return
 	}
 	sendResponse(w, invoice)
@@ -139,12 +140,12 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 	// the invoiceID is the address of the invoice
 	id := p.ByName("invoiceID")
 	if id == "" {
-		sendError(w, 400, "bad-request", "bad request: missing invoice ID")
+		sendBadRequest(w, "missing invoice ID")
 		return
 	}
 	invoice, err := t.api.GetInvoice(Address(id))
 	if err != nil {
-		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
+		sendError(w, "GetInvoice", err)
 		return
 	}
 	sendResponse(w, invoice)
@@ -155,7 +156,7 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
 	// optional pagination: cursor comes from the previous response (or zero)
@@ -167,7 +168,7 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	if cursor != "" {
 		icursor, perr = strconv.Atoi(cursor)
 		if perr != nil || icursor < 0 {
-			sendError(w, 400, "bad-request", "bad request: invalid cursor in URL")
+			sendBadRequest(w, "invalid cursor in URL")
 			return
 		}
 	}
@@ -175,17 +176,17 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	if limit != "" {
 		ilimit, perr = strconv.Atoi(limit)
 		if perr != nil || ilimit < 1 {
-			sendError(w, 400, "bad-request", "bad request: invalid limit in URL")
+			sendBadRequest(w, "invalid limit in URL")
 			return
 		}
 		if ilimit > 100 {
-			sendError(w, 400, "bad-request", "bad request: invalid limit in URL (cannot be greater than 100)")
+			sendBadRequest(w, "invalid limit in URL (cannot be greater than 100)")
 			return
 		}
 	}
 	invoices, err := t.api.ListInvoices(foreignID, icursor, ilimit)
 	if err != nil {
-		sendError(w, 500, string(err.Code), fmt.Sprintf("error in ListInvoices: %v", err.Message))
+		sendError(w, "ListInvoices", err)
 		return
 	}
 	sendResponse(w, invoices)
@@ -196,12 +197,12 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
-		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
 	acc, err := t.api.CreateAccount(foreignID, true)
 	if err != nil {
-		sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateAccount: %v", err.Message))
+		sendError(w, "CreateAccount", err)
 		return
 	}
 	sendResponse(w, acc)
@@ -212,12 +213,12 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 	// the foreignID is a 3rd-party ID for the account
 	id := p.ByName("foreignID")
 	if id == "" {
-		sendError(w, 400, "bad-request", "bad request: missing account ID in URL")
+		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
 	acc, err := t.api.GetAccount(id)
 	if err != nil {
-		sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
+		sendError(w, "GetAccount", err)
 		return
 	}
 	sendResponse(w, acc)
@@ -229,18 +230,37 @@ func sendResponse(w http.ResponseWriter, payload any) {
 	// note: w.Header after this, so we can call sendError
 	b, err := json.Marshal(payload)
 	if err != nil {
-		sendError(w, 500, "marshal", fmt.Sprintf("json.marshal error: %v", err))
+		sendErrorResponse(w, http.StatusInternalServerError, "marshal", fmt.Sprintf("in json.Marshal: %s", err.Error()))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store") // do not cache (Browsers cache GET forever by default)
 	w.Write(b)
 }
 
-func sendError(w http.ResponseWriter, statusCode int, code string, message string) {
+func sendBadRequest(w http.ResponseWriter, message string) {
+	sendErrorResponse(w, http.StatusBadRequest, BadRequest, message)
+}
+
+func sendError(w http.ResponseWriter, where string, err error) {
+	var info *ErrorInfo
+	if errors.As(err, &info) {
+		status := HttpStatusForError(info.Code)
+		message := fmt.Sprintf("in %s: %s", where, info.Message)
+		sendErrorResponse(w, status, info.Code, message)
+	} else {
+		message := fmt.Sprintf("in %s: %s", where, err.Error())
+		sendErrorResponse(w, http.StatusInternalServerError, UnknownError, message)
+	}
+}
+
+func sendErrorResponse(w http.ResponseWriter, statusCode int, code ErrorCode, message string) {
+	log.Printf("[!] %s: %s\n", code, message)
 	// would prefer to use json.Marshal, but this avoids the need
 	// to handle encoding errors arising from json.Marshal itself!
-	encoded := fmt.Sprintf("{\"error\":{\"code\":%q,\"message\":%q}}", code, message)
+	payload := fmt.Sprintf("{\"error\":{\"code\":%q,\"debug\":%q}}", code, message)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store") // do not cache (Browsers cache GET forever by default)
 	w.WriteHeader(statusCode)
-	w.Write([]byte(encoded))
+	w.Write([]byte(payload))
 }
