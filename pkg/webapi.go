@@ -82,9 +82,9 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		return
 	}
 	var o InvoiceCreateRequest
-	err := json.NewDecoder(r.Body).Decode(&o)
-	if err != nil {
-		t.sendError(w, 400, "bad-request", fmt.Sprintf("bad request body (expecting JSON): %v", err))
+	jerr := json.NewDecoder(r.Body).Decode(&o)
+	if jerr != nil {
+		t.sendError(w, 400, "bad-request", fmt.Sprintf("bad request body (expecting JSON): %v", jerr))
 		return
 	}
 	if o.Vendor == "" {
@@ -97,7 +97,7 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 	}
 	invoice, err := t.api.CreateInvoice(o, foreignID)
 	if err != nil {
-		t.sendError(w, 500, "internal", fmt.Sprintf("error in CreateInvoice: %v", err))
+		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateInvoice: %v", err.Message))
 		return
 	}
 	t.sendResponse(w, invoice)
@@ -119,12 +119,12 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 	}
 	acc, err := t.api.GetAccount(id)
 	if err != nil {
-		t.sendError(w, 500, "internal", fmt.Sprintf("error in GetAccount: %v", err))
+		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
 		return
 	}
 	invoice, err := t.api.GetInvoice(Address(id)) // TODO: need a "not found" error-code
 	if err != nil {
-		t.sendError(w, 500, "internal", fmt.Sprintf("error in GetInvoice: %v", err))
+		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
 		return
 	}
 	if invoice.Account != acc.Address {
@@ -142,9 +142,9 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 		t.sendError(w, 400, "bad-request", "bad request: missing invoice ID")
 		return
 	}
-	invoice, err := t.api.GetInvoice(Address(id)) // TODO: need a "not found" error-code
+	invoice, err := t.api.GetInvoice(Address(id))
 	if err != nil {
-		t.sendError(w, 500, "internal", fmt.Sprintf("error in GetInvoice: %v", err))
+		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetInvoice: %v", err.Message))
 		return
 	}
 	t.sendResponse(w, invoice)
@@ -163,18 +163,18 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	ilimit := 10
 	qs := r.URL.Query()
 	cursor := qs.Get("cursor")
-	var err error
+	var perr error
 	if cursor != "" {
-		icursor, err = strconv.Atoi(cursor)
-		if err != nil || icursor < 0 {
+		icursor, perr = strconv.Atoi(cursor)
+		if perr != nil || icursor < 0 {
 			t.sendError(w, 400, "bad-request", "bad request: invalid cursor in URL")
 			return
 		}
 	}
 	limit := qs.Get("limit")
 	if limit != "" {
-		ilimit, err = strconv.Atoi(limit)
-		if err != nil || ilimit < 1 {
+		ilimit, perr = strconv.Atoi(limit)
+		if perr != nil || ilimit < 1 {
 			t.sendError(w, 400, "bad-request", "bad request: invalid limit in URL")
 			return
 		}
@@ -185,7 +185,7 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 	}
 	invoices, err := t.api.ListInvoices(foreignID, icursor, ilimit)
 	if err != nil {
-		t.sendError(w, 500, "internal", fmt.Sprintf("error in ListInvoices: %v", err))
+		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in ListInvoices: %v", err.Message))
 		return
 	}
 	t.sendResponse(w, invoices)
@@ -201,7 +201,7 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 	}
 	acc, err := t.api.CreateAccount(foreignID, true)
 	if err != nil {
-		t.sendError(w, 500, "internal", fmt.Sprintf("error in CreateAccount: %v", err))
+		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in CreateAccount: %v", err.Message))
 		return
 	}
 	t.sendResponse(w, acc)
@@ -217,7 +217,7 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 	}
 	acc, err := t.api.GetAccount(id)
 	if err != nil {
-		t.sendError(w, 500, "internal", fmt.Sprintf("error in GetAccount: %v", err))
+		t.sendError(w, 500, string(err.Code), fmt.Sprintf("error in GetAccount: %v", err.Message))
 		return
 	}
 	t.sendResponse(w, acc)
