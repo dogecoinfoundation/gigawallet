@@ -32,6 +32,8 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 	go func() {
 		mux := httprouter.New()
 
+		// Internal APIs
+
 		// POST { account } /account/:foreignID -> { account } upsert account
 		mux.POST("/account/:foreignID", t.upsertAccount)
 
@@ -51,10 +53,23 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		mux.GET("/account/:foreignID/invoices", t.listInvoices)
 
 		// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
+		mux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
 
-		// POST { ammount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
+		// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
 
-		// POST { ammount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
+		// POST { amount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
+
+		// External APIs
+
+		// GET /invoice/:invoiceID/connect -> { dogeConnect json } get the dogeConnect JSON for an invoice
+
+		// GET /invoice/:invoiceID/status -> { status } get status of an invoice
+
+		// GET /invoice/:invoiceID/poll -> { status } long-poll invoice waiting for status change
+
+		// GET /invoice/:invoiceID/splash -> html page that tries to launch dogeconnect:// with QRcode fallback
+
+		// POST { dogeConnect payment } /invoice/:invoiceID/pay -> { status } pay an invoice with a dogeConnect response
 
 		t.srv = &http.Server{Addr: t.bind + ":" + t.port, Handler: mux}
 		go func() {
@@ -189,6 +204,27 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 		return
 	}
 	sendResponse(w, invoices)
+}
+
+// pays an invoice from another account managed by gigawallet
+// POST /invoice/:invoiceID/payfrom/:foreignID -> { status }
+func (t WebAPI) payInvoiceFromInternal(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	invoice_id := p.ByName("invoiceID")
+	if invoice_id == "" {
+		sendBadRequest(w, "missing invoice ID in URL")
+		return
+	}
+	foreign_id := p.ByName("foreignID")
+	if foreign_id == "" {
+		sendBadRequest(w, "missing foreign ID in URL")
+		return
+	}
+	txn, err := t.api.PayInvoiceFromAccount(Address(invoice_id), foreign_id)
+	if err != nil {
+		sendError(w, "PayInvoiceFromAccount", err)
+		return
+	}
+	sendResponse(w, txn)
 }
 
 // upsertAccount returns the address of the new account with the foreignID in the URL

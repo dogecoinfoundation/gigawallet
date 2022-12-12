@@ -1,5 +1,10 @@
 package giga
 
+import (
+	"fmt"
+	"sort"
+)
+
 type API struct {
 	Store Store
 	L1    L1
@@ -94,4 +99,66 @@ func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 		return AccountPublic{}, err
 	}
 	return acc.GetPublicInfo(), nil
+}
+
+func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string, error) {
+	invoice, err := a.Store.GetInvoice(invoiceID)
+	if err != nil {
+		return "", err
+	}
+	payFrom, err := a.Store.GetAccount(accountID)
+	if err != nil {
+		return "", err
+	}
+	// chicken and egg problem: fee calculation requires transaction size,
+	// and transaction size depends on the number of UTXOs included...
+	// start with enough UTXOs to pay for at least 1 KB (1000 bytes) and,
+	// if the txn turns out bigger than the selected UTXOs can pay for,
+	// we'll add another UTXO and try again (note that we select enough
+	// UTXOs to pay for _at_least_ 1000 bytes, but may cover a lot more)
+	feeGuess := txnFeePerKB
+	invoiceAmount := invoice.TotalKoinu()
+	if invoiceAmount < txnDustLimit {
+		return "", fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", &invoiceAmount.ToCoinString())
+	}
+	amountPlusFee := invoiceAmount + feeGuess
+	allUTXOs := a.Store.GetAllUnreservedUTXOs(payFrom.Address) // Address is the ID
+	txnInputs := chooseUTXOsToSpend(allUTXOs, amountPlusFee)   // mutates allUTXOs
+	if txnInputs == nil {
+		return "", fmt.Errorf("insufficient funds in account: %s", accountID)
+	}
+	payTo := invoice.ID // pay-to Address is the ID
+	changeAddress := payFrom.NextUnusedChangeAddress()
+	// create a transaction to pay the invoice amount (plus fee)
+	// from the `payFrom` account, paying any change back to the `payFrom` account
+	txn, err := a.L1.MakeTransaction(invoiceAmount, txnInputs, payTo, feeGuess, changeAddress)
+	if err != nil {
+		return "", err
+	}
+	// TODO: adjust the fee based on txn size and make the Txn again?
+	// TODO: mark the chosen UTXOs as being spent by this Txn (which we must also track in the pay-from account)
+	// TODO: mark the change address as being used by this Txn (in the 'from' account)
+	// TODO: mark the pay-to address as being used by this Txn (in the 'to' account)
+	// TODO: submit the transaction to the mempool
+	// TODO: mark the transaction as 'in progress' in the DB (must affect both accounts)
+	return txn.TxnHex, nil
+}
+
+func chooseUTXOsToSpend(allUTXOs []UTXO, minimumTotal Koinu) []UTXO {
+	sortUTXOsAscendingInPlace(allUTXOs)
+	remaining := minimumTotal
+	for n, UTXO := range allUTXOs {
+		if UTXO.Value >= remaining {
+			return allUTXOs[0 : n+1] // up to and including this UTXO
+		} else {
+			remaining -= UTXO.Value
+		}
+	}
+	return nil
+}
+
+func sortUTXOsAscendingInPlace(UTXOs []UTXO) {
+	sort.Slice(UTXOs[:], func(i, j int) bool {
+		return UTXOs[i].Value < UTXOs[j].Value
+	})
 }

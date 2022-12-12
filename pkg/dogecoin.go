@@ -1,6 +1,8 @@
 package giga
 
 import (
+	"fmt"
+
 	"github.com/shopspring/decimal"
 )
 
@@ -12,11 +14,25 @@ import (
 type L1 interface {
 	MakeAddress() (Address, Privkey, error)
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
+	MakeTransaction(amount Koinu, UTXOs []UTXO, payTo Address, fee Koinu, change Address) (Txn, error)
 	Send(Txn) error
 }
 
 type Address string
 type Privkey string
+type Koinu uint64
+
+const numKoinuDigits int = 8
+const oneCoinInKoinu Koinu = 100000000          // 8 koinu zeros
+const txnFeePerKB Koinu = oneCoinInKoinu / 100  // 0.01 DOGE
+const txnFeePerByte Koinu = txnFeePerKB / 1000  // since Core version 1.14.5
+const txnDustLimit Koinu = oneCoinInKoinu / 100 // 0.01 DOGE
+
+func (k Koinu) ToCoinString() string {
+	wholeCoins := k / oneCoinInKoinu
+	koinuPart := k % oneCoinInKoinu
+	return fmt.Sprintf("%d.%*d", wholeCoins, numKoinuDigits, koinuPart)
+}
 
 type Account struct {
 	Address         Address
@@ -24,6 +40,12 @@ type Account struct {
 	ForeignID       string
 	NextInternalKey uint32
 	NextExternalKey uint32
+}
+
+type UTXO struct {
+	TxnID string
+	VOut  int
+	Value Koinu
 }
 
 func (a Account) GetPublicInfo() AccountPublic {
@@ -35,12 +57,18 @@ type AccountPublic struct {
 	ForeignID string  `json:"foreign_id"`
 }
 
-type Txn struct{}
+type Txn struct {
+	TxnHex       string
+	InAmount     Koinu
+	PayAmount    Koinu
+	FeeAmount    Koinu
+	ChangeAmount Koinu
+}
 
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
-	ID      Address `json:"id"`
-	Account Address `json:"account"` // from Account.Address
+	ID      Address `json:"id"`      // pay-to Address (Invoice ID)
+	Account Address `json:"account"` // an Account.Address (Account ID)
 	TXID    string  `json:"txid"`
 	Vendor  string  `json:"vendor"`
 	Items   []Item  `json:"items"`
