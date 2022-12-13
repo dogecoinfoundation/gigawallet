@@ -227,6 +227,10 @@ func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
 	return acc, nil
 }
 
+func (s SQLite) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+	return
+}
+
 func dbErr(err error, where string) error {
 	return giga.NewErr(giga.NotAvailable, "SQLite error: %s: %v", where, err)
 }

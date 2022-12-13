@@ -5,6 +5,11 @@ import (
 	"sort"
 )
 
+const (
+	scriptTypeP2PKH    = 1
+	scriptTypeMultiSig = 2
+)
+
 type API struct {
 	Store Store
 	L1    L1
@@ -116,22 +121,28 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	// if the txn turns out bigger than the selected UTXOs can pay for,
 	// we'll add another UTXO and try again (note that we select enough
 	// UTXOs to pay for _at_least_ 1000 bytes, but may cover a lot more)
-	feeGuess := txnFeePerKB
-	invoiceAmount := invoice.TotalKoinu()
-	if invoiceAmount < txnDustLimit {
-		return "", fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", &invoiceAmount.ToCoinString())
+	feeGuess := TxnFeePerKB
+	invoiceAmount := invoice.CalcTotal()
+	if invoiceAmount.LessThan(TxnDustLimit) {
+		return "", fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
 	}
-	amountPlusFee := invoiceAmount + feeGuess
-	allUTXOs := a.Store.GetAllUnreservedUTXOs(payFrom.Address) // Address is the ID
-	txnInputs := chooseUTXOsToSpend(allUTXOs, amountPlusFee)   // mutates allUTXOs
+	amountPlusFee := invoiceAmount.Add(feeGuess)
+	allUTXOs, err := a.Store.GetAllUnreservedUTXOs(payFrom.Address) // Address is the ID
+	if err != nil {
+		return "", err
+	}
+	txnInputs := chooseUTXOsToSpend(allUTXOs, amountPlusFee) // mutates allUTXOs
 	if txnInputs == nil {
 		return "", fmt.Errorf("insufficient funds in account: %s", accountID)
 	}
 	payTo := invoice.ID // pay-to Address is the ID
-	changeAddress := payFrom.NextUnusedChangeAddress()
+	changeAddress, err := nextUnusedChangeAddress(a, payFrom)
+	if err != nil {
+		return "", err
+	}
 	// create a transaction to pay the invoice amount (plus fee)
 	// from the `payFrom` account, paying any change back to the `payFrom` account
-	txn, err := a.L1.MakeTransaction(invoiceAmount, txnInputs, payTo, feeGuess, changeAddress)
+	txn, err := a.L1.MakeTransaction(invoiceAmount, txnInputs, payTo, feeGuess, changeAddress, payFrom.Privkey)
 	if err != nil {
 		return "", err
 	}
@@ -144,14 +155,16 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	return txn.TxnHex, nil
 }
 
-func chooseUTXOsToSpend(allUTXOs []UTXO, minimumTotal Koinu) []UTXO {
+func chooseUTXOsToSpend(allUTXOs []UTXO, minimumTotal CoinAmount) []UTXO {
 	sortUTXOsAscendingInPlace(allUTXOs)
 	remaining := minimumTotal
 	for n, UTXO := range allUTXOs {
-		if UTXO.Value >= remaining {
-			return allUTXOs[0 : n+1] // up to and including this UTXO
-		} else {
-			remaining -= UTXO.Value
+		if UTXO.ScriptType == scriptTypeP2PKH {
+			if UTXO.Value.GreaterThanOrEqual(remaining) {
+				return allUTXOs[0 : n+1] // up to and including this UTXO
+			} else {
+				remaining = remaining.Sub(UTXO.Value)
+			}
 		}
 	}
 	return nil
@@ -159,6 +172,15 @@ func chooseUTXOsToSpend(allUTXOs []UTXO, minimumTotal Koinu) []UTXO {
 
 func sortUTXOsAscendingInPlace(UTXOs []UTXO) {
 	sort.Slice(UTXOs[:], func(i, j int) bool {
-		return UTXOs[i].Value < UTXOs[j].Value
+		return UTXOs[i].Value.LessThan(UTXOs[j].Value)
 	})
+}
+
+func nextUnusedChangeAddress(a API, acc Account) (Address, error) {
+	keyIndex := acc.NextInternalKey
+	address, err := a.L1.MakeChildAddress(acc.Privkey, keyIndex, true)
+	if err != nil {
+		return "", err
+	}
+	return address, nil
 }

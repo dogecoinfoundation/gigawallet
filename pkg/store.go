@@ -19,4 +19,8 @@ type Store interface {
 	StoreAccount(account Account) error
 	// GetAccount returns the account with the given ForeignID.
 	GetAccount(foreignID string) (Account, error)
+
+	// List all unreserved UTXOs in the account's wallet.
+	// Unreserved means not already being used in a pending transaction.
+	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 }

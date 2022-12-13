@@ -24,7 +24,7 @@ func (l L1Mock) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isIn
 	return "mockChildAddress", nil
 }
 
-func (l L1Mock) MakeTransaction(amount giga.Koinu, UTXOs []giga.UTXO, payTo giga.Address, fee giga.Koinu, change giga.Address) (giga.Txn, error) {
+func (l L1Mock) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.Txn, error) {
 	return giga.Txn{}, fmt.Errorf("not implemented")
 }
 

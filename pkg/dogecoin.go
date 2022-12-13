@@ -1,8 +1,6 @@
 package giga
 
 import (
-	"fmt"
-
 	"github.com/shopspring/decimal"
 )
 
@@ -14,25 +12,19 @@ import (
 type L1 interface {
 	MakeAddress() (Address, Privkey, error)
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
-	MakeTransaction(amount Koinu, UTXOs []UTXO, payTo Address, fee Koinu, change Address) (Txn, error)
+	MakeTransaction(amount CoinAmount, UTXOs []UTXO, payTo Address, fee CoinAmount, change Address, private_key Privkey) (Txn, error)
 	Send(Txn) error
 }
 
 type Address string
 type Privkey string
-type Koinu uint64
+type CoinAmount = decimal.Decimal
 
-const numKoinuDigits int = 8
-const oneCoinInKoinu Koinu = 100000000          // 8 koinu zeros
-const txnFeePerKB Koinu = oneCoinInKoinu / 100  // 0.01 DOGE
-const txnFeePerByte Koinu = txnFeePerKB / 1000  // since Core version 1.14.5
-const txnDustLimit Koinu = oneCoinInKoinu / 100 // 0.01 DOGE
-
-func (k Koinu) ToCoinString() string {
-	wholeCoins := k / oneCoinInKoinu
-	koinuPart := k % oneCoinInKoinu
-	return fmt.Sprintf("%d.%*d", wholeCoins, numKoinuDigits, koinuPart)
-}
+var ZeroCoins = decimal.NewFromInt(0)                         // 0 DOGE
+var OneCoin = decimal.NewFromInt(1)                           // 1.0 DOGE
+var TxnFeePerKB = OneCoin.Div(decimal.NewFromInt(100))        // 0.01 DOGE
+var TxnFeePerByte = TxnFeePerKB.Div(decimal.NewFromInt(1000)) // since Core version 1.14.5
+var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
 
 type Account struct {
 	Address         Address
@@ -43,9 +35,10 @@ type Account struct {
 }
 
 type UTXO struct {
-	TxnID string
-	VOut  int
-	Value Koinu
+	TxnID      string
+	VOut       int
+	Value      CoinAmount
+	ScriptType int // P2PKH, MultiSig, etc
 }
 
 func (a Account) GetPublicInfo() AccountPublic {
@@ -59,10 +52,10 @@ type AccountPublic struct {
 
 type Txn struct {
 	TxnHex       string
-	InAmount     Koinu
-	PayAmount    Koinu
-	FeeAmount    Koinu
-	ChangeAmount Koinu
+	InAmount     CoinAmount
+	PayAmount    CoinAmount
+	FeeAmount    CoinAmount
+	ChangeAmount CoinAmount
 }
 
 type Invoice struct {
@@ -76,6 +69,14 @@ type Invoice struct {
 	KeyIndex      uint32 `json:"-"` // which HD Wallet child-key was generated
 	BlockID       string `json:"-"` // transaction seen in this mined block
 	Confirmations int32  `json:"-"` // number of confirmed blocks (since block_id)
+}
+
+func (i *Invoice) CalcTotal() CoinAmount {
+	total := ZeroCoins
+	for _, item := range i.Items {
+		total = total.Add(item.Price)
+	}
+	return total
 }
 
 type Item struct {

@@ -75,3 +75,7 @@ func (m Mock) GetAccountByAddress(id giga.Address) (giga.Account, error) {
 	}
 	return v, nil
 }
+
+func (m Mock) GetAllUnreservedUTXOs(account giga.Address) ([]giga.UTXO, error) {
+	return nil, nil
+}
