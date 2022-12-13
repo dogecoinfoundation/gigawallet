@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	scriptTypeP2PKH    = 1
-	scriptTypeMultiSig = 2
+	scriptTypeP2PKH    = "p2pkh"
+	scriptTypeMultiSig = "multisig"
 )
 
 type API struct {

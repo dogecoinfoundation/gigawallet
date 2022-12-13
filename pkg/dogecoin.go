@@ -35,10 +35,13 @@ type Account struct {
 }
 
 type UTXO struct {
-	TxnID      string
-	VOut       int
-	Value      CoinAmount
-	ScriptType int // P2PKH, MultiSig, etc
+	Account       Address    // receiving account ID (by matching ScriptAddress against account's HD child keys)
+	TxnID         string     // is an output from this Txn ID
+	VOut          int        // is an output at this index in Txn
+	Status        string     // 'p' = receive pending; 'c' = receive confirmed; 's' = spent pending; 'x' = spent confirmed
+	Value         CoinAmount // value of the txn output in dogecoin
+	ScriptType    string     // 'p2pkh', 'multisig', etc (by pattern-matching the txn output script code)
+	ScriptAddress string     // the P2PKH address required to spend the txn output (extracted from the script code)
 }
 
 func (a Account) GetPublicInfo() AccountPublic {

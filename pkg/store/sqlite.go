@@ -29,6 +29,16 @@ CREATE TABLE IF NOT EXISTS invoice (
 	block_id TEXT NOT NULL,
 	confirmations INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS utxo (
+	account_address TEXT NOT NULL,
+	txn_id TEXT NOT NULL,
+	vout INTEGER NOT NULL,
+	status TEXT NOT NULL,
+	value TEXT NOT NULL,
+	script_type TEXT NOT NULL,
+	script_address TEXT NOT NULL
+);
 `
 
 // interface guard ensures SQLite implements giga.PaymentsStore
@@ -228,6 +238,24 @@ func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
 }
 
 func (s SQLite) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+	rows_found := 0
+	rows, err := s.db.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
+	if err != nil {
+		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		utxo := giga.UTXO{Account: account, Status: "c"}
+		err := rows.Scan(&utxo.TxnID, &utxo.VOut, &utxo.Value, &utxo.ScriptType, &utxo.ScriptAddress)
+		if err != nil {
+			return nil, dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
+		}
+		result = append(result, utxo)
+		rows_found++
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
+	}
 	return
 }
 
