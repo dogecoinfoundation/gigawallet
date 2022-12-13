@@ -3,9 +3,11 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+	"github.com/shopspring/decimal"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -246,9 +248,14 @@ func (s SQLite) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO,
 	defer rows.Close()
 	for rows.Next() {
 		utxo := giga.UTXO{Account: account, Status: "c"}
-		err := rows.Scan(&utxo.TxnID, &utxo.VOut, &utxo.Value, &utxo.ScriptType, &utxo.ScriptAddress)
+		var value string
+		err := rows.Scan(&utxo.TxnID, &utxo.VOut, &value, &utxo.ScriptType, &utxo.ScriptAddress)
 		if err != nil {
 			return nil, dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
+		}
+		utxo.Value, err = decimal.NewFromString(value)
+		if err != nil {
+			return nil, dbErr(err, fmt.Sprintf("GetAllUnreservedUTXOs: invalid decimal value in UTXO database: %v", value))
 		}
 		result = append(result, utxo)
 		rows_found++
