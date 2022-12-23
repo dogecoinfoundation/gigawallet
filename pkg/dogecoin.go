@@ -12,11 +12,19 @@ import (
 type L1 interface {
 	MakeAddress() (Address, Privkey, error)
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
+	MakeTransaction(amount CoinAmount, UTXOs []UTXO, payTo Address, fee CoinAmount, change Address, private_key Privkey) (Txn, error)
 	Send(Txn) error
 }
 
 type Address string
 type Privkey string
+type CoinAmount = decimal.Decimal
+
+var ZeroCoins = decimal.NewFromInt(0)                         // 0 DOGE
+var OneCoin = decimal.NewFromInt(1)                           // 1.0 DOGE
+var TxnFeePerKB = OneCoin.Div(decimal.NewFromInt(100))        // 0.01 DOGE
+var TxnFeePerByte = TxnFeePerKB.Div(decimal.NewFromInt(1000)) // since Core version 1.14.5
+var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
 
 type Account struct {
 	Address         Address
@@ -26,28 +34,52 @@ type Account struct {
 	NextExternalKey uint32
 }
 
+type UTXO struct {
+	Account       Address    // receiving account ID (by matching ScriptAddress against account's HD child keys)
+	TxnID         string     // is an output from this Txn ID
+	VOut          int        // is an output at this index in Txn
+	Status        string     // 'p' = receive pending; 'c' = receive confirmed; 's' = spent pending; 'x' = spent confirmed
+	Value         CoinAmount // value of the txn output in dogecoin
+	ScriptType    string     // 'p2pkh', 'multisig', etc (by pattern-matching the txn output script code)
+	ScriptAddress string     // the P2PKH address required to spend the txn output (extracted from the script code)
+}
+
 func (a Account) GetPublicInfo() AccountPublic {
 	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID}
 }
 
 type AccountPublic struct {
-	Address   Address
-	ForeignID string
+	Address   Address `json:"id"`
+	ForeignID string  `json:"foreign_id"`
 }
 
-type Txn struct{}
+type Txn struct {
+	TxnHex       string
+	InAmount     CoinAmount
+	PayAmount    CoinAmount
+	FeeAmount    CoinAmount
+	ChangeAmount CoinAmount
+}
 
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
-	ID      Address `json:"id"`
-	Account Address `json:"account"` // from Account.Address
+	ID      Address `json:"id"`      // pay-to Address (Invoice ID)
+	Account Address `json:"account"` // an Account.Address (Account ID)
 	TXID    string  `json:"txid"`
 	Vendor  string  `json:"vendor"`
 	Items   []Item  `json:"items"`
 	// These are used internally to track invoice status.
-	KeyIndex      uint32 // which HD Wallet child-key was generated
-	BlockID       string // transaction seen in this mined block
-	Confirmations int32  // number of confirmed blocks (since block_id)
+	KeyIndex      uint32 `json:"-"` // which HD Wallet child-key was generated
+	BlockID       string `json:"-"` // transaction seen in this mined block
+	Confirmations int32  `json:"-"` // number of confirmed blocks (since block_id)
+}
+
+func (i *Invoice) CalcTotal() CoinAmount {
+	total := ZeroCoins
+	for _, item := range i.Items {
+		total = total.Add(item.Price)
+	}
+	return total
 }
 
 type Item struct {

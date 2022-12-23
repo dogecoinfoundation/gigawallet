@@ -41,6 +41,10 @@ func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, i
 	return "foo", nil
 }
 
+func (l L1CoreRPC) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.Txn, error) {
+	return giga.Txn{}, fmt.Errorf("not implemented")
+}
+
 func (l L1CoreRPC) Send(txn giga.Txn) error {
 	return nil
 }

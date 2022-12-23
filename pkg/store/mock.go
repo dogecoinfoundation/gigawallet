@@ -1,8 +1,6 @@
 package store
 
 import (
-	"errors"
-	"fmt"
 	"log"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -47,9 +45,13 @@ func (m Mock) StoreInvoice(invoice giga.Invoice) error {
 func (m Mock) GetInvoice(id giga.Address) (giga.Invoice, error) {
 	v, ok := m.invoices[id]
 	if !ok {
-		return giga.Invoice{}, errors.New("invoice not found for id " + fmt.Sprint(id))
+		return giga.Invoice{}, giga.NewErr(giga.NotFound, "invoice not found: %v", id)
 	}
 	return v, nil
+}
+
+func (m Mock) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return
 }
 
 func (m Mock) StoreAccount(account giga.Account) error {
@@ -61,7 +63,7 @@ func (m Mock) StoreAccount(account giga.Account) error {
 func (m Mock) GetAccount(foreignID string) (giga.Account, error) {
 	v, ok := m.accounts[foreignID]
 	if !ok {
-		return giga.Account{}, errors.New("account not found for foreignID " + fmt.Sprint(foreignID))
+		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %v", foreignID)
 	}
 	return v, nil
 }
@@ -69,7 +71,11 @@ func (m Mock) GetAccount(foreignID string) (giga.Account, error) {
 func (m Mock) GetAccountByAddress(id giga.Address) (giga.Account, error) {
 	v, ok := m.accountsByAddress[id]
 	if !ok {
-		return giga.Account{}, errors.New("account not found for id " + fmt.Sprint(id))
+		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %v", id)
 	}
 	return v, nil
+}
+
+func (m Mock) GetAllUnreservedUTXOs(account giga.Address) ([]giga.UTXO, error) {
+	return nil, nil
 }

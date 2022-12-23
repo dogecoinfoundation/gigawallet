@@ -1,6 +1,10 @@
 package dogecoin
 
-import giga "github.com/dogecoinfoundation/gigawallet/pkg"
+import (
+	"fmt"
+
+	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+)
 
 // interface guard ensures L1Mock implements giga.L1
 var _ giga.L1 = L1Mock{}
@@ -18,6 +22,10 @@ func (l L1Mock) MakeAddress() (giga.Address, giga.Privkey, error) {
 
 func (l L1Mock) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
 	return "mockChildAddress", nil
+}
+
+func (l L1Mock) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.Txn, error) {
+	return giga.Txn{}, fmt.Errorf("not implemented")
 }
 
 func (l L1Mock) Send(txn giga.Txn) error {
