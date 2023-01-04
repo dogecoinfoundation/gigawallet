@@ -128,12 +128,12 @@ func toHex(b []byte) string {
 	return hex.EncodeToString(b)
 }
 
-func subscribeAll(sock *zmq4.Socket, topics ...string) error {
-	for _, topic := range topics {
-		err := sock.SetSubscribe(topic)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// func subscribeAll(sock *zmq4.Socket, topics ...string) error {
+// 	for _, topic := range topics {
+// 		err := sock.SetSubscribe(topic)
+// 		if err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return nil
+// }

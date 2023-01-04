@@ -12,8 +12,9 @@ import (
 type L1 interface {
 	MakeAddress() (Address, Privkey, error)
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
-	MakeTransaction(amount CoinAmount, UTXOs []UTXO, payTo Address, fee CoinAmount, change Address, private_key Privkey) (Txn, error)
-	Send(Txn) error
+	MakeTransaction(amount CoinAmount, UTXOs []UTXO, payTo Address, fee CoinAmount, change Address, private_key Privkey) (NewTxn, error)
+	DecodeTransaction(txnHex string) (DecodedTxn, error)
+	Send(NewTxn) error
 }
 
 type Address string
@@ -108,14 +109,17 @@ type UTXOIterator interface {
 	getNext() UTXO
 }
 
-// Txn is a new Dogecoin Transaction being created by Gigawallet.
-// This is a workspace used to build up the transaction.
-type Txn struct {
+// NewTxn is a new Dogecoin Transaction being created by Gigawallet.
+type NewTxn struct {
 	TxnHex       string
-	InAmount     CoinAmount
+	TotalIn      CoinAmount
 	PayAmount    CoinAmount
 	FeeAmount    CoinAmount
 	ChangeAmount CoinAmount
+}
+
+// DecodedTxn is decoded from transaction hex data by L1/Core.
+type DecodedTxn struct {
 }
 
 // Invoice is a request for payment created by Gigawallet.

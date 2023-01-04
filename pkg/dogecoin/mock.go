@@ -24,10 +24,14 @@ func (l L1Mock) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isIn
 	return "mockChildAddress", nil
 }
 
-func (l L1Mock) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.Txn, error) {
-	return giga.Txn{}, fmt.Errorf("not implemented")
+func (l L1Mock) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.NewTxn, error) {
+	return giga.NewTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1Mock) Send(txn giga.Txn) error {
-	return nil
+func (l L1Mock) DecodeTransaction(txnHex string) (giga.DecodedTxn, error) {
+	return giga.DecodedTxn{}, fmt.Errorf("not implemented")
+}
+
+func (l L1Mock) Send(txn giga.NewTxn) error {
+	return fmt.Errorf("not implemented")
 }

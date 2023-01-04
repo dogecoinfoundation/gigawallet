@@ -30,21 +30,36 @@ type L1CoreRPC struct {
 }
 
 func (l L1CoreRPC) MakeAddress() (giga.Address, giga.Privkey, error) {
-	// res := map[string]struct{}{}
-	res := ""
-	err := l.client.Call("getrpcinfo", nil, &res)
-	fmt.Println(res, err)
-	return "foo", "bar", nil
+	return "", "", fmt.Errorf("not implemented")
 }
 
 func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
-	return "foo", nil
+	return "", fmt.Errorf("not implemented")
 }
 
-func (l L1CoreRPC) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.Txn, error) {
-	return giga.Txn{}, fmt.Errorf("not implemented")
+func (l L1CoreRPC) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.NewTxn, error) {
+	return giga.NewTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1CoreRPC) Send(txn giga.Txn) error {
-	return nil
+type DecodeRawTransactionArgs struct {
+	Hexstring string `json:"hexstring"`
+}
+
+type DecodeRawTransactionResponse struct {
+	// TODO: dogecoin core response
+}
+
+func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.DecodedTxn, err error) {
+	args := DecodeRawTransactionArgs{Hexstring: txn_hex}
+	res := DecodeRawTransactionResponse{}
+	err = l.client.Call("decoderawtransaction", &args, &res)
+	if err != nil {
+		return
+	}
+	// TODO: populate 'txn' from 'res'
+	return
+}
+
+func (l L1CoreRPC) Send(txn giga.NewTxn) error {
+	return fmt.Errorf("not implemented")
 }
