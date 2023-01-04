@@ -26,6 +26,7 @@ var TxnFeePerKB = OneCoin.Div(decimal.NewFromInt(100))        // 0.01 DOGE
 var TxnFeePerByte = TxnFeePerKB.Div(decimal.NewFromInt(1000)) // since Core version 1.14.5
 var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
 
+// Account is a single user account (Wallet) managed by Gigawallet.
 type Account struct {
 	Address         Address
 	Privkey         Privkey
@@ -34,6 +35,63 @@ type Account struct {
 	NextExternalKey uint32
 }
 
+// NextChangeAddress generates the next unused "internal address"
+// in the Account's HD-Wallet keyspace. NOTE: since callers don't run
+// inside a transaction, concurrent requests can end up paying to the
+// same change address (we accept this risk)
+func (a *Account) NextChangeAddress(lib L1) (Address, error) {
+	keyIndex := a.NextInternalKey
+	address, err := lib.MakeChildAddress(a.Privkey, keyIndex, true)
+	if err != nil {
+		return "", err
+	}
+	return address, nil
+}
+
+// UnreservedUTXOs creates an iterator over UTXOs in this Account that
+// have not already been earmarked for an outgoing payment (i.e. reserved.)
+// UTXOs are fetched incrementally from the Store, because there can be
+// a lot of them. This should iterate in desired spending order.
+// NOTE: this does not reserve the UTXOs returned; the caller must to that
+// by calling Store.CreateTransaction with the selcted UTXOs - and that may
+// fail if the UTXOs have been reserved by a concurrent request. In that case,
+// the caller should start over with a new UnreservedUTXOs() call.
+func (a *Account) UnreservedUTXOs(s Store) (iter UTXOIterator, err error) {
+	// TODO: change this to fetch UTXOs from the Store in batches
+	// using a paginated query API.
+	allUTXOs, err := s.GetAllUnreservedUTXOs(a.Address)
+	if err != nil {
+		return &AccountUnspentUTXOs{}, err
+	}
+	return &AccountUnspentUTXOs{utxos: allUTXOs, next: 0}, nil
+}
+
+type AccountUnspentUTXOs struct {
+	utxos []UTXO
+	next  int
+}
+
+func (it *AccountUnspentUTXOs) hasNext() bool {
+	return it.next < len(it.utxos)
+}
+func (it *AccountUnspentUTXOs) getNext() UTXO {
+	utxo := it.utxos[it.next]
+	it.next++
+	return utxo
+}
+
+// GetPublicInfo gets those parts of the Account that are safe
+// to expose to the outside world (i.e. NOT private keys)
+func (a Account) GetPublicInfo() AccountPublic {
+	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID}
+}
+
+type AccountPublic struct {
+	Address   Address `json:"id"`
+	ForeignID string  `json:"foreign_id"`
+}
+
+// UTXO is an Unspent Transaction Output, i.e. a prior payment into our Account.
 type UTXO struct {
 	Account       Address    // receiving account ID (by matching ScriptAddress against account's HD child keys)
 	TxnID         string     // is an output from this Txn ID
@@ -44,15 +102,14 @@ type UTXO struct {
 	ScriptAddress string     // the P2PKH address required to spend the txn output (extracted from the script code)
 }
 
-func (a Account) GetPublicInfo() AccountPublic {
-	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID}
+// UTXOIterator is used to iterate over UTXOs in the Account.
+type UTXOIterator interface {
+	hasNext() bool
+	getNext() UTXO
 }
 
-type AccountPublic struct {
-	Address   Address `json:"id"`
-	ForeignID string  `json:"foreign_id"`
-}
-
+// Txn is a new Dogecoin Transaction being created by Gigawallet.
+// This is a workspace used to build up the transaction.
 type Txn struct {
 	TxnHex       string
 	InAmount     CoinAmount
@@ -61,6 +118,7 @@ type Txn struct {
 	ChangeAmount CoinAmount
 }
 
+// Invoice is a request for payment created by Gigawallet.
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
 	ID      Address `json:"id"`      // pay-to Address (Invoice ID)
@@ -74,10 +132,11 @@ type Invoice struct {
 	Confirmations int32  `json:"-"` // number of confirmed blocks (since block_id)
 }
 
+// CalcTotal sums up the Items listed on the Invoice.
 func (i *Invoice) CalcTotal() CoinAmount {
 	total := ZeroCoins
 	for _, item := range i.Items {
-		total = total.Add(item.Price)
+		total = total.Add(decimal.NewFromInt(int64(item.Quantity)).Mul(item.Price))
 	}
 	return total
 }

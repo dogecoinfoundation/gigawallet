@@ -78,12 +78,9 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 			}
 		}()
 		started <- true
-		select {
-		case ctx := <-stop:
-			// do some shutdown stuff then signal we're done
-			t.srv.Shutdown(ctx)
-			stopped <- true
-		}
+		ctx := <-stop
+		t.srv.Shutdown(ctx)
+		stopped <- true
 	}()
 	return nil
 }
