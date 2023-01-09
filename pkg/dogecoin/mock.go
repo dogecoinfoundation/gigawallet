@@ -28,8 +28,8 @@ func (l L1Mock) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo
 	return giga.NewTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1Mock) DecodeTransaction(txnHex string) (giga.DecodedTxn, error) {
-	return giga.DecodedTxn{}, fmt.Errorf("not implemented")
+func (l L1Mock) DecodeTransaction(txnHex string) (giga.RawTxn, error) {
+	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
 func (l L1Mock) Send(txn giga.NewTxn) error {

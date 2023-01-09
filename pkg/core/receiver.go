@@ -14,6 +14,9 @@ import (
 // interface guard ensures ZMQEmitter implements giga.NodeEmitter
 var _ giga.NodeEmitter = &CoreReceiver{}
 
+// CoreReceiver receives ZMQ messages from Dogecoin Core.
+// CAUTION: the protocol is not authenticated!
+// CAUTION: subscribers MUST validate the received data since it may be out of date, incomplete or even invalid (fake)
 type CoreReceiver struct {
 	bus         giga.MessageBus
 	sock        *zmq4.Socket

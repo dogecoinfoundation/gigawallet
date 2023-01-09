@@ -42,21 +42,12 @@ func (l L1CoreRPC) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, pa
 }
 
 type DecodeRawTransactionArgs struct {
-	Hexstring string `json:"hexstring"`
+	Hex string `json:"hexstring"`
 }
 
-type DecodeRawTransactionResponse struct {
-	// TODO: dogecoin core response
-}
-
-func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.DecodedTxn, err error) {
-	args := DecodeRawTransactionArgs{Hexstring: txn_hex}
-	res := DecodeRawTransactionResponse{}
-	err = l.client.Call("decoderawtransaction", &args, &res)
-	if err != nil {
-		return
-	}
-	// TODO: populate 'txn' from 'res'
+func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.RawTxn, err error) {
+	args := DecodeRawTransactionArgs{Hex: txn_hex}
+	err = l.client.Call("decoderawtransaction", &args, &txn)
 	return
 }
 

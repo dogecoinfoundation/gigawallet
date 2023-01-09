@@ -114,11 +114,11 @@ func (l L1Libdogecoin) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO
 	return giga.NewTxn{TxnHex: tx_hex, TotalIn: totalIn, PayAmount: amount, FeeAmount: fee, ChangeAmount: change_amt}, nil
 }
 
-func (l L1Libdogecoin) DecodeTransaction(txnHex string) (giga.DecodedTxn, error) {
+func (l L1Libdogecoin) DecodeTransaction(txnHex string) (giga.RawTxn, error) {
 	if l.fallback != nil {
 		return l.fallback.DecodeTransaction(txnHex)
 	}
-	return giga.DecodedTxn{}, fmt.Errorf("not implemented")
+	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
 func (l L1Libdogecoin) Send(txn giga.NewTxn) error {

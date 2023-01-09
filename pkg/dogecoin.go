@@ -13,12 +13,12 @@ type L1 interface {
 	MakeAddress() (Address, Privkey, error)
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
 	MakeTransaction(amount CoinAmount, UTXOs []UTXO, payTo Address, fee CoinAmount, change Address, private_key Privkey) (NewTxn, error)
-	DecodeTransaction(txnHex string) (DecodedTxn, error)
+	DecodeTransaction(txnHex string) (RawTxn, error)
 	Send(NewTxn) error
 }
 
-type Address string
-type Privkey string
+type Address string // Dogecoin address (base-58 public key hash aka PKH)
+type Privkey string //
 type CoinAmount = decimal.Decimal
 
 var ZeroCoins = decimal.NewFromInt(0)                         // 0 DOGE
@@ -118,8 +118,41 @@ type NewTxn struct {
 	ChangeAmount CoinAmount
 }
 
-// DecodedTxn is decoded from transaction hex data by L1/Core.
-type DecodedTxn struct {
+// RawTxn is decoded from transaction hex data by L1/Core.
+// Derived from the `decoderawtransaction` Core API.
+// Backgrounder: https://btcinformation.org/en/developer-guide#transactions
+type RawTxn struct {
+	TxID     string       `json:"txid"`     // The transaction id
+	Hash     string       `json:"hash"`     // The transaction hash (differs from txid for witness transactions)
+	Size     int64        `json:"size"`     // The transaction size
+	VSize    int64        `json:"vsize"`    // The virtual transaction size (differs from size for witness transactions)
+	Version  int64        `json:"version"`  // The version
+	LockTime int64        `json:"locktime"` // The lock time
+	VIn      []RawTxnVIn  `json:"vin"`      // Array of transaction inputs (UTXOs to spend)
+	VOut     []RawTxnVOut `json:"vout"`     // Array of transaction outputs (UTXOs to create)
+}
+type RawTxnVIn struct {
+	TxID        string          `json:"txid"`        // The transaction id (UTXO)
+	VOut        int64           `json:"vout"`        // The output number (UTXO)
+	ScriptSig   RawTxnScriptSig `json:"scriptSig"`   // The "signature script" (solution to the UTXO "pubkey script")
+	TxInWitness []string        `json:"txinwitness"` // Array of hex-encoded witness data (if any)
+	Sequence    int64           `json:"sequence"`    // The script sequence number
+}
+type RawTxnScriptSig struct {
+	Asm string `json:"asm"` // The script disassembly
+	Hex string `json:"hex"` // The script hex
+}
+type RawTxnVOut struct {
+	Value        string             `json:"value"`        // The value in DOGE (an exact decimal number)
+	N            int64              `json:"n"`            // The output number (VOut when spending)
+	ScriptPubKey RawTxnScriptPubKey `json:"scriptPubKey"` // The "pubkey script" (conditions for spending this output)
+}
+type RawTxnScriptPubKey struct {
+	Asm       string   `json:"asm"`       // The script disassembly
+	Hex       string   `json:"hex"`       // The script hex
+	ReqSigs   int64    `json:"reqSigs"`   // Number of required signatures
+	Type      string   `json:"type"`      // Script type: 'pubkeyhash' (P2PKH)
+	Addresses []string `json:"addresses"` // Array of dogecoin addresses accepted by the script
 }
 
 // Invoice is a request for payment created by Gigawallet.
