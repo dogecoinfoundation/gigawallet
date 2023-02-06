@@ -143,7 +143,7 @@ type RawTxnScriptSig struct {
 	Hex string `json:"hex"` // The script hex
 }
 type RawTxnVOut struct {
-	Value        string             `json:"value"`        // The value in DOGE (an exact decimal number)
+	Value        decimal.Decimal    `json:"value"`        // The value in DOGE (an exact decimal number)
 	N            int64              `json:"n"`            // The output number (VOut when spending)
 	ScriptPubKey RawTxnScriptPubKey `json:"scriptPubKey"` // The "pubkey script" (conditions for spending this output)
 }
