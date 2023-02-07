@@ -12,8 +12,6 @@ type Store interface {
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
 	// GetPendingInvoices sends all invoices that are pending to the given channel.
 	GetPendingInvoices() (<-chan Invoice, error)
-	// MarkInvoiceAsPaid marks the invoice with the given ID as paid.
-	MarkInvoiceAsPaid(id Address) error
 
 	// StoreAccount stores an account.
 	StoreAccount(account Account) error
@@ -23,4 +21,30 @@ type Store interface {
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
+
+	// Commit a list of Update structs transactionally.
+	// This interface suports both SQL and Object stores (with conditional puts)
+	Commit(updates []any) error
+}
+
+// Upsert: Account, unconditional.
+type UpsertAccount struct {
+	Account Account
+}
+
+// Update: next external key numbers in an Account.
+type UpdateAccountNextExternal struct {
+	Address  Address
+	KeyIndex uint32
+}
+
+// Upsert: Invoice, unconditional.
+type UpsertInvoice struct {
+	Invoice Invoice
+}
+
+// MarkInvoiceAsPaid marks the invoice with the given ID as paid.
+// Update, unconditional.
+type MarkInvoiceAsPaid struct {
+	InvoiceID Address
 }

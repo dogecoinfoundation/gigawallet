@@ -79,3 +79,7 @@ func (m Mock) GetAccountByAddress(id giga.Address) (giga.Account, error) {
 func (m Mock) GetAllUnreservedUTXOs(account giga.Address) ([]giga.UTXO, error) {
 	return nil, nil
 }
+
+func (m Mock) Commit(updates []any) error {
+	return nil
+}
