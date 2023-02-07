@@ -1,6 +1,8 @@
 package giga
 
 import (
+	"fmt"
+
 	"github.com/jinzhu/configor"
 )
 
@@ -36,10 +38,20 @@ type Config struct {
 
 	// info for connecting to dogecoin-core daemon
 	Dogecoind map[string]NodeConfig
+	// currently active NodeConfig
+	Core NodeConfig
 }
 
 func LoadConfig(confPath string) Config {
 	c := Config{Dogecoind: make(map[string]NodeConfig)}
 	configor.Load(&c, confPath)
+	// config load never fails, so validate:
+	if len(c.Gigawallet.Dogecoind) < 1 {
+		panic("bad config: missing gigawallet.dogecoind (select active network)")
+	}
+	c.Core = c.Dogecoind[c.Gigawallet.Dogecoind]
+	if len(c.Core.Host) < 1 {
+		panic(fmt.Sprintf("bad config: missing dogecoind.%s.host", c.Gigawallet.Dogecoind))
+	}
 	return c
 }

@@ -15,10 +15,11 @@ var _ giga.L1 = L1CoreRPC{}
 
 // NewDogecoinCoreRPC returns a giga.L1 implementor that uses dogecoin-core's RPC
 func NewDogecoinCoreRPC(config giga.Config) (L1CoreRPC, error) {
-	addr := fmt.Sprintf("http://%s:%d", config.Dogecoind[config.Gigawallet.Dogecoind].RPCHost, config.Dogecoind[config.Gigawallet.Dogecoind].RPCPort)
-	user := config.Dogecoind[config.Gigawallet.Dogecoind].RPCUser
-	pass := config.Dogecoind[config.Gigawallet.Dogecoind].RPCPass
-	return L1CoreRPC{addr, user, pass, 1}, nil
+	addr := fmt.Sprintf("http://%s:%d", config.Core.RPCHost, config.Core.RPCPort)
+	user := config.Core.RPCUser
+	pass := config.Core.RPCPass
+	var id uint64 = 1
+	return L1CoreRPC{addr, user, pass, &id}, nil
 }
 
 type L1CoreRPC struct {

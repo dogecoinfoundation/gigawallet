@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -19,12 +18,6 @@ func main() {
 		os.Exit(1)
 	}
 	conf := giga.LoadConfig(os.Args[1])
-	if len(conf.Gigawallet.Dogecoind) < 1 {
-		panic("bad config: missing gigawallet.dogecoind")
-	}
-	if len(conf.Dogecoind[conf.Gigawallet.Dogecoind].Host) < 1 {
-		panic(fmt.Sprintf("bad config: missing dogecoind.%s.host", conf.Gigawallet.Dogecoind))
-	}
 
 	rpc, err := dogecoin.NewL1Libdogecoin(conf, nil)
 	if err != nil {
