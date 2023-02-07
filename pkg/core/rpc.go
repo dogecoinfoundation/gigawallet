@@ -110,6 +110,15 @@ func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.RawTxn, err error
 	return
 }
 
+func (l L1CoreRPC) GetBlock(blockHash string, decodeTxns bool) (txn giga.RpcBlock, err error) {
+	verbosity := 1 // returns an Object with information about block ‘hash’.
+	if decodeTxns {
+		verbosity = 2 // returns an Object with information about block ‘hash’ and information about each transaction.
+	}
+	err = l.request("getblock", []any{blockHash, verbosity}, &txn)
+	return
+}
+
 func (l L1CoreRPC) Send(txn giga.NewTxn) error {
 	return fmt.Errorf("not implemented")
 }

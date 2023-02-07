@@ -121,6 +121,13 @@ func (l L1Libdogecoin) DecodeTransaction(txnHex string) (giga.RawTxn, error) {
 	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
+func (l L1Libdogecoin) GetBlock(blockHash string, decodeTxns bool) (txn giga.RpcBlock, err error) {
+	if l.fallback != nil {
+		return l.fallback.GetBlock(blockHash, decodeTxns)
+	}
+	return giga.RpcBlock{}, fmt.Errorf("not implemented")
+}
+
 func (l L1Libdogecoin) Send(txn giga.NewTxn) error {
 	if l.fallback != nil {
 		return l.fallback.Send(txn)

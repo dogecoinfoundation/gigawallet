@@ -14,6 +14,7 @@ type L1 interface {
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
 	MakeTransaction(amount CoinAmount, UTXOs []UTXO, payTo Address, fee CoinAmount, change Address, private_key Privkey) (NewTxn, error)
 	DecodeTransaction(txnHex string) (RawTxn, error)
+	GetBlock(blockHash string, decodeTxns bool) (RpcBlock, error)
 	Send(NewTxn) error
 }
 
@@ -153,6 +154,35 @@ type RawTxnScriptPubKey struct {
 	ReqSigs   int64    `json:"reqSigs"`   // Number of required signatures
 	Type      string   `json:"type"`      // Script type: 'pubkeyhash' (P2PKH)
 	Addresses []string `json:"addresses"` // Array of dogecoin addresses accepted by the script
+}
+
+// RpcBlock is decoded from block hex data by L1/Core.
+// Derived from the `getblock` Core API.
+// https://developer.bitcoin.org/reference/rpc/getblock.html
+type RpcBlock struct {
+	Hash              string       `json:"hash"`              // (string) the block hash (same as provided) hex
+	Confirmations     int          `json:"confirmations"`     // (numeric) The number of confirmations, or -1 if the block is not on the main chain
+	Size              int          `json:"size"`              // (numeric) The block size
+	StrippedSize      int          `json:"strippedsize"`      // (numeric) The block size excluding witness data
+	Weight            int          `json:"weight"`            // (numeric) The block weight as defined in BIP 141
+	Height            int          `json:"height"`            // (numeric) The block height or index
+	Version           int          `json:"version"`           // (numeric) The block version
+	VersionHex        string       `json:"versionHex"`        // (string) The block version formatted in hexadecimal
+	MerkleRoot        string       `json:"merkleroot"`        // (string) The merkle root, hex
+	Tx                []RpcBlockTx `json:"tx"`                // (json array) The transaction ids
+	Time              int          `json:"time"`              // (numeric) The block time expressed in UNIX epoch time
+	MedianTime        int          `json:"mediantime"`        // (numeric) The median block time expressed in UNIX epoch time
+	Nonce             int          `json:"nonce"`             // (numeric) The nonce
+	Bits              string       `json:"bits"`              // (string) The bits
+	Difficulty        int          `json:"difficulty"`        // (numeric) The difficulty
+	ChainWork         string       `json:"chainwork"`         // (string) Expected number of hashes required to produce the chain up to this block (in hex)
+	NTx               int          `json:"nTx"`               // (numeric) The number of transactions in the block
+	PreviousBlockHash string       `json:"previousblockhash"` // (string) The hash of the previous block, hex
+	NextBlockHash     string       `json:"nextblockhash"`     // (string) The hash of the next block, hex
+}
+type RpcBlockTx struct {
+	Hex string `json:"hex"` // (string) The transaction id
+	RawTxn
 }
 
 // Invoice is a request for payment created by Gigawallet.
