@@ -48,8 +48,7 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 	if err != nil {
 		return err
 	}
-	// err = subscribeAll(sock, "hashtx", "rawtx", "rawblock")
-	err = sock.SetSubscribe("") // enable all messages.
+	err = subscribeAll(sock, "hashtx", "rawtx", "hashblock")
 	if err != nil {
 		return err
 	}
@@ -104,11 +103,7 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 			case "hashblock":
 				id := toHex(msg[1])
 				fmt.Printf("ZMQ=> Block id=%s\n", id)
-				z.notify(giga.TX, id, "")
-			case "rawblock":
-				block := toHex(msg[1])
-				fmt.Printf("ZMQ=> Block %s\n", block)
-				z.notify(giga.Block, "", block)
+				z.notify(giga.Block, id, "")
 			default:
 				fmt.Printf("ZMQ=> %s ??\n", tag)
 			}
@@ -131,12 +126,12 @@ func toHex(b []byte) string {
 	return hex.EncodeToString(b)
 }
 
-// func subscribeAll(sock *zmq4.Socket, topics ...string) error {
-// 	for _, topic := range topics {
-// 		err := sock.SetSubscribe(topic)
-// 		if err != nil {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
+func subscribeAll(sock *zmq4.Socket, topics ...string) error {
+	for _, topic := range topics {
+		err := sock.SetSubscribe(topic)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
