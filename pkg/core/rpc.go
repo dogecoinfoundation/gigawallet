@@ -26,7 +26,7 @@ type L1CoreRPC struct {
 	url  string
 	user string
 	pass string
-	id   uint64
+	id   *uint64
 }
 
 type rpcRequest struct {
@@ -40,13 +40,13 @@ type rpcResponse struct {
 	Error  any              `json:"error"`
 }
 
-func (l *L1CoreRPC) request(method string, params []any, result any) error {
+func (l L1CoreRPC) request(method string, params []any, result any) error {
 	body := rpcRequest{
 		Method: method,
 		Params: params,
-		Id:     l.id,
+		Id:     *l.id,
 	}
-	l.id += 1 // each request should use a unique ID
+	*l.id += 1 // each request should use a unique ID
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("json-rpc marshal request: %v", err)
