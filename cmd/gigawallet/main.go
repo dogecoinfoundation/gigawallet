@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -55,7 +56,7 @@ func main() {
 	defer store.Close()
 
 	// Start the TxnConfirmer service
-	cf, err := broker.NewTxnConfirmer(conf)
+	cf, err := broker.NewTxnConfirmer(conf, l1)
 	if err != nil {
 		panic(err)
 	}

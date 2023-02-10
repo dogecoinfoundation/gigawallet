@@ -88,7 +88,7 @@ func (l L1CoreRPC) request(method string, params []any, result any) error {
 	}
 	err = json.Unmarshal(*rpcres.Result, result)
 	if err != nil {
-		return fmt.Errorf("json-rpc unmarshal result: %v", err)
+		return fmt.Errorf("json-rpc unmarshal result: %v | %v", err, string(*rpcres.Result))
 	}
 	return nil
 }
@@ -110,12 +110,15 @@ func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.RawTxn, err error
 	return
 }
 
-func (l L1CoreRPC) GetBlock(blockHash string, decodeTxns bool) (txn giga.RpcBlock, err error) {
-	verbosity := 1 // returns an Object with information about block ‘hash’.
-	if decodeTxns {
-		verbosity = 2 // returns an Object with information about block ‘hash’ and information about each transaction.
-	}
-	err = l.request("getblock", []any{blockHash, verbosity}, &txn)
+func (l L1CoreRPC) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
+	decode := true // to get back JSON rather than HEX
+	err = l.request("getblock", []any{blockHash, decode}, &txn)
+	return
+}
+
+func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
+	decode := true // to get back JSON rather than HEX
+	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn)
 	return
 }
 

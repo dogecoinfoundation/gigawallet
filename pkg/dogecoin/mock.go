@@ -32,8 +32,12 @@ func (l L1Mock) DecodeTransaction(txnHex string) (giga.RawTxn, error) {
 	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1Mock) GetBlock(blockHash string, decodeTxns bool) (txn giga.RpcBlock, err error) {
+func (l L1Mock) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
 	return giga.RpcBlock{}, fmt.Errorf("not implemented")
+}
+
+func (l L1Mock) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
+	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
 func (l L1Mock) Send(txn giga.NewTxn) error {
