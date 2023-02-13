@@ -48,35 +48,51 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 	}
 	go func() {
 		started <- true
-		for {
-			msg, err := z.sock.RecvMessageBytes(0)
-			if err != nil {
-				panic("zmq error: " + err.Error())
-			}
-			tag := string(msg[0])
-			switch tag {
-			case "hashtx":
-				id := toHex(msg[1])
-				msg, err = z.sock.RecvMessageBytes(0)
+
+		go func() {
+			for {
+				msg, err := z.sock.RecvMessageBytes(0)
 				if err != nil {
-					panic(fmt.Sprintf("zmq error: (hashtx %s): %v\n", id, err.Error()))
+					panic("zmq error: " + err.Error())
 				}
-				if string(msg[0]) != "rawtx" {
-					panic(fmt.Sprintf("zmq error: expected rawtx after hashtx %s", id))
+				tag := string(msg[0])
+				switch tag {
+				case "hashtx":
+					id := toHex(msg[1])
+					msg, err = z.sock.RecvMessageBytes(0)
+					if err != nil {
+						panic(fmt.Sprintf("zmq error: (hashtx %s): %v\n", id, err.Error()))
+					}
+					if string(msg[0]) != "rawtx" {
+						panic(fmt.Sprintf("zmq error: expected rawtx after hashtx %s", id))
+					}
+					rawtx := toHex(msg[1])
+					fmt.Printf("ZMQ=> TX id=%s rawtx=%s\n", id, rawtx)
+					z.notify(giga.TX, id, rawtx)
+				case "hashblock":
+					id := toHex(msg[1])
+					fmt.Printf("ZMQ=> Block id=%s\n", id)
+					z.notify(giga.TX, id, "")
+				case "rawblock":
+					block := toHex(msg[1])
+					fmt.Printf("ZMQ=> Block %s\n", block)
+					z.notify(giga.Block, "", block)
+				default:
+					fmt.Printf("ZMQ=> %s ??\n", tag)
 				}
-				rawtx := toHex(msg[1])
-				fmt.Printf("ZMQ=> TX id=%s rawtx=%s\n", id, rawtx)
-				z.notify(giga.TX, id, rawtx)
-			case "hashblock":
-				id := toHex(msg[1])
-				fmt.Printf("ZMQ=> Block id=%s\n", id)
-				z.notify(giga.TX, id, "")
-			case "rawblock":
-				block := toHex(msg[1])
-				fmt.Printf("ZMQ=> Block %s\n", block)
-				z.notify(giga.Block, "", block)
+			}
+		}()
+
+		for {
+			// Handle shutdown
+			select {
+			case <-stop:
+				fmt.Println("CLOSING ZMQ")
+				sock.Close()
+				stopped <- true
+				return
 			default:
-				fmt.Printf("ZMQ=> %s ??\n", tag)
+				// fall through to zmq recv
 			}
 		}
 	}()

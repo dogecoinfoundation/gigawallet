@@ -19,3 +19,7 @@
   rpcport = 22555
   rpcpass = "gigawallet"
   rpcuser = "gigawallet"
+
+[loggers.events]
+  path = "./events.log"
+  types = ["ALL"]

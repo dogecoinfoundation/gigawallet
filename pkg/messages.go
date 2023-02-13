@@ -1,7 +1,7 @@
 package giga
 
 /*
-The notification subsystem exists to allow event-based access to
+The message subsystem exists to allow event-based access to
 the various parts of GigaWallet's processes, for integration purposes.
 
 A simple internal 'message bus' is passed around internally as a
@@ -13,7 +13,7 @@ messages being routed to various external services, ie: MQTT, AMQP,
 HTTP callbacks, log-files, etc. These are managed by MessageSubscribers:
 
 MessageSubscribers are registered with the bus and are subscribed via
-their own channels along with a list of events they want to subscrive
+their own channels along with a list of MessageTypes they want to subscrive
 to.
 */
 
@@ -26,13 +26,18 @@ import (
 
 type MessageType string
 
+// These consts are used to pub and sub to messages
 const (
-	MSG_ALL MessageType = "MAGIC" // Do not use for sending
-	MSG_SYS MessageType = "SYS"   // System messages
-	MSG_NET MessageType = "NET"   // Network Events
-	MSG_ACC MessageType = "ACC"   // Account Events
-	MSG_INV MessageType = "INV"   // Innvoice Events
+	MSG_ALL MessageType = "ALL" // Do not use for sending
+	MSG_SYS MessageType = "SYS" // System messages
+	MSG_NET MessageType = "NET" // Network Events
+	MSG_ACC MessageType = "ACC" // Account Events
+	MSG_INV MessageType = "INV" // Innvoice Events
 )
+
+// slice of all msg types for config funcs lookup
+var MSG_TYPES []MessageType = []MessageType{MSG_ALL,
+	MSG_SYS, MSG_NET, MSG_ACC, MSG_INV}
 
 // MessageSubscribers are things that subscribe to the bus and handle
 // messages, ie: MQTT, AMQP, http callbacks etc.

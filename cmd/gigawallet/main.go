@@ -7,11 +7,11 @@ import (
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
+	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 	"github.com/dogecoinfoundation/gigawallet/pkg/core"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
 	"github.com/dogecoinfoundation/gigawallet/pkg/messages"
 	"github.com/dogecoinfoundation/gigawallet/pkg/store"
-	"github.com/tjstebbing/conductor"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 	}
 	fmt.Println(rpc.MakeAddress())
 
-	c := conductor.New(
+	c := conductor.NewConductor(
 		conductor.HookSignals(),
 		conductor.Noisy(),
 	)
@@ -42,12 +42,8 @@ func main() {
 	bus := giga.NewMessageBus()
 	c.Service("MessageBus", bus)
 
-	// Start the MessageLogger Service
-	msgLog := messages.NewMessageLogger(messages.MessageLoggerConfig{})
-	c.Service("MessageLogger", msgLog)
-
-	// conenct the MessageLogger to the bus to log any msgs
-	bus.Register(msgLog, giga.MSG_ALL)
+	// Configure loggers
+	messages.SetupLoggers(c, bus, conf)
 
 	// Setup the L1 interface to Core
 	l1, err := dogecoin.NewL1Libdogecoin(conf)

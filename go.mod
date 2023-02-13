@@ -18,4 +18,4 @@ require (
 	gopkg.in/yaml.v2 v2.2.2 // indirect
 )
 
-replace github.com/dogeorg/go-libdogecoin => /Users/tjstebbing/code/go-libdogecoin
+// replace github.com/dogeorg/go-libdogecoin => /Users/tjstebbing/code/go-libdogecoin
