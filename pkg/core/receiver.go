@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"syscall"
+	"time"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/pebbe/zmq4"
@@ -14,6 +15,7 @@ import (
 var _ giga.NodeEmitter = &CoreReceiver{}
 
 type CoreReceiver struct {
+	bus         giga.MessageBus
 	sock        *zmq4.Socket
 	listeners   []chan<- giga.NodeEvent
 	nodeAddress string
@@ -23,8 +25,9 @@ func (e *CoreReceiver) Subscribe(ch chan<- giga.NodeEvent) {
 	e.listeners = append(e.listeners, ch)
 }
 
-func NewCoreReceiver(config giga.Config) (*CoreReceiver, error) {
+func NewCoreReceiver(bus giga.MessageBus, config giga.Config) (*CoreReceiver, error) {
 	return &CoreReceiver{
+		bus:         bus,
 		listeners:   make([]chan<- giga.NodeEvent, 0, 10),
 		nodeAddress: fmt.Sprintf("tcp://%s:%d", config.Dogecoind[config.Gigawallet.Dogecoind].Host, config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort),
 	}, nil
@@ -35,8 +38,9 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 	if err != nil {
 		return err
 	}
+	sock.SetRcvtimeo(2 * time.Second)
 	z.sock = sock
-	log.Println("ZMQ: connecting to:", z.nodeAddress)
+	z.bus.Send(giga.MSG_SYS, fmt.Sprintf("ZMQ: connecting to: %s", z.nodeAddress))
 	err = sock.Connect(z.nodeAddress)
 	if err != nil {
 		return err
@@ -48,10 +52,37 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 	}
 	go func() {
 		started <- true
+
 		for {
+			// Handle shutdown
+			select {
+			case <-stop:
+				sock.Close()
+				close(stopped)
+				return
+			default:
+				// fall through to zmq recv
+			}
+
 			msg, err := z.sock.RecvMessageBytes(0)
 			if err != nil {
-				panic("zmq error: " + err.Error())
+				switch err := err.(type) {
+				case zmq4.Errno:
+					if err == zmq4.Errno(syscall.ETIMEDOUT) {
+						// handle timeouts by looping again
+						z.bus.Send(giga.MSG_SYS, "ZMQ: connection timeout")
+						continue
+					} else if err == zmq4.Errno(syscall.EAGAIN) {
+						continue
+					} else {
+						// handle other ZeroMQ error codes
+						z.bus.Send(giga.MSG_SYS, fmt.Sprintf("ZMQ err: %s", err))
+						continue
+					}
+				default:
+					// handle other Go errors
+					panic(fmt.Sprintf("zmq error: %v\n", err))
+				}
 			}
 			tag := string(msg[0])
 			switch tag {
@@ -79,6 +110,7 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 				fmt.Printf("ZMQ=> %s ??\n", tag)
 			}
 		}
+
 	}()
 	return nil
 }

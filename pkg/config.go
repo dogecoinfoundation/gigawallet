@@ -28,6 +28,11 @@ type Config struct {
 		DBFile string `default:"gigawallet.db"`
 	}
 
+	Loggers map[string]struct {
+		Path  string
+		Types []string `default:"[]"`
+	}
+
 	// info for connecting to dogecoin-core daemon
 	Dogecoind map[string]NodeConfig
 }
