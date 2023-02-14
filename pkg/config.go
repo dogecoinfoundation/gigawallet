@@ -1,12 +1,15 @@
 package giga
 
 import (
+	"fmt"
+
 	"github.com/jinzhu/configor"
 )
 
 type NodeConfig struct {
 	Host    string `default:"localhost"`
 	ZMQPort int    `default:"28332"`
+	RPCHost string `default:"127.0.0.1"`
 	RPCPort int    `default:"44555"`
 	RPCPass string `default:"gigawallet"`
 	RPCUser string `default:"gigawallet"`
@@ -35,10 +38,20 @@ type Config struct {
 
 	// info for connecting to dogecoin-core daemon
 	Dogecoind map[string]NodeConfig
+	// currently active NodeConfig
+	Core NodeConfig
 }
 
 func LoadConfig(confPath string) Config {
 	c := Config{Dogecoind: make(map[string]NodeConfig)}
 	configor.Load(&c, confPath)
+	// config load never fails, so validate:
+	if len(c.Gigawallet.Dogecoind) < 1 {
+		panic("bad config: missing gigawallet.dogecoind (select active network)")
+	}
+	c.Core = c.Dogecoind[c.Gigawallet.Dogecoind]
+	if len(c.Core.Host) < 1 {
+		panic(fmt.Sprintf("bad config: missing dogecoind.%s.host", c.Gigawallet.Dogecoind))
+	}
 	return c
 }

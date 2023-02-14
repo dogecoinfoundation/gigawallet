@@ -50,11 +50,6 @@ type SQLite struct {
 	db *sql.DB
 }
 
-func (s SQLite) MarkInvoiceAsPaid(id giga.Address) error {
-	//TODO implement me
-	return giga.NewErr(giga.NotAvailable, "not implemented")
-}
-
 func (s SQLite) GetPendingInvoices() (<-chan giga.Invoice, error) {
 	//TODO implement me
 	log.Print("GetPendingInvoices: not implemented")
@@ -82,51 +77,12 @@ func (s SQLite) Close() {
 }
 
 func (s SQLite) StoreInvoice(inv giga.Invoice) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return dbErr(err, "StoreInvoice: db.Begin")
-	}
-
-	stmt, err := tx.Prepare("insert into invoice(invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return dbErr(err, "StoreInvoice: tx.Prepare insert")
-	}
-	defer stmt.Close()
-
-	items_b, err := json.Marshal(inv.Items)
-	if err != nil {
-		return dbErr(err, "StoreInvoice: json.Marshal items")
-	}
-
-	_, err = stmt.Exec(inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
-	if err != nil {
-		return dbErr(err, "StoreInvoice: stmt.Exec insert")
-	}
-
-	update, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
-	if err != nil {
-		return dbErr(err, "StoreInvoice: tx.Prepare update")
-	}
-	defer stmt.Close()
-
-	// update Account to mark KeyIndex as used.
-	res, err := update.Exec(inv.KeyIndex+1, inv.Account)
-	if err != nil {
-		return dbErr(err, "StoreInvoice: update.Exec")
-	}
-	num_rows, err := res.RowsAffected()
-	if err != nil {
-		return dbErr(err, "StoreInvoice: res.RowsAffected")
-	}
-	if num_rows < 1 {
-		return giga.NewErr(giga.NotFound, "unknown account: %s", inv.Account)
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return dbErr(err, "StoreInvoice: tx.Commit")
-	}
-	return nil
+	// replaced with Commit API.
+	return s.Commit([]any{
+		giga.UpsertInvoice{
+			Invoice: inv,
+		},
+	})
 }
 
 func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
@@ -203,27 +159,12 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 }
 
 func (s SQLite) StoreAccount(acc giga.Account) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return dbErr(err, "StoreAccount: beginning transaction")
-	}
-
-	stmt, err := tx.Prepare("insert into account(foreign_id, address, privkey, next_int_key, next_ext_key) values(?, ?, ?, ?, ?)")
-	if err != nil {
-		return dbErr(err, "StoreAccount: preparing insert")
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
-	if err != nil {
-		return dbErr(err, "StoreAccount: executing insert")
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return dbErr(err, "StoreAccount: committing transaction")
-	}
-	return nil
+	// replaced with Commit API.
+	return s.Commit([]any{
+		giga.UpsertAccount{
+			Account: acc,
+		},
+	})
 }
 
 func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
@@ -264,6 +205,101 @@ func (s SQLite) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO,
 		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
 	return
+}
+
+func (s SQLite) Commit(updates []any) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return dbErr(err, "Beginning transaction")
+	}
+
+	for _, update := range updates {
+		switch u := update.(type) {
+		case giga.UpsertAccount:
+			return s.createAccount(tx, u.Account)
+		case giga.UpdateAccountNextExternal:
+			return s.updateAccountNextExternal(tx, u.Address, u.KeyIndex)
+		case giga.UpsertInvoice:
+			return s.createInvoice(tx, u.Invoice)
+		case giga.MarkInvoiceAsPaid:
+			return s.markInvoiceAsPaid(tx, u.InvoiceID)
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return dbErr(err, "Committing transaction")
+	}
+
+	return nil
+}
+
+func (s SQLite) createAccount(tx *sql.Tx, acc giga.Account) error {
+	stmt, err := tx.Prepare("insert into account(foreign_id, address, privkey, next_int_key, next_ext_key) values(?, ?, ?, ?, ?)")
+	if err != nil {
+		return dbErr(err, "createAccount: preparing insert")
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
+	if err != nil {
+		return dbErr(err, "createAccount: executing insert")
+	}
+	return nil
+}
+
+func (s SQLite) createInvoice(tx *sql.Tx, inv giga.Invoice) error {
+	items_b, err := json.Marshal(inv.Items)
+	if err != nil {
+		return dbErr(err, "createInvoice: json.Marshal items")
+	}
+
+	stmt, err := tx.Prepare("insert into invoice(invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return dbErr(err, "createInvoice: tx.Prepare insert")
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
+	if err != nil {
+		return dbErr(err, "createInvoice: stmt.Exec insert")
+	}
+
+	return s.updateAccountNextExternal(tx, inv.Account, inv.KeyIndex)
+}
+
+func (s SQLite) updateAccountNextExternal(tx *sql.Tx, account giga.Address, keyIndex uint32) error {
+	stmt, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
+	if err != nil {
+		return dbErr(err, "StoreInvoice: tx.Prepare update")
+	}
+	defer stmt.Close()
+
+	// update Account to mark KeyIndex as used.
+	res, err := stmt.Exec(keyIndex+1, account)
+	if err != nil {
+		return dbErr(err, "StoreInvoice: update.Exec")
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		return dbErr(err, "StoreInvoice: res.RowsAffected")
+	}
+	if num_rows < 1 {
+		return giga.NewErr(giga.NotFound, "unknown account: %s", account)
+	}
+	return nil
+}
+
+func (s SQLite) markInvoiceAsPaid(tx *sql.Tx, address giga.Address) error {
+	stmt, err := tx.Prepare("update invoices set confirmations = ? where invoice_address = ?")
+	if err != nil {
+		return dbErr(err, "markInvoiceAsPaid: preparing update")
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(1, address)
+	if err != nil {
+		return dbErr(err, "markInvoiceAsPaid: executing update")
+	}
+	return nil
 }
 
 func dbErr(err error, where string) error {

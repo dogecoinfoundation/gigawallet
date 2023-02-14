@@ -19,14 +19,8 @@ func main() {
 		os.Exit(1)
 	}
 	conf := giga.LoadConfig(os.Args[1])
-	if len(conf.Gigawallet.Dogecoind) < 1 {
-		panic("bad config: missing gigawallet.dogecoind")
-	}
-	if len(conf.Dogecoind[conf.Gigawallet.Dogecoind].Host) < 1 {
-		panic(fmt.Sprintf("bad config: missing dogecoind.%s.host", conf.Gigawallet.Dogecoind))
-	}
 
-	rpc, err := dogecoin.NewL1Libdogecoin(conf)
+	rpc, err := dogecoin.NewL1Libdogecoin(conf, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -44,8 +38,12 @@ func main() {
 	// Configure loggers
 	messages.SetupLoggers(c, bus, conf)
 
-	// Setup the L1 interface to Core
-	l1, err := dogecoin.NewL1Libdogecoin(conf)
+	// Set up the L1 interface to Core
+	l1_core, err := core.NewDogecoinCoreRPC(conf)
+	if err != nil {
+		panic(err)
+	}
+	l1, err := dogecoin.NewL1Libdogecoin(conf, l1_core)
 	if err != nil {
 		panic(err)
 	}
@@ -58,7 +56,7 @@ func main() {
 	defer store.Close()
 
 	// Start the TxnConfirmer service
-	cf, err := broker.NewTxnConfirmer(conf)
+	cf, err := broker.NewTxnConfirmer(conf, l1)
 	if err != nil {
 		panic(err)
 	}

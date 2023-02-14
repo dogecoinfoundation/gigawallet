@@ -2,7 +2,6 @@ package giga
 
 import (
 	"fmt"
-	"sort"
 )
 
 const (
@@ -121,22 +120,22 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	// if the txn turns out bigger than the selected UTXOs can pay for,
 	// we'll add another UTXO and try again (note that we select enough
 	// UTXOs to pay for _at_least_ 1000 bytes, but may cover a lot more)
-	feeGuess := TxnFeePerKB
 	invoiceAmount := invoice.CalcTotal()
 	if invoiceAmount.LessThan(TxnDustLimit) {
 		return "", fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
 	}
+	feeGuess := TxnFeePerKB // TODO: use transaction size.
 	amountPlusFee := invoiceAmount.Add(feeGuess)
-	allUTXOs, err := a.Store.GetAllUnreservedUTXOs(payFrom.Address) // Address is the ID
+	unspentUTXOs, err := payFrom.UnreservedUTXOs(a.Store)
 	if err != nil {
 		return "", err
 	}
-	txnInputs := chooseUTXOsToSpend(allUTXOs, amountPlusFee) // mutates allUTXOs
+	txnInputs := chooseUTXOsToSpend(amountPlusFee, unspentUTXOs)
 	if txnInputs == nil {
 		return "", fmt.Errorf("insufficient funds in account: %s", accountID)
 	}
 	payTo := invoice.ID // pay-to Address is the ID
-	changeAddress, err := nextUnusedChangeAddress(a, payFrom)
+	changeAddress, err := payFrom.NextChangeAddress(a.L1)
 	if err != nil {
 		return "", err
 	}
@@ -155,32 +154,28 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	return txn.TxnHex, nil
 }
 
-func chooseUTXOsToSpend(allUTXOs []UTXO, minimumTotal CoinAmount) []UTXO {
-	sortUTXOsAscendingInPlace(allUTXOs)
+// chooseUTXOsToSpend selects unspent UTXOs from the Account (Wallet)
+// that add up to some specified amount, [TODO: plus the transaction fees
+// for the UTXO inputs added by this function, which change the size of
+// the transaction as we add them.]
+// The UTXOIterator is assumed to be sorted in the order we want to
+// spend them by the Account/Wallet itself.
+func chooseUTXOsToSpend(minimumTotal CoinAmount, unspentUTXOs UTXOIterator) (selected []UTXO) {
 	remaining := minimumTotal
-	for n, UTXO := range allUTXOs {
-		if UTXO.ScriptType == scriptTypeP2PKH {
-			if UTXO.Value.GreaterThanOrEqual(remaining) {
-				return allUTXOs[0 : n+1] // up to and including this UTXO
+	for unspentUTXOs.hasNext() {
+		utxo := unspentUTXOs.getNext()
+		if utxo.ScriptType == scriptTypeP2PKH {
+			// we can (presumably) spend this UTXO with one of our private keys,
+			// otherwise it wouldn't be in our wallet.
+			// XXX: should grow the minimumTotal by the post-signed UTXO "input" size
+			// each time we add a UTXO to the transaction here.
+			if utxo.Value.GreaterThanOrEqual(remaining) {
+				selected = append(selected, utxo)
+				return // up to and including this UTXO
 			} else {
-				remaining = remaining.Sub(UTXO.Value)
+				remaining = remaining.Sub(utxo.Value)
 			}
 		}
 	}
-	return nil
-}
-
-func sortUTXOsAscendingInPlace(UTXOs []UTXO) {
-	sort.Slice(UTXOs[:], func(i, j int) bool {
-		return UTXOs[i].Value.LessThan(UTXOs[j].Value)
-	})
-}
-
-func nextUnusedChangeAddress(a API, acc Account) (Address, error) {
-	keyIndex := acc.NextInternalKey
-	address, err := a.L1.MakeChildAddress(acc.Privkey, keyIndex, true)
-	if err != nil {
-		return "", err
-	}
-	return address, nil
+	return
 }

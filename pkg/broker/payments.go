@@ -39,7 +39,11 @@ func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context
 					p.sendEvent(giga.BrokerEvent{Type: giga.NewInvoice, ID: e.ID})
 				case giga.InvoiceConfirmed:
 					// from Confirmer
-					err := p.store.MarkInvoiceAsPaid(giga.Address(e.ID))
+					err := p.store.Commit([]any{
+						giga.MarkInvoiceAsPaid{
+							InvoiceID: giga.Address(e.ID),
+						},
+					})
 					if err != nil {
 						log.Println("error marking invoice with id", e.ID, "as paid:", err)
 						return

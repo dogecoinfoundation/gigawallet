@@ -4,7 +4,7 @@
   bind = "localhost"  # avoids macOS firewall confirmation!
 
 [gigawallet]
-  dogecoind = "testnet"  # which dogecoind to connect to
+  dogecoind = "mainnet"  # which dogecoind to connect to
 
 [dogecoind.testnet]
   host    = "localhost"
@@ -16,6 +16,7 @@
 [dogecoind.mainnet]
   host    = "localhost"
   zmqport = 28332
+  rpchost = "127.0.0.1"
   rpcport = 22555
   rpcpass = "gigawallet"
   rpcuser = "gigawallet"

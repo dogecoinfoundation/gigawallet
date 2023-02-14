@@ -55,6 +55,9 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 		mux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
 
+		// POST /decode-txn -> test decoding
+		mux.POST("/decode-txn", t.decodeTxn)
+
 		// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
 
 		// POST { amount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
@@ -78,12 +81,9 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 			}
 		}()
 		started <- true
-		select {
-		case ctx := <-stop:
-			// do some shutdown stuff then signal we're done
-			t.srv.Shutdown(ctx)
-			stopped <- true
-		}
+		ctx := <-stop
+		t.srv.Shutdown(ctx)
+		stopped <- true
 	}()
 	return nil
 }
@@ -257,6 +257,25 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 		return
 	}
 	sendResponse(w, acc)
+}
+
+type DecodeTxnRequest struct {
+	Hex string `json:"hex"`
+}
+
+func (t WebAPI) decodeTxn(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	var o DecodeTxnRequest
+	err := json.NewDecoder(r.Body).Decode(&o)
+	if err != nil {
+		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
+		return
+	}
+	rawTxn, err := t.api.L1.DecodeTransaction(o.Hex)
+	if err != nil {
+		sendBadRequest(w, fmt.Sprintf("error decoding transaction: %v", err))
+		return
+	}
+	sendResponse(w, rawTxn)
 }
 
 // Helpers

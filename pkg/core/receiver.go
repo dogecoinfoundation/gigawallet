@@ -14,6 +14,9 @@ import (
 // interface guard ensures ZMQEmitter implements giga.NodeEmitter
 var _ giga.NodeEmitter = &CoreReceiver{}
 
+// CoreReceiver receives ZMQ messages from Dogecoin Core.
+// CAUTION: the protocol is not authenticated!
+// CAUTION: subscribers MUST validate the received data since it may be out of date, incomplete or even invalid (fake)
 type CoreReceiver struct {
 	bus         giga.MessageBus
 	sock        *zmq4.Socket
@@ -45,8 +48,7 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 	if err != nil {
 		return err
 	}
-	// err = subscribeAll(sock, "hashtx", "rawtx", "rawblock")
-	err = sock.SetSubscribe("") // enable all messages.
+	err = subscribeAll(sock, "hashtx", "rawtx", "hashblock")
 	if err != nil {
 		return err
 	}
@@ -96,16 +98,13 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 					panic(fmt.Sprintf("zmq error: expected rawtx after hashtx %s", id))
 				}
 				rawtx := toHex(msg[1])
-				fmt.Printf("ZMQ=> TX id=%s rawtx=%s\n", id, rawtx)
+				// fmt.Printf("ZMQ=> TX id=%s rawtx=%s\n", id, rawtx)
+				fmt.Printf("ZMQ=> TX id=%s\n", id)
 				z.notify(giga.TX, id, rawtx)
 			case "hashblock":
 				id := toHex(msg[1])
-				fmt.Printf("ZMQ=> Block id=%s\n", id)
-				z.notify(giga.TX, id, "")
-			case "rawblock":
-				block := toHex(msg[1])
-				fmt.Printf("ZMQ=> Block %s\n", block)
-				z.notify(giga.Block, "", block)
+				fmt.Printf("ZMQ=> BLOCK id=%s\n", id)
+				z.notify(giga.Block, id, "")
 			default:
 				fmt.Printf("ZMQ=> %s ??\n", tag)
 			}
