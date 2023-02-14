@@ -108,24 +108,24 @@ func (c *Conductor) Stop() {
 
 	// decrement our waitgroup when each service says it has stopped
 	for _, state := range c.services {
+		fmt.Println("Requesting shutdown: ", state.name)
 		state.shutdown <- ctx
-		go func() {
-			<-state.stopped
+		go func(s *serviceState) {
+			<-(*s).stopped
+			fmt.Println("Shutdown complete: ", (*s).name)
 			wg.Done()
-		}()
+		}(state)
 	}
 
 	// Wait for either all services to close, or the timeout to occur then signal shutdown.
 	select {
 	case <-done:
+		fmt.Println("👋 All services stopped, goodbye!")
 		close(c.shutdown)
 		return
-		/*
-			case <-time.After(c.stopTimeout + time.Second):
-				c.log("Timeout exeeded waiting for services to stop, shutting down")
-				cancel()
-				close(c.shutdown)
-				return*/
+	case <-time.After(c.stopTimeout + time.Second):
+		fmt.Println("Timeout exeeded waiting for services to stop, shutting down")
+		close(c.shutdown)
 	}
 }
 

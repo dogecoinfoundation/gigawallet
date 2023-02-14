@@ -35,13 +35,15 @@ func HookSignals() func(*Conductor) {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 		go func() {
-			select {
-			case sig := <-sigCh: // sigterm/sigint caught
-				c.logf("Caught %v signal, shutting down", sig)
-				c.Stop()
-				return
-			case <-c.shutdown: // service is closing down..
-				return
+			for {
+				select {
+				case sig := <-sigCh: // sigterm/sigint caught
+					c.logf("Caught %v signal, shutting down", sig)
+					c.Stop()
+					continue
+				case <-c.shutdown: // service is closing down..
+					return
+				}
 			}
 		}()
 	}

@@ -59,22 +59,14 @@ type Subscription struct {
 
 func NewMessageBus() MessageBus {
 	return MessageBus{
-		register:   make(chan Subscription, 10),
-		unregister: make(chan Subscription),
-		receivers:  make(map[*Subscription]bool),
-		inbound:    make(chan Message, 1),
+		receivers: make(map[*Subscription]bool),
+		inbound:   make(chan Message, 1),
 	}
 }
 
 type MessageBus struct {
 	// Registered MessageSubscribers.
 	receivers map[*Subscription]bool
-
-	// Register requests for MessageSubscribers.
-	register chan Subscription
-
-	// Unregister requests from MessageSubscribers.
-	unregister chan Subscription
 
 	// Messages from Send(), destinated for MessageSubscribers
 	inbound chan Message
@@ -98,7 +90,13 @@ func (b MessageBus) Send(t MessageType, msg interface{}, msgID ...string) error 
 }
 
 func (b MessageBus) Register(m MessageSubscriber, types ...MessageType) {
-	b.register <- Subscription{m, types}
+	sub := Subscription{m, types}
+	b.receivers[&sub] = true
+}
+
+func (b MessageBus) Unregister(sub *Subscription) {
+	delete(b.receivers, sub)
+	close((*sub).dest.GetChan())
 }
 
 // Implements conductor Service
@@ -111,13 +109,6 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 				select {
 				case <-stopBus:
 					return
-				case sub := <-b.register:
-					b.receivers[&sub] = true
-				case sub := <-b.unregister:
-					if _, ok := b.receivers[&sub]; ok {
-						delete(b.receivers, &sub)
-						close(sub.dest.GetChan())
-					}
 				case message := <-b.inbound:
 					for sub := range b.receivers {
 						// check if this receiver wants this message type
@@ -141,8 +132,7 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 						default:
 							// if we are unable to send, cansel the sub
 							b.Send(MSG_SYS, struct{ msg string }{msg: "reciever failed to handle msg, closing"})
-							close((*sub).dest.GetChan())
-							delete(b.receivers, sub)
+							b.Unregister(sub)
 						}
 					}
 				}
@@ -159,18 +149,6 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 		}
 
 	}()
-	return nil
-}
-
-// Config handling, here we find any configured MessageSubscribers
-// and create them, then subscribe them to the bus.
-func SetupMessageSubscribers(c Config, b MessageBus) error {
-
-	// Set up any Loggers
-
-	// Set up any AMQP channels
-
-	// Set up any HTTP Callbacks
 	return nil
 }
 

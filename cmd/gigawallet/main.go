@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
@@ -70,13 +69,12 @@ func main() {
 	c.Service("Payment Broker", pb)
 
 	// Start the Core listener service (ZMQ)
-	z, err := core.NewCoreReceiver(conf)
+	z, err := core.NewCoreReceiver(bus, conf)
 	if err != nil {
 		panic(err)
 	}
 	z.Subscribe(cf.ReceiveFromNode)
 	c.Service("ZMQ Listener", z)
-
 	// Start the Payment API
 	p, err := giga.NewWebAPI(conf, l1, store)
 	if err != nil {
@@ -84,9 +82,5 @@ func main() {
 	}
 	c.Service("Payment API", p)
 
-	go func() {
-		time.Sleep(2 * time.Second)
-		bus.Send(giga.MSG_SYS, "starting up")
-	}()
 	<-c.Start()
 }

@@ -31,7 +31,7 @@ func (l MessageLogger) Run(started, stopped chan bool, stop chan context.Context
 			// handle stopping the service
 			case <-stop:
 				close(l.Rec)
-				stopped <- true
+				close(stopped)
 				return
 			case msg := <-l.Rec:
 				l.Log.Printf("%s (%s): %s\n",
