@@ -240,11 +240,18 @@ func (s SQLite) createAccount(tx *sql.Tx, acc giga.Account) error {
 		return dbErr(err, "createAccount: preparing insert")
 	}
 	defer stmt.Close()
+
 	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
 	if err != nil {
 		return dbErr(err, "createAccount: executing insert")
 	}
+
+	err = tx.Commit()
+	if err != nil {
+		return dbErr(err, "createAccount: committing transaction")
+	}
 	return nil
+
 }
 
 func (s SQLite) createInvoice(tx *sql.Tx, inv giga.Invoice) error {
