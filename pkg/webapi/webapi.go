@@ -1,14 +1,14 @@
-package giga
+package webapi
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 
+	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/julienschmidt/httprouter"
 	"github.com/tjstebbing/conductor"
 )
@@ -18,14 +18,14 @@ type WebAPI struct {
 	srv  *http.Server
 	bind string
 	port string
-	api  API
+	api  giga.API
 }
 
 // interface guard ensures WebAPI implements conductor.Service
 var _ conductor.Service = WebAPI{}
 
-func NewWebAPI(config Config, l1 L1, store Store) (WebAPI, error) {
-	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: NewAPI(store, l1)}, nil
+func NewWebAPI(config giga.Config, l1 giga.L1, store giga.Store) (WebAPI, error) {
+	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: giga.NewAPI(store, l1)}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {
@@ -96,7 +96,7 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, "missing invoice ID in URL")
 		return
 	}
-	var o InvoiceCreateRequest
+	var o giga.InvoiceCreateRequest
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
@@ -137,13 +137,13 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		sendError(w, "GetAccount", err)
 		return
 	}
-	invoice, err := t.api.GetInvoice(Address(id)) // TODO: need a "not found" error-code
+	invoice, err := t.api.GetInvoice(giga.Address(id)) // TODO: need a "not found" error-code
 	if err != nil {
 		sendError(w, "GetInvoice", err)
 		return
 	}
 	if invoice.Account != acc.Address {
-		sendErrorResponse(w, 404, NotFound, "no such invoice in this account")
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
 		return
 	}
 	sendResponse(w, invoice)
@@ -157,7 +157,7 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 		sendBadRequest(w, "missing invoice ID")
 		return
 	}
-	invoice, err := t.api.GetInvoice(Address(id))
+	invoice, err := t.api.GetInvoice(giga.Address(id))
 	if err != nil {
 		sendError(w, "GetInvoice", err)
 		return
@@ -219,7 +219,7 @@ func (t WebAPI) payInvoiceFromInternal(w http.ResponseWriter, r *http.Request, p
 		sendBadRequest(w, "missing foreign ID in URL")
 		return
 	}
-	txn, err := t.api.PayInvoiceFromAccount(Address(invoice_id), foreign_id)
+	txn, err := t.api.PayInvoiceFromAccount(giga.Address(invoice_id), foreign_id)
 	if err != nil {
 		sendError(w, "PayInvoiceFromAccount", err)
 		return
@@ -276,45 +276,4 @@ func (t WebAPI) decodeTxn(w http.ResponseWriter, r *http.Request, p httprouter.P
 		return
 	}
 	sendResponse(w, rawTxn)
-}
-
-// Helpers
-
-func sendResponse(w http.ResponseWriter, payload any) {
-	// note: w.Header after this, so we can call sendError
-	b, err := json.Marshal(payload)
-	if err != nil {
-		sendErrorResponse(w, http.StatusInternalServerError, "marshal", fmt.Sprintf("in json.Marshal: %s", err.Error()))
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store") // do not cache (Browsers cache GET forever by default)
-	w.Write(b)
-}
-
-func sendBadRequest(w http.ResponseWriter, message string) {
-	sendErrorResponse(w, http.StatusBadRequest, BadRequest, message)
-}
-
-func sendError(w http.ResponseWriter, where string, err error) {
-	var info *ErrorInfo
-	if errors.As(err, &info) {
-		status := HttpStatusForError(info.Code)
-		message := fmt.Sprintf("%s: %s", where, info.Message)
-		sendErrorResponse(w, status, info.Code, message)
-	} else {
-		message := fmt.Sprintf("%s: %s", where, err.Error())
-		sendErrorResponse(w, http.StatusInternalServerError, UnknownError, message)
-	}
-}
-
-func sendErrorResponse(w http.ResponseWriter, statusCode int, code ErrorCode, message string) {
-	log.Printf("[!] %s: %s\n", code, message)
-	// would prefer to use json.Marshal, but this avoids the need
-	// to handle encoding errors arising from json.Marshal itself!
-	payload := fmt.Sprintf("{\"error\":{\"code\":%q,\"message\":%q}}", code, message)
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store") // do not cache (Browsers cache GET forever by default)
-	w.WriteHeader(statusCode)
-	w.Write([]byte(payload))
 }

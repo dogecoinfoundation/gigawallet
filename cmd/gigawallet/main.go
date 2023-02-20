@@ -11,6 +11,7 @@ import (
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
 	"github.com/dogecoinfoundation/gigawallet/pkg/messages"
 	"github.com/dogecoinfoundation/gigawallet/pkg/store"
+	"github.com/dogecoinfoundation/gigawallet/pkg/webapi"
 )
 
 func main() {
@@ -74,7 +75,7 @@ func main() {
 	z.Subscribe(cf.ReceiveFromNode)
 	c.Service("ZMQ Listener", z)
 	// Start the Payment API
-	p, err := giga.NewWebAPI(conf, l1, store)
+	p, err := webapi.NewWebAPI(conf, l1, store)
 	if err != nil {
 		panic(err)
 	}
