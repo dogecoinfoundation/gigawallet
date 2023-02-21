@@ -216,18 +216,23 @@ func (s SQLite) Commit(updates []any) error {
 	for _, update := range updates {
 		switch u := update.(type) {
 		case giga.UpsertAccount:
-			return s.createAccount(tx, u.Account)
+			err = s.createAccount(tx, u.Account)
 		case giga.UpdateAccountNextExternal:
-			return s.updateAccountNextExternal(tx, u.Address, u.KeyIndex)
+			err = s.updateAccountNextExternal(tx, u.Address, u.KeyIndex)
 		case giga.UpsertInvoice:
-			return s.createInvoice(tx, u.Invoice)
+			err = s.createInvoice(tx, u.Invoice)
 		case giga.MarkInvoiceAsPaid:
-			return s.markInvoiceAsPaid(tx, u.InvoiceID)
+			err = s.markInvoiceAsPaid(tx, u.InvoiceID)
+		}
+		if err != nil {
+			fmt.Println("Sqlite Store Commit rolling back: ", err)
+			tx.Rollback()
+			return err
 		}
 	}
-
 	err = tx.Commit()
 	if err != nil {
+		fmt.Println("Sqlite Store Commit: failed to commit:", err)
 		return dbErr(err, "Committing transaction")
 	}
 

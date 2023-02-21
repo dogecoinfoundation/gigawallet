@@ -75,6 +75,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		// POST { dogeConnect payment } /invoice/:invoiceID/pay -> { status } pay an invoice with a dogeConnect response
 
 		t.srv = &http.Server{Addr: t.bind + ":" + t.port, Handler: mux}
+		fmt.Printf("listening on %s:%s", t.bind, t.port)
 		go func() {
 			if err := t.srv.ListenAndServe(); err != http.ErrServerClosed {
 				log.Fatalf("HTTP server ListenAndServe: %v", err)
