@@ -74,7 +74,6 @@ func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoices
 }
 
 func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error) {
-	fmt.Println("create account")
 	acc, err := a.Store.GetAccount(foreignID)
 	if err == nil {
 		if upsert {
@@ -91,8 +90,6 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 		ForeignID: foreignID,
 		Privkey:   priv,
 	}
-	fmt.Println("store account", account)
-	acc, err = a.Store.GetAccount(foreignID)
 	err = a.Store.StoreAccount(account)
 	if err != nil {
 		return AccountPublic{}, err
