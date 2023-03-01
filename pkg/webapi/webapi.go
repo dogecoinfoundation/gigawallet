@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -45,6 +46,8 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 
 		// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
 		mux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
+
+		mux.GET("/account/:foreignID/invoice/:invoiceID/qr.png", t.getAccountInvoiceQR)
 
 		// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
 		mux.GET("/invoice/:invoiceID", t.getInvoice)
@@ -92,6 +95,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 // createInvoice returns the ID of the created Invoice (which is the one-time address for this transaction) for the foreignID in the URL and the InvoiceCreateRequest in the body
 func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the foreignID is a 3rd-party ID for the account
+	fmt.Println("here")
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
 		sendBadRequest(w, "missing invoice ID in URL")
@@ -103,6 +107,7 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
 		return
 	}
+	fmt.Println(o)
 	if o.Vendor == "" {
 		sendBadRequest(w, "missing 'vendor' in JSON body")
 		return
@@ -133,7 +138,7 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		sendBadRequest(w, "missing invoice ID")
 		return
 	}
-	acc, err := t.api.GetAccount(id)
+	acc, err := t.api.GetAccount(foreignID)
 	if err != nil {
 		sendError(w, "GetAccount", err)
 		return
@@ -148,6 +153,47 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		return
 	}
 	sendResponse(w, invoice)
+}
+
+func (t WebAPI) getAccountInvoiceQR(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the foreignID is a 3rd-party ID for the account
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	// the invoiceID is the address of the invoice
+	id := p.ByName("invoiceID")
+	if id == "" {
+		sendBadRequest(w, "missing invoice ID")
+		return
+	}
+	acc, err := t.api.GetAccount(foreignID)
+	if err != nil {
+		sendError(w, "GetAccount", err)
+		return
+	}
+	invoice, err := t.api.GetInvoice(giga.Address(id)) // TODO: need a "not found" error-code
+	if err != nil {
+		sendError(w, "GetInvoice", err)
+		return
+	}
+	if invoice.Account != acc.Address {
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
+		return
+	}
+
+	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=0&cxt=%s", string(invoice.ID), url.QueryEscape("https://example.com/")), 256)
+	w.Header().Set("Content-Type", "image/png")
+	//  Maxage 900 (15 minutes) is because this image should not
+	//  change at all for a given invoice and we expect most invoices
+	// to be complete in far less time than 15 min.. but 15 min allows
+	// us room to upgrade the format between releases if needed..
+	w.Header().Set("Cache-Control", "max-age:=900, immutable")
+	//w.Header().Set("Cache-Control", "no-cache")
+
+	w.Write(qr)
+
 }
 
 // getInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL

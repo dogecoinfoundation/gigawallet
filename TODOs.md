@@ -3,9 +3,17 @@
 
 #### Cleanup APIs - @tjstebbing 
   - [ ] Refresh old PR and apply to private endpoints #17
-  - [ ] Add invoice reading endpoint with QRcode / JSON (connect) 
+  - [ ] Add appropriate JSON (connect) output to invoice api
+  - [x] Add invoice reading endpoint with QRcode 
   - [x] Move to a sub-package `webapi.go` getting big
 
+  
+#### Auto-reconciliation feature - @tjstebbing
+  - [ ] Add account 'settings' to DB
+  - [ ] Add reconciliation setting per account (where/when to auto send Doge payments)
+  - [ ] Add reconciliation setting per invoice (overrides account setting)
+  - [ ] Write an Accountant service to manage automatic payments etc.
+  
 #### Message broker - @tjstebbing
   - [ ] Build AMQP connector for external event integration
   - [x] Build logger connector for debugging msg bus

@@ -9,7 +9,7 @@ import (
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 	"github.com/dogecoinfoundation/gigawallet/pkg/core"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
-	"github.com/dogecoinfoundation/gigawallet/pkg/messages"
+	"github.com/dogecoinfoundation/gigawallet/pkg/receivers"
 	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"github.com/dogecoinfoundation/gigawallet/pkg/webapi"
 )
@@ -37,7 +37,7 @@ func main() {
 	c.Service("MessageBus", bus)
 
 	// Configure loggers
-	messages.SetupLoggers(c, bus, conf)
+	receivers.SetupLoggers(c, bus, conf)
 
 	// Set up the L1 interface to Core
 	l1_core, err := core.NewDogecoinCoreRPC(conf)
