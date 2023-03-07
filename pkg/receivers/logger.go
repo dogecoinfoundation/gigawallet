@@ -34,8 +34,9 @@ func (l MessageLogger) Run(started, stopped chan bool, stop chan context.Context
 				close(stopped)
 				return
 			case msg := <-l.Rec:
-				l.Log.Printf("%s (%s): %s\n",
-					msg.MessageType,
+				l.Log.Printf("%s:%s (%s): %s\n",
+					msg.EventType.Type(),
+					msg.EventType,
 					msg.ID,
 					msg.Message)
 			}
@@ -62,11 +63,11 @@ func SetupLoggers(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Conf
 		l := NewMessageLogger(c.Path)
 		cond.Service(fmt.Sprintf("Logger %s", c.Path), l)
 
-		types := []giga.MessageType{}
+		types := []giga.EventType{}
 		for _, t := range c.Types {
 			match := false
-			for _, x := range giga.MSG_TYPES {
-				if t == string(x) {
+			for _, x := range giga.EVENT_TYPES {
+				if t == x.Type() {
 					match = true
 					types = append(types, x)
 				}

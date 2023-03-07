@@ -43,7 +43,7 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 	}
 	sock.SetRcvtimeo(2 * time.Second)
 	z.sock = sock
-	z.bus.Send(giga.MSG_SYS, fmt.Sprintf("ZMQ: connecting to: %s", z.nodeAddress))
+	z.bus.Send(giga.SYS_STARTUP, fmt.Sprintf("ZMQ: connecting to: %s", z.nodeAddress))
 	err = sock.Connect(z.nodeAddress)
 	if err != nil {
 		return err
@@ -72,13 +72,13 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 				case zmq4.Errno:
 					if err == zmq4.Errno(syscall.ETIMEDOUT) {
 						// handle timeouts by looping again
-						z.bus.Send(giga.MSG_SYS, "ZMQ: connection timeout")
+						z.bus.Send(giga.SYS_ERR, "ZMQ: connection timeout")
 						continue
 					} else if err == zmq4.Errno(syscall.EAGAIN) {
 						continue
 					} else {
 						// handle other ZeroMQ error codes
-						z.bus.Send(giga.MSG_SYS, fmt.Sprintf("ZMQ err: %s", err))
+						z.bus.Send(giga.SYS_ERR, fmt.Sprintf("ZMQ err: %s", err))
 						continue
 					}
 				default:
