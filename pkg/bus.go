@@ -13,7 +13,7 @@ messages being routed to various external services, ie: MQTT, AMQP,
 HTTP callbacks, log-files, etc. These are managed by MessageSubscribers:
 
 MessageSubscribers are registered with the bus and are subscribed via
-their own channels along with a list of MessageTypes they want to subscrive
+their own channels along with a list of EventTypes they want to subscrive
 to.
 */
 
@@ -24,21 +24,6 @@ import (
 	"encoding/json"
 )
 
-type MessageType string
-
-// These consts are used to pub and sub to messages
-const (
-	MSG_ALL MessageType = "ALL" // Do not use for sending
-	MSG_SYS MessageType = "SYS" // System messages
-	MSG_NET MessageType = "NET" // Network Events
-	MSG_ACC MessageType = "ACC" // Account Events
-	MSG_INV MessageType = "INV" // Innvoice Events
-)
-
-// slice of all msg types for config funcs lookup
-var MSG_TYPES []MessageType = []MessageType{MSG_ALL,
-	MSG_SYS, MSG_NET, MSG_ACC, MSG_INV}
-
 // MessageSubscribers are things that subscribe to the bus and handle
 // messages, ie: MQTT, AMQP, http callbacks etc.
 type MessageSubscriber interface {
@@ -47,14 +32,14 @@ type MessageSubscriber interface {
 
 // Created by the bus, wraps message sent with Send
 type Message struct {
-	MessageType MessageType
-	Message     []byte
-	ID          string // optional
+	EventType EventType
+	Message   []byte
+	ID        string // optional
 }
 
 type Subscription struct {
 	dest  MessageSubscriber
-	types []MessageType
+	types []EventType
 }
 
 func NewMessageBus() MessageBus {
@@ -72,10 +57,10 @@ type MessageBus struct {
 	inbound chan Message
 }
 
-// Send a message to the bus with a specific MessageType
+// Send a message to the bus with a specific EventType
 // msg can be anything JSON serialisable, this will be
 // turned into a Message and delivered to any interested MessageSubscribers
-func (b MessageBus) Send(t MessageType, msg interface{}, msgID ...string) error {
+func (b MessageBus) Send(t EventType, msg interface{}, msgID ...string) error {
 	j, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -89,7 +74,7 @@ func (b MessageBus) Send(t MessageType, msg interface{}, msgID ...string) error 
 	return nil
 }
 
-func (b MessageBus) Register(m MessageSubscriber, types ...MessageType) {
+func (b MessageBus) Register(m MessageSubscriber, types ...EventType) {
 	sub := Subscription{m, types}
 	b.receivers[&sub] = true
 }
@@ -114,11 +99,11 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 						// check if this receiver wants this message type
 						cont := false
 						for _, t := range (*sub).types {
-							if t == MSG_ALL {
+							if t.Type() == "ALL" {
 								cont = true
 								break
 							}
-							if t == message.MessageType {
+							if t.Type() == message.EventType.Type() {
 								cont = true
 							}
 						}
@@ -131,7 +116,7 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 						case (*sub).dest.GetChan() <- message:
 						default:
 							// if we are unable to send, cansel the sub
-							b.Send(MSG_SYS, struct{ msg string }{msg: "reciever failed to handle msg, closing"})
+							b.Send(SYS_ERR, struct{ msg string }{msg: "reciever failed to handle msg, closing"})
 							b.Unregister(sub)
 						}
 					}
