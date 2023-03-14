@@ -25,8 +25,8 @@ type WebAPI struct {
 // interface guard ensures WebAPI implements conductor.Service
 var _ conductor.Service = WebAPI{}
 
-func NewWebAPI(config giga.Config, l1 giga.L1, store giga.Store) (WebAPI, error) {
-	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: giga.NewAPI(store, l1)}, nil
+func NewWebAPI(config giga.Config, l1 giga.L1, store giga.Store, bus giga.MessageBus) (WebAPI, error) {
+	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: giga.NewAPI(store, l1, bus)}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {

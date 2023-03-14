@@ -75,7 +75,7 @@ func main() {
 	z.Subscribe(cf.ReceiveFromNode)
 	c.Service("ZMQ Listener", z)
 	// Start the Payment API
-	p, err := webapi.NewWebAPI(conf, l1, store)
+	p, err := webapi.NewWebAPI(conf, l1, store, bus)
 	if err != nil {
 		panic(err)
 	}
