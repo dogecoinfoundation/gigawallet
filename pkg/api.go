@@ -12,10 +12,11 @@ const (
 type API struct {
 	Store Store
 	L1    L1
+	bus   MessageBus
 }
 
-func NewAPI(store Store, l1 L1) API {
-	return API{store, l1}
+func NewAPI(store Store, l1 L1, bus MessageBus) API {
+	return API{store, l1, bus}
 }
 
 type InvoiceCreateRequest struct {
@@ -38,6 +39,7 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 	if err != nil {
 		return Invoice{}, err
 	}
+	a.bus.Send(INV_CREATED, i)
 	return i, nil
 }
 
@@ -94,7 +96,9 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 	if err != nil {
 		return AccountPublic{}, err
 	}
-	return account.GetPublicInfo(), nil
+	pub := account.GetPublicInfo()
+	a.bus.Send(ACC_CREATED, pub)
+	return pub, nil
 }
 
 func (a API) GetAccount(foreignID string) (AccountPublic, error) {
@@ -103,6 +107,34 @@ func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 		return AccountPublic{}, err
 	}
 	return acc.GetPublicInfo(), nil
+}
+
+// Update any of the 'settings' fields on an Account
+func (a API) UpdateAccountSettings(foreignID string, update map[string]interface{}) (AccountPublic, error) {
+	// TODO: potato programming, needs cleanup
+	acc, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return AccountPublic{}, err
+	}
+	for k, v := range update {
+		switch k {
+		case "PayoutAddress":
+			acc.PayoutAddress = v.(string)
+		case "PayoutThreshold":
+			acc.PayoutThreshold = v.(string)
+		case "PayoutFrequency":
+			acc.PayoutFrequency = v.(string)
+		default:
+			a.bus.Send(SYS_ERR, fmt.Sprintf("Invalid account setting: %s", k))
+		}
+	}
+	err = a.Store.StoreAccount(acc)
+	if err != nil {
+		return AccountPublic{}, err
+	}
+	pub := acc.GetPublicInfo()
+	a.bus.Send(ACC_UPDATED, pub)
+	return pub, nil
 }
 
 func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string, error) {
@@ -151,6 +183,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	// TODO: mark the pay-to address as being used by this Txn (in the 'to' account)
 	// TODO: submit the transaction to the mempool
 	// TODO: mark the transaction as 'in progress' in the DB (must affect both accounts)
+	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": invoiceAmount})
 	return txn.TxnHex, nil
 }
 
