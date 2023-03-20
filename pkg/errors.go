@@ -26,3 +26,17 @@ func (e *ErrorInfo) Error() string {
 func NewErr(code ErrorCode, format string, args ...any) error {
 	return &ErrorInfo{Code: code, Message: fmt.Sprintf(format, args...)}
 }
+
+func IsNotFoundError(err error) bool {
+	if e, ok := err.(*ErrorInfo); ok {
+		return e.Code == NotFound
+	}
+	return false
+}
+
+func IsAlreadyExistsError(err error) bool {
+	if e, ok := err.(*ErrorInfo); ok {
+		return e.Code == AlreadyExists
+	}
+	return false
+}

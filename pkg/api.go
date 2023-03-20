@@ -55,7 +55,7 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 
 	err = txn.Commit()
 	if err != nil {
-		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to commit", foreignID))
+		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to commit: %s", foreignID))
 		return Invoice{}, err
 	}
 
@@ -96,43 +96,55 @@ func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoices
 }
 
 func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error) {
-	txn, err := a.Store.Begin()
-	if err != nil {
-		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateAccount: Failed to begin txn: %s", err))
-		return AccountPublic{}, err
-	}
-	defer txn.Rollback()
-
-	acc, err := txn.GetAccount(foreignID)
-	if err == nil {
-		if upsert {
-			return acc.GetPublicInfo(), nil
+	// Transaction retry loop.
+	for {
+		txn, err := a.Store.Begin()
+		if err != nil {
+			a.bus.Send(SYS_ERR, fmt.Sprintf("CreateAccount: Failed to begin txn: %s", err))
+			return AccountPublic{}, err
 		}
-		return AccountPublic{}, err
-	}
-	addr, priv, err := a.L1.MakeAddress()
-	if err != nil {
-		return AccountPublic{}, NewErr(UnknownError, "MakeAddress failed: %v", err)
-	}
-	account := Account{
-		Address:   addr,
-		ForeignID: foreignID,
-		Privkey:   priv,
-	}
-	err = txn.StoreAccount(account)
-	if err != nil {
-		return AccountPublic{}, err
-	}
+		defer txn.Rollback()
 
-	err = txn.Commit()
-	if err != nil {
-		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateAccount: Failed to commit", foreignID))
-		return AccountPublic{}, err
-	}
+		acc, err := txn.GetAccount(foreignID)
+		if err == nil {
+			// Account already exists.
+			if upsert {
+				return acc.GetPublicInfo(), nil
+			}
+			return AccountPublic{}, NewErr(AlreadyExists, "account already exists: %v", err)
+		}
 
-	pub := account.GetPublicInfo()
-	a.bus.Send(ACC_CREATED, pub)
-	return pub, nil
+		// Account does not exist yet.
+		addr, priv, err := a.L1.MakeAddress()
+		if err != nil {
+			return AccountPublic{}, NewErr(NotAvailable, "cannot create address: %v", err)
+		}
+		account := Account{
+			Address:   addr,
+			ForeignID: foreignID,
+			Privkey:   priv,
+		}
+		// FIXME: This is mis-named, because it fails with AlreadyExists if the account exists.
+		err = txn.StoreAccount(account)
+		if err != nil {
+			if IsAlreadyExistsError(err) {
+				// retry: another concurrent request created the account.
+				txn.Rollback()
+				continue
+			}
+			return AccountPublic{}, NewErr(NotAvailable, "cannot create account: %v", err)
+		}
+
+		err = txn.Commit()
+		if err != nil {
+			a.bus.Send(SYS_ERR, fmt.Sprintf("CreateAccount: Failed to commit: %s", foreignID))
+			return AccountPublic{}, NewErr(NotAvailable, "cannot create account: %v", err)
+		}
+
+		pub := account.GetPublicInfo()
+		a.bus.Send(ACC_CREATED, pub)
+		return pub, nil
+	}
 }
 
 func (a API) GetAccount(foreignID string) (AccountPublic, error) {
@@ -175,7 +187,7 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 
 	err = txn.Commit()
 	if err != nil {
-		a.bus.Send(SYS_ERR, fmt.Sprintf("UpdateAccountSettings: Failed to commit", foreignID))
+		a.bus.Send(SYS_ERR, fmt.Sprintf("UpdateAccountSettings: Failed to commit: %s", foreignID))
 		return AccountPublic{}, err
 	}
 

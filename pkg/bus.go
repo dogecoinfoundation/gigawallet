@@ -125,14 +125,11 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 		}()
 
 		started <- true
-		select {
-		//case ctx := <-stop:
-		case <-stop:
-			// do some shutdown stuff then signal we're done
-			close(stopBus)
-			stopped <- true
-		}
-
+		// wait for shutdown.
+		<-stop
+		// do some shutdown stuff then signal we're done
+		close(stopBus)
+		stopped <- true
 	}()
 	return nil
 }

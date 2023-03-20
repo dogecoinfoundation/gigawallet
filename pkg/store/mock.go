@@ -54,7 +54,19 @@ func (m Mock) ListInvoices(account giga.Address, cursor int, limit int) (items [
 	return
 }
 
-func (m Mock) StoreAccount(account giga.Account) error {
+func (m Mock) CreateAccount(account giga.Account) error {
+	if _, exists := m.accounts[account.ForeignID]; exists {
+		return giga.NewErr(giga.AlreadyExists, "account already exists: %s", account.ForeignID)
+	}
+	m.accounts[account.ForeignID] = account
+	m.accountsByAddress[account.Address] = account
+	return nil
+}
+
+func (m Mock) UpdateAccount(account giga.Account) error {
+	if _, exists := m.accounts[account.ForeignID]; !exists {
+		return giga.NewErr(giga.AlreadyExists, "account does not exist: %s", account.ForeignID)
+	}
 	m.accounts[account.ForeignID] = account
 	m.accountsByAddress[account.Address] = account
 	return nil

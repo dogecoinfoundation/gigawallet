@@ -33,9 +33,11 @@ type StoreTransaction interface {
 	Rollback() error
 
 	// StoreInvoice stores an invoice.
+	// It returns an unspecified error if the invoice ID already exists (FIXME)
 	StoreInvoice(invoice Invoice) error
 
 	// GetInvoice returns the invoice with the given ID.
+	// It returns giga.NotFound if the invoice does not exist (key: ID/address)
 	GetInvoice(id Address) (Invoice, error)
 
 	// ListInvoices returns a filtered list of invoices for an account.
@@ -47,10 +49,12 @@ type StoreTransaction interface {
 	// GetPendingInvoices sends all invoices that are pending to the given channel.
 	GetPendingInvoices() (<-chan Invoice, error)
 
-	// Stot.txcount stores an account.
+	// StoreAccount stores an account.
+	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)
 	StoreAccount(account Account) error
 
 	// GetAccount returns the account with the given ForeignID.
+	// It returns giga.NotFound if the account does not exist (key: ForeignID)
 	GetAccount(foreignID string) (Account, error)
 
 	// List all unreserved UTXOs in the account's wallet.
@@ -62,8 +66,13 @@ type StoreTransaction interface {
 	MarkInvoiceAsPaid(address Address) error
 }
 
-// Upsert: Account, unconditional.
-type UpsertAccount struct {
+// Create Account: foreignID must not exist.
+type CreateAccount struct {
+	Account Account
+}
+
+// Update Account: foreignID must already exist.
+type UpdateAccount struct {
 	Account Account
 }
 

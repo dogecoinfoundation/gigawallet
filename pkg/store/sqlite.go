@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/shopspring/decimal"
@@ -18,7 +19,10 @@ CREATE TABLE IF NOT EXISTS account (
 	address TEXT NOT NULL UNIQUE,
 	privkey TEXT NOT NULL,
 	next_int_key INTEGER NOT NULL,
-	next_ext_key INTEGER NOT NULL
+	next_ext_key INTEGER NOT NULL,
+	payout_address TEXT NOT NULL,
+	payout_threshold TEXT NOT NULL,
+	payout_frequency TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS invoice (
@@ -73,7 +77,7 @@ func (s SQLiteStore) Close() {
 func (s SQLiteStore) Begin() (giga.StoreTransaction, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return SQLiteStoreTransaction{}, err
+		return &SQLiteStoreTransaction{}, err
 	}
 	return NewStoreTransaction(tx), nil
 }
@@ -160,8 +164,11 @@ func (s SQLiteStore) GetPendingInvoices() (<-chan giga.Invoice, error) {
 func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 	row := s.db.QueryRow("SELECT foreign_id, address, privkey, next_int_key, next_ext_key FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
-	err := row.Scan(&acc.ForeignID, &acc.Address, &acc.Privkey, &acc.NextInternalKey, &acc.NextExternalKey)
+	err := row.Scan(
+		&acc.ForeignID, &acc.Address, &acc.Privkey,
+		&acc.NextInternalKey, &acc.NextExternalKey, &acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
+		// MUST detect this error to fulfil the API contract.
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
 	}
 	if err != nil {
@@ -198,18 +205,18 @@ func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.
 }
 
 /****** SQLiteStoreTransaction implements giga.StoreTransaction ******/
-var _ giga.StoreTransaction = SQLiteStoreTransaction{}
+var _ giga.StoreTransaction = &SQLiteStoreTransaction{}
 
 type SQLiteStoreTransaction struct {
 	tx       *sql.Tx
 	finality bool
 }
 
-func NewStoreTransaction(txn *sql.Tx) SQLiteStoreTransaction {
-	return SQLiteStoreTransaction{txn, false}
+func NewStoreTransaction(txn *sql.Tx) *SQLiteStoreTransaction {
+	return &SQLiteStoreTransaction{txn, false}
 }
 
-func (t SQLiteStoreTransaction) Commit() error {
+func (t *SQLiteStoreTransaction) Commit() error {
 	err := t.tx.Commit()
 	if err != nil {
 		return err
@@ -331,9 +338,39 @@ func (t SQLiteStoreTransaction) StoreAccount(acc giga.Account) error {
 		return dbErr(err, "createAccount: preparing insert")
 	}
 	defer stmt.Close()
-	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
+	_, err = stmt.Exec(
+		acc.ForeignID, acc.Address, acc.Privkey, // only in createAccount.
+		acc.NextInternalKey, acc.NextExternalKey, acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency) // common (see updateAccount)
 	if err != nil {
+		// MUST detect this error to fulfil the API contract.
+		if strings.HasPrefix(err.Error(), "UNIQUE constraint failed") {
+			return giga.NewErr(giga.AlreadyExists, "account already exists: %s", acc.ForeignID)
+		}
 		return dbErr(err, "createAccount: executing insert")
+	}
+	return nil
+}
+
+// FIXME: not used, but StoreAccount only handles insert.
+func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
+	stmt, err := t.tx.Prepare("update account set next_int_key = MAX(next_int_key, ?), next_ext_key = MAX(next_ext_key, ?), payout_address = ?, payout_threshold = ?, payout_frequency = ? where foreign_id = ?")
+	if err != nil {
+		return dbErr(err, "updateAccount: preparing update")
+	}
+	defer stmt.Close()
+	res, err := stmt.Exec(
+		acc.NextInternalKey, acc.NextExternalKey, acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency, // common (see createAccount)
+		acc.ForeignID) // only in updateAccount.
+	if err != nil {
+		return dbErr(err, "updateAccount: executing update")
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		return dbErr(err, "updateAccount: res.RowsAffected")
+	}
+	if num_rows < 1 {
+		// MUST detect this error to fulfil the API contract.
+		return giga.NewErr(giga.NotFound, "account not found: %s", acc.ForeignID)
 	}
 	return nil
 }
