@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	expectedBlockInterval = 20 * time.Second
+	expectedBlockInterval = 30 * time.Second
 )
 
 type TipSubscription struct {
@@ -62,9 +62,11 @@ func (c *TipChaser) Run(started, stopped chan bool, stop chan context.Context) e
 				}
 			case <-time.After(expectedBlockInterval):
 				log.Println("TipChaser: falling back to getbestblockhash")
+				// c.bus.Send(giga.SYS_ERR, "TipChaser: falling back to getbestblockhash")
 				txid, err := c.l1.GetBestBlockHash()
 				if err != nil {
-					c.bus.Send(giga.SYS_ERR, "TipChaser: core RPC request failed: getbestblockhash")
+					log.Println("TipChaser: core RPC request failed: getbestblockhash")
+					// c.bus.Send(giga.SYS_ERR, "TipChaser: core RPC request failed: getbestblockhash")
 				} else {
 					if txid != lastid {
 						lastid = txid

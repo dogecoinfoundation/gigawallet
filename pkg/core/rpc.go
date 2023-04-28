@@ -40,7 +40,7 @@ type rpcResponse struct {
 	Error  any              `json:"error"`
 }
 
-func (l L1CoreRPC) request(method string, params []any, result any, decode bool) error {
+func (l L1CoreRPC) request(method string, params []any, result any) error {
 	body := rpcRequest{
 		Method: method,
 		Params: params,
@@ -86,17 +86,9 @@ func (l L1CoreRPC) request(method string, params []any, result any, decode bool)
 	if rpcres.Result == nil {
 		return fmt.Errorf("json-rpc missing result")
 	}
-	if decode {
-		err = json.Unmarshal(*rpcres.Result, result)
-		if err != nil {
-			return fmt.Errorf("json-rpc unmarshal result: %v | %v", err, string(*rpcres.Result))
-		}
-	} else {
-		if ptr, ok := result.(*string); ok {
-			*ptr = string(*rpcres.Result)
-		} else {
-			return fmt.Errorf("json-rpc raw result: must pass address of a string var")
-		}
+	err = json.Unmarshal(*rpcres.Result, result)
+	if err != nil {
+		return fmt.Errorf("json-rpc unmarshal result: %v | %v", err, string(*rpcres.Result))
 	}
 	return nil
 }
@@ -114,24 +106,24 @@ func (l L1CoreRPC) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, pa
 }
 
 func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.RawTxn, err error) {
-	err = l.request("decoderawtransaction", []any{txn_hex}, &txn, true)
+	err = l.request("decoderawtransaction", []any{txn_hex}, &txn)
 	return
 }
 
 func (l L1CoreRPC) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
 	decode := true // to get back JSON rather than HEX
-	err = l.request("getblock", []any{blockHash, decode}, &txn, true)
+	err = l.request("getblock", []any{blockHash, decode}, &txn)
 	return
 }
 
 func (l L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
-	err = l.request("getbestblockhash", []any{}, &blockHash, false)
+	err = l.request("getbestblockhash", []any{}, &blockHash)
 	return
 }
 
 func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	decode := true // to get back JSON rather than HEX
-	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn, true)
+	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn)
 	return
 }
 

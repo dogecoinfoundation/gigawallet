@@ -48,7 +48,7 @@ func (z *CoreReceiver) Run(started, stopped chan bool, stop chan context.Context
 	if err != nil {
 		return err
 	}
-	err = subscribeAll(sock, "hashtx", "rawtx", "hashblock")
+	err = subscribeAll(sock, "hashblock") // "hashtx", "rawtx"
 	if err != nil {
 		return err
 	}
