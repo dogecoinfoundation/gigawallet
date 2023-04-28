@@ -43,49 +43,42 @@ CREATE TABLE IF NOT EXISTS utxo (
 );
 `
 
-// interface guard ensures SQLite implements giga.PaymentsStore
-var _ giga.Store = SQLite{}
+/****************** SQLiteStore implements giga.Store ********************/
+var _ giga.Store = SQLiteStore{}
 
-type SQLite struct {
+type SQLiteStore struct {
 	db *sql.DB
 }
 
-func (s SQLite) GetPendingInvoices() (<-chan giga.Invoice, error) {
-	//TODO implement me
-	log.Print("GetPendingInvoices: not implemented")
-	return make(chan giga.Invoice), nil
-}
-
-// NewSQLite returns a giga.PaymentsStore implementor that uses sqlite
-func NewSQLite(fileName string) (SQLite, error) {
+// NewSQLiteStore returns a giga.PaymentsStore implementor that uses sqlite
+func NewSQLiteStore(fileName string) (SQLiteStore, error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
-		return SQLite{}, dbErr(err, "opening database")
+		return SQLiteStore{}, dbErr(err, "opening database")
 	}
 	// init tables / indexes
 	_, err = db.Exec(SETUP_SQL)
 	if err != nil {
-		return SQLite{}, dbErr(err, "creating database schema")
+		return SQLiteStore{}, dbErr(err, "creating database schema")
 	}
 
-	return SQLite{db}, nil
+	return SQLiteStore{db}, nil
 }
 
 // Defer this until shutdown
-func (s SQLite) Close() {
+func (s SQLiteStore) Close() {
 	s.db.Close()
 }
 
-func (s SQLite) StoreInvoice(inv giga.Invoice) error {
-	// replaced with Commit API.
-	return s.Commit([]any{
-		giga.UpsertInvoice{
-			Invoice: inv,
-		},
-	})
+func (s SQLiteStore) Begin() (StoreTransaction, error) {
+	//tx, err := db.Begin()
+	if err != nil {
+		return StoreTransaction{}, err
+	}
+	return NewStoreTransaction(s, s.db), nil
 }
 
-func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
+func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 	row := s.db.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
 	var id giga.Address
 	var account giga.Address
@@ -119,7 +112,7 @@ func (s SQLite) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 	}, nil
 }
 
-func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
 	// MUST order by key_index (or sqlite OID) to support the cursor API:
 	// we need a way to resume the query next time from whatever next_cursor we return,
 	// and the aggregate result SHOULD be stable even as the DB is modified.
@@ -158,16 +151,13 @@ func (s SQLite) ListInvoices(account giga.Address, cursor int, limit int) (items
 	return
 }
 
-func (s SQLite) StoreAccount(acc giga.Account) error {
-	// replaced with Commit API.
-	return s.Commit([]any{
-		giga.UpsertAccount{
-			Account: acc,
-		},
-	})
+func (s SQLiteStore) GetPendingInvoices() (<-chan giga.Invoice, error) {
+	//TODO implement me
+	log.Print("GetPendingInvoices: not implemented")
+	return make(chan giga.Invoice), nil
 }
 
-func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
+func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 	row := s.db.QueryRow("SELECT foreign_id, address, privkey, next_int_key, next_ext_key FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
 	err := row.Scan(&acc.ForeignID, &acc.Address, &acc.Privkey, &acc.NextInternalKey, &acc.NextExternalKey)
@@ -180,7 +170,7 @@ func (s SQLite) GetAccount(foreignID string) (giga.Account, error) {
 	return acc, nil
 }
 
-func (s SQLite) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
 	rows_found := 0
 	rows, err := s.db.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
 	if err != nil {
@@ -207,7 +197,106 @@ func (s SQLite) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO,
 	return
 }
 
-func (s SQLite) Commit(updates []any) error {
+/* Sqlite
+
+
+
+
+
+func (s SQLiteStore) createAccount(tx *sql.Tx, acc giga.Account) error {
+	stmt, err := tx.Prepare("insert into account(foreign_id, address, privkey, next_int_key, next_ext_key) values(?, ?, ?, ?, ?)")
+	if err != nil {
+		return dbErr(err, "createAccount: preparing insert")
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
+	if err != nil {
+		return dbErr(err, "createAccount: executing insert")
+	}
+	return nil
+}
+
+func (s SQLiteStore) createInvoice(tx *sql.Tx, inv giga.Invoice) error {
+	items_b, err := json.Marshal(inv.Items)
+	if err != nil {
+		return dbErr(err, "createInvoice: json.Marshal items")
+	}
+
+	stmt, err := tx.Prepare("insert into invoice(invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return dbErr(err, "createInvoice: tx.Prepare insert")
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
+	if err != nil {
+		return dbErr(err, "createInvoice: stmt.Exec insert")
+	}
+
+	return s.updateAccountNextExternal(tx, inv.Account, inv.KeyIndex)
+}
+
+func (s SQLiteStore) updateAccountNextExternal(tx *sql.Tx, account giga.Address, keyIndex uint32) error {
+	stmt, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
+	if err != nil {
+		return dbErr(err, "StoreInvoice: tx.Prepare update")
+	}
+	defer stmt.Close()
+
+	// update Account to mark KeyIndex as used.
+	res, err := stmt.Exec(keyIndex+1, account)
+	if err != nil {
+		return dbErr(err, "StoreInvoice: update.Exec")
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		return dbErr(err, "StoreInvoice: res.RowsAffected")
+	}
+	if num_rows < 1 {
+		return giga.NewErr(giga.NotFound, "unknown account: %s", account)
+	}
+	return nil
+}
+
+func (s SQLiteStore) markInvoiceAsPaid(tx *sql.Tx, address giga.Address) error {
+	stmt, err := tx.Prepare("update invoices set confirmations = ? where invoice_address = ?")
+	if err != nil {
+		return dbErr(err, "markInvoiceAsPaid: preparing update")
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(1, address)
+	if err != nil {
+		return dbErr(err, "markInvoiceAsPaid: executing update")
+	}
+	return nil
+}
+
+func dbErr(err error, where string) error {
+	return giga.NewErr(giga.NotAvailable, "SQLiteStore error: %s: %v", where, err)
+}
+
+
+
+func (s SQLiteStore) StoreInvoice(inv giga.Invoice) error {
+	// replaced with Commit API.
+	return s.Commit([]any{
+		giga.UpsertInvoice{
+			Invoice: inv,
+		},
+	})
+}
+
+func (s SQLiteStore) StoreAccount(acc giga.Account) error {
+	// replaced with Commit API.
+	return s.Commit([]any{
+		giga.UpsertAccount{
+			Account: acc,
+		},
+	})
+}
+
+/*
+func Commit(tx sql.Tx, updates []any) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return dbErr(err, "Beginning transaction")
@@ -238,75 +327,4 @@ func (s SQLite) Commit(updates []any) error {
 
 	return nil
 }
-
-func (s SQLite) createAccount(tx *sql.Tx, acc giga.Account) error {
-	stmt, err := tx.Prepare("insert into account(foreign_id, address, privkey, next_int_key, next_ext_key) values(?, ?, ?, ?, ?)")
-	if err != nil {
-		return dbErr(err, "createAccount: preparing insert")
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
-	if err != nil {
-		return dbErr(err, "createAccount: executing insert")
-	}
-	return nil
-}
-
-func (s SQLite) createInvoice(tx *sql.Tx, inv giga.Invoice) error {
-	items_b, err := json.Marshal(inv.Items)
-	if err != nil {
-		return dbErr(err, "createInvoice: json.Marshal items")
-	}
-
-	stmt, err := tx.Prepare("insert into invoice(invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations) values(?, ?, ?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return dbErr(err, "createInvoice: tx.Prepare insert")
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), inv.KeyIndex, inv.BlockID, inv.Confirmations)
-	if err != nil {
-		return dbErr(err, "createInvoice: stmt.Exec insert")
-	}
-
-	return s.updateAccountNextExternal(tx, inv.Account, inv.KeyIndex)
-}
-
-func (s SQLite) updateAccountNextExternal(tx *sql.Tx, account giga.Address, keyIndex uint32) error {
-	stmt, err := tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
-	if err != nil {
-		return dbErr(err, "StoreInvoice: tx.Prepare update")
-	}
-	defer stmt.Close()
-
-	// update Account to mark KeyIndex as used.
-	res, err := stmt.Exec(keyIndex+1, account)
-	if err != nil {
-		return dbErr(err, "StoreInvoice: update.Exec")
-	}
-	num_rows, err := res.RowsAffected()
-	if err != nil {
-		return dbErr(err, "StoreInvoice: res.RowsAffected")
-	}
-	if num_rows < 1 {
-		return giga.NewErr(giga.NotFound, "unknown account: %s", account)
-	}
-	return nil
-}
-
-func (s SQLite) markInvoiceAsPaid(tx *sql.Tx, address giga.Address) error {
-	stmt, err := tx.Prepare("update invoices set confirmations = ? where invoice_address = ?")
-	if err != nil {
-		return dbErr(err, "markInvoiceAsPaid: preparing update")
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(1, address)
-	if err != nil {
-		return dbErr(err, "markInvoiceAsPaid: executing update")
-	}
-	return nil
-}
-
-func dbErr(err error, where string) error {
-	return giga.NewErr(giga.NotAvailable, "SQLite error: %s: %v", where, err)
-}
+*/
