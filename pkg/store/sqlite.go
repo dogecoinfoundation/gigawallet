@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS utxo (
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chain (
+	best_hash TEXT NOT NULL,
+	best_height INTEGER NOT NULL
+);
 `
 
 /****************** SQLiteStore implements giga.Store ********************/

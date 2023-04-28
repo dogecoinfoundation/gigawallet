@@ -40,7 +40,7 @@ type rpcResponse struct {
 	Error  any              `json:"error"`
 }
 
-func (l L1CoreRPC) request(method string, params []any, result any) error {
+func (l L1CoreRPC) request(method string, params []any, result any, decode bool) error {
 	body := rpcRequest{
 		Method: method,
 		Params: params,
@@ -86,9 +86,17 @@ func (l L1CoreRPC) request(method string, params []any, result any) error {
 	if rpcres.Result == nil {
 		return fmt.Errorf("json-rpc missing result")
 	}
-	err = json.Unmarshal(*rpcres.Result, result)
-	if err != nil {
-		return fmt.Errorf("json-rpc unmarshal result: %v | %v", err, string(*rpcres.Result))
+	if decode {
+		err = json.Unmarshal(*rpcres.Result, result)
+		if err != nil {
+			return fmt.Errorf("json-rpc unmarshal result: %v | %v", err, string(*rpcres.Result))
+		}
+	} else {
+		if ptr, ok := result.(*string); ok {
+			*ptr = string(*rpcres.Result)
+		} else {
+			return fmt.Errorf("json-rpc raw result: must pass address of a string var")
+		}
 	}
 	return nil
 }
@@ -106,19 +114,24 @@ func (l L1CoreRPC) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, pa
 }
 
 func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.RawTxn, err error) {
-	err = l.request("decoderawtransaction", []any{txn_hex}, &txn)
+	err = l.request("decoderawtransaction", []any{txn_hex}, &txn, true)
 	return
 }
 
 func (l L1CoreRPC) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
 	decode := true // to get back JSON rather than HEX
-	err = l.request("getblock", []any{blockHash, decode}, &txn)
+	err = l.request("getblock", []any{blockHash, decode}, &txn, true)
+	return
+}
+
+func (l L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
+	err = l.request("getbestblockhash", []any{}, &blockHash, false)
 	return
 }
 
 func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	decode := true // to get back JSON rather than HEX
-	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn)
+	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn, true)
 	return
 }
 

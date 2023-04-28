@@ -36,7 +36,7 @@ func NewCoreReceiver(bus giga.MessageBus, config giga.Config) (*CoreReceiver, er
 	}, nil
 }
 
-func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context) error {
+func (z *CoreReceiver) Run(started, stopped chan bool, stop chan context.Context) error {
 	sock, err := zmq4.NewSocket(zmq4.SUB)
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func (z CoreReceiver) Run(started, stopped chan bool, stop chan context.Context)
 	return nil
 }
 
-func (z CoreReceiver) notify(tag giga.NodeEventType, id string, data string) {
+func (z *CoreReceiver) notify(tag giga.NodeEventType, id string, data string) {
 	e := giga.NodeEvent{
 		Type: tag, ID: id, Data: data,
 	}

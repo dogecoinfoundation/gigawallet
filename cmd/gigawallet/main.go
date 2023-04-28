@@ -56,12 +56,20 @@ func main() {
 	}
 	defer store.Close()
 
-	// Start the TxnConfirmer service
-	cf, err := broker.NewTxnConfirmer(conf, l1)
+	// Start the TipChaser service
+	tc, err := broker.NewTipChaser(conf, l1)
 	if err != nil {
 		panic(err)
 	}
-	c.Service("Confirmer", cf)
+	c.Service("TipChaser", tc)
+
+	// Start the ChainFollower service
+	cf, err := broker.NewChainFollower(conf, l1)
+	if err != nil {
+		panic(err)
+	}
+	tc.Subscribe(cf.ReceiveBestBlock, false) // non-blocking.
+	c.Service("ChainFollower", cf)
 
 	// Start the PaymentBroker service
 	pb := broker.NewPaymentBroker(conf, store)
@@ -72,7 +80,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	z.Subscribe(cf.ReceiveFromNode)
+	z.Subscribe(tc.ReceiveFromNode)
 	c.Service("ZMQ Listener", z)
 	// Start the Payment API
 	p, err := webapi.NewWebAPI(conf, l1, store, bus)
