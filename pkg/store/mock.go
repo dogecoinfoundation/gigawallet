@@ -92,6 +92,10 @@ func (m Mock) GetAllUnreservedUTXOs(account giga.Address) ([]giga.UTXO, error) {
 	return nil, nil
 }
 
+func (m Mock) GetChainState() (giga.ChainState, error) {
+	return giga.ChainState{}, nil
+}
+
 func (m Mock) Commit(updates []any) error {
 	return nil
 }

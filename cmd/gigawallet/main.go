@@ -64,7 +64,7 @@ func main() {
 	c.Service("TipChaser", tc)
 
 	// Start the ChainFollower service
-	cf, err := broker.NewChainFollower(conf, l1)
+	cf, err := broker.NewChainFollower(conf, l1, store)
 	if err != nil {
 		panic(err)
 	}

@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS utxo (
 	script_address TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS chain (
+CREATE TABLE IF NOT EXISTS chainstate (
 	best_hash TEXT NOT NULL,
 	best_height INTEGER NOT NULL
 );
@@ -180,6 +180,20 @@ func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
 	}
 	return acc, nil
+}
+
+func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
+	row := s.db.QueryRow("SELECT best_hash, best_height FROM chainstate")
+	var state giga.ChainState
+	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight)
+	if err == sql.ErrNoRows {
+		// MUST detect this error to fulfil the API contract.
+		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
+	}
+	if err != nil {
+		return giga.ChainState{}, dbErr(err, "GetChainState: row.Scan")
+	}
+	return state, nil
 }
 
 func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {

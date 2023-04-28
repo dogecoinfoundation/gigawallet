@@ -20,6 +20,10 @@ type Store interface {
 	// GetAccount returns the account with the given ForeignID.
 	GetAccount(foreignID string) (Account, error)
 
+	// GetChainState gets the last saved Best Block information (checkpoint for restart)
+	// It returns giga.NotFound if the chainstate record does not exist.
+	GetChainState() (ChainState, error)
+
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
@@ -91,4 +95,9 @@ type UpsertInvoice struct {
 // Update, unconditional.
 type MarkInvoiceAsPaid struct {
 	InvoiceID Address
+}
+
+type ChainState struct {
+	BestBlockHash   string
+	BestBlockHeight int64
 }
