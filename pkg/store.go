@@ -68,6 +68,17 @@ type StoreTransaction interface {
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
 	MarkInvoiceAsPaid(address Address) error
+
+	// UpdateChainState updates the Best Block information (checkpoint for restart)
+	UpdateChainState(state ChainState) error
+
+	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
+	// This serves to roll back the effects of adding or spending those UTXOs.
+	RevertUTXOsAboveHeight(maxValidHeight int64) error
+
+	// RevertTxnsAboveHeight clears chain-heights above the given height recorded in Txns.
+	// This serves to roll back the effects of creating or confirming those Txns.
+	RevertTxnsAboveHeight(maxValidHeight int64) error
 }
 
 // Create Account: foreignID must not exist.

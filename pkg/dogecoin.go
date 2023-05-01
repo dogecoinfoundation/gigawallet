@@ -104,11 +104,11 @@ type RawTxnScriptPubKey struct {
 // https://developer.bitcoin.org/reference/rpc/getblock.html
 type RpcBlock struct {
 	Hash              string          `json:"hash"`              // (string) the block hash (same as provided) (hex)
-	Confirmations     int             `json:"confirmations"`     // (numeric) The number of confirmations, or -1 if the block is not on the main chain
+	Confirmations     int64           `json:"confirmations"`     // (numeric) The number of confirmations, or -1 if the block is not on the main chain
 	Size              int             `json:"size"`              // (numeric) The block size
 	StrippedSize      int             `json:"strippedsize"`      // (numeric) The block size excluding witness data
 	Weight            int             `json:"weight"`            // (numeric) The block weight as defined in BIP 141
-	Height            int             `json:"height"`            // (numeric) The block height or index
+	Height            int64           `json:"height"`            // (numeric) The block height or index
 	Version           int             `json:"version"`           // (numeric) The block version
 	VersionHex        string          `json:"versionHex"`        // (string) The block version formatted in hexadecimal
 	MerkleRoot        string          `json:"merkleroot"`        // (string) The merkle root (hex)

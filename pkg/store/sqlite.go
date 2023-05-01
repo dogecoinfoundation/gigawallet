@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS invoice (
 	items TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
 	block_id TEXT NOT NULL,
-	confirmations INTEGER NOT NULL
+	on_chain_height INTEGER,
+	verified_height INTEGER,
+	dirty BOOLEAN NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS utxo (
@@ -43,7 +45,12 @@ CREATE TABLE IF NOT EXISTS utxo (
 	status TEXT NOT NULL,
 	value TEXT NOT NULL,
 	script_type TEXT NOT NULL,
-	script_address TEXT NOT NULL
+	script_address TEXT NOT NULL,
+	adding_height INTEGER,
+	available_height INTEGER,
+	spending_height INTEGER,
+	spent_height INTEGER,
+	dirty BOOLEAN NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS chainstate (
@@ -465,6 +472,102 @@ func (t SQLiteStoreTransaction) MarkInvoiceAsPaid(address giga.Address) error {
 	_, err = stmt.Exec(1, address)
 	if err != nil {
 		return dbErr(err, "markInvoiceAsPaid: executing update")
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
+	stmt, err := t.tx.Prepare("UPDATE chainstate SET best_hash = ?, best_height = ?")
+	if err != nil {
+		return dbErr(err, "UpdateChainState: preparing update")
+	}
+	defer stmt.Close()
+	res, err := stmt.Exec(state.BestBlockHash, state.BestBlockHeight)
+	if err != nil {
+		return dbErr(err, "UpdateChainState: executing update")
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		return dbErr(err, "UpdateChainState: res.RowsAffected")
+	}
+	if num_rows < 1 {
+		// this is the first call to UpdateChainState: insert the row.
+		stmt, err := t.tx.Prepare("INSERT INTO chainstate (best_hash, best_height) VALUES (?, ?)")
+		if err != nil {
+			return dbErr(err, "UpdateChainState: preparing insert")
+		}
+		defer stmt.Close()
+		_, err = stmt.Exec(state.BestBlockHash, state.BestBlockHeight)
+		if err != nil {
+			return dbErr(err, "UpdateChainState: executing insert")
+		}
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) error {
+	// The presence of a height in adding_height, available_height, spending_height or spent_height
+	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
+	// reserved for spending, or has been spent (confirmed)
+	stmt1, err := t.tx.Prepare("UPDATE utxo SET adding_height = NULL, available_height = NULL, spending_height = NULL, spent_height = NULL, dirty = true WHERE adding_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 1")
+	}
+	defer stmt1.Close()
+	stmt2, err := t.tx.Prepare("UPDATE utxo SET available_height = NULL, spending_height = NULL, spent_height = NULL, dirty = true WHERE available_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 2")
+	}
+	defer stmt2.Close()
+	stmt3, err := t.tx.Prepare("UPDATE utxo SET spending_height = NULL, spent_height = NULL, dirty = true WHERE spending_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 3")
+	}
+	defer stmt3.Close()
+	stmt4, err := t.tx.Prepare("UPDATE utxo SET spent_height = NULL, dirty = true WHERE spent_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 4")
+	}
+	defer stmt4.Close()
+	_, err = stmt1.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 1")
+	}
+	_, err = stmt2.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 2")
+	}
+	_, err = stmt3.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 3")
+	}
+	_, err = stmt4.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 4")
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) error {
+	// The presence of a height in on_chain_height or verified_height indicates
+	// that the invoice is in a block (on-chain) or has been verified (N blocks later)
+	stmt1, err := t.tx.Prepare("UPDATE invoice SET on_chain_height = NULL, verified_height = NULL, dirty = true WHERE on_chain_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: preparing update 1")
+	}
+	defer stmt1.Close()
+	stmt2, err := t.tx.Prepare("UPDATE invoice SET verified_height = NULL, dirty = true WHERE verified_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: preparing update 2")
+	}
+	defer stmt2.Close()
+	_, err = stmt1.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: executing update 1")
+	}
+	_, err = stmt2.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: executing update 2")
 	}
 	return nil
 }

@@ -18,7 +18,7 @@ type TipSubscription struct {
 }
 
 type TipChaser struct {
-	bus             giga.MessageBus
+	// bus             giga.MessageBus
 	l1              giga.L1
 	ReceiveFromNode chan giga.NodeEvent
 	listeners       []TipSubscription

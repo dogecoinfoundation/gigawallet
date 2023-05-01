@@ -96,6 +96,18 @@ func (m Mock) GetChainState() (giga.ChainState, error) {
 	return giga.ChainState{}, nil
 }
 
+func (m Mock) UpdateChainState(state giga.ChainState) error {
+	return nil
+}
+
+func (m Mock) RevertUTXOsAboveHeight(maxValidHeight int64) error {
+	return nil
+}
+
+func (m Mock) RevertTxnsAboveHeight(maxValidHeight int64) error {
+	return nil
+}
+
 func (m Mock) Commit(updates []any) error {
 	return nil
 }
