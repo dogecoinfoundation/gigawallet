@@ -50,7 +50,7 @@ func main() {
 	}
 
 	// Setup a Store, SQLite for now
-	store, err := store.NewSQLite(conf.Store.DBFile)
+	store, err := store.NewSQLiteStore(conf.Store.DBFile)
 	if err != nil {
 		panic(err)
 	}

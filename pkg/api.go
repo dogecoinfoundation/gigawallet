@@ -25,20 +25,40 @@ type InvoiceCreateRequest struct {
 }
 
 func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invoice, error) {
-	acc, err := a.Store.GetAccount(foreignID)
+	txn, err := a.Store.Begin()
 	if err != nil {
+		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to begin txn: %s", err))
 		return Invoice{}, err
 	}
+	defer txn.Rollback()
+
+	acc, err := txn.GetAccount(foreignID)
+	if err != nil {
+		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to find Account: %s", foreignID))
+		return Invoice{}, err
+	}
+
+	// Create a new child address for this invoice from the account's HD key
 	keyIndex := acc.NextExternalKey
 	invoiceID, err := a.L1.MakeChildAddress(acc.Privkey, keyIndex, false)
 	if err != nil {
-		return Invoice{}, NewErr(UnknownError, "MakeChildAddress failed: %v", err)
+		eMsg := fmt.Sprintf("MakeChildAddress failed: %v", err)
+		a.bus.Send(SYS_ERR, eMsg)
+		return Invoice{}, NewErr(UnknownError, eMsg, err)
 	}
+
 	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex}
-	err = a.Store.StoreInvoice(i)
+	err = txn.StoreInvoice(i)
 	if err != nil {
 		return Invoice{}, err
 	}
+
+	err = txn.Commit()
+	if err != nil {
+		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to commit", foreignID))
+		return Invoice{}, err
+	}
+
 	a.bus.Send(INV_CREATED, i)
 	return i, nil
 }
@@ -76,7 +96,14 @@ func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoices
 }
 
 func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error) {
-	acc, err := a.Store.GetAccount(foreignID)
+	txn, err := a.Store.Begin()
+	if err != nil {
+		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateAccount: Failed to begin txn: %s", err))
+		return AccountPublic{}, err
+	}
+	defer txn.Rollback()
+
+	acc, err := txn.GetAccount(foreignID)
 	if err == nil {
 		if upsert {
 			return acc.GetPublicInfo(), nil
@@ -92,10 +119,17 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 		ForeignID: foreignID,
 		Privkey:   priv,
 	}
-	err = a.Store.StoreAccount(account)
+	err = txn.StoreAccount(account)
 	if err != nil {
 		return AccountPublic{}, err
 	}
+
+	err = txn.Commit()
+	if err != nil {
+		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateAccount: Failed to commit", foreignID))
+		return AccountPublic{}, err
+	}
+
 	pub := account.GetPublicInfo()
 	a.bus.Send(ACC_CREATED, pub)
 	return pub, nil
@@ -111,8 +145,14 @@ func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 
 // Update any of the 'settings' fields on an Account
 func (a API) UpdateAccountSettings(foreignID string, update map[string]interface{}) (AccountPublic, error) {
-	// TODO: potato programming, needs cleanup
-	acc, err := a.Store.GetAccount(foreignID)
+	txn, err := a.Store.Begin()
+	if err != nil {
+		a.bus.Send(SYS_ERR, fmt.Sprintf("UpdateAccountSettings: Failed to begin txn: %s", err))
+		return AccountPublic{}, err
+	}
+	defer txn.Rollback()
+
+	acc, err := txn.GetAccount(foreignID)
 	if err != nil {
 		return AccountPublic{}, err
 	}
@@ -128,10 +168,17 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 			a.bus.Send(SYS_ERR, fmt.Sprintf("Invalid account setting: %s", k))
 		}
 	}
-	err = a.Store.StoreAccount(acc)
+	err = txn.StoreAccount(acc)
 	if err != nil {
 		return AccountPublic{}, err
 	}
+
+	err = txn.Commit()
+	if err != nil {
+		a.bus.Send(SYS_ERR, fmt.Sprintf("UpdateAccountSettings: Failed to commit", foreignID))
+		return AccountPublic{}, err
+	}
+
 	pub := acc.GetPublicInfo()
 	a.bus.Send(ACC_UPDATED, pub)
 	return pub, nil

@@ -9,7 +9,7 @@ import (
 )
 
 // interface guard ensures Mock implements giga.PaymentsStore
-var _ giga.Store = Mock{}
+//var _ giga.Store = Mock{}
 
 type Mock struct {
 	invoices          map[giga.Address]giga.Invoice

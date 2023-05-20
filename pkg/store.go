@@ -26,7 +26,10 @@ type Store interface {
 }
 
 type StoreTransaction interface {
+	// Commit the transaction to the store
 	Commit() error
+	// Rollback the transaction from the store, should
+	// be a no-op of Commit has already succeeded
 	Rollback() error
 
 	// StoreInvoice stores an invoice.
@@ -44,7 +47,7 @@ type StoreTransaction interface {
 	// GetPendingInvoices sends all invoices that are pending to the given channel.
 	GetPendingInvoices() (<-chan Invoice, error)
 
-	// StoreAccount stores an account.
+	// Stot.txcount stores an account.
 	StoreAccount(account Account) error
 
 	// GetAccount returns the account with the given ForeignID.
@@ -53,6 +56,10 @@ type StoreTransaction interface {
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
+
+	// What it says on the tin. We should consider
+	// adding this to Store as a fast-path
+	MarkInvoiceAsPaid(address Address) error
 }
 
 // Upsert: Account, unconditional.
