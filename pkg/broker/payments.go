@@ -39,14 +39,24 @@ func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context
 					p.sendEvent(giga.BrokerEvent{Type: giga.NewInvoice, ID: e.ID})
 				case giga.InvoiceConfirmed:
 					// from Confirmer
-					err := p.store.Commit([]any{
-						giga.MarkInvoiceAsPaid{
-							InvoiceID: giga.Address(e.ID),
-						},
-					})
+					txn, err := p.store.Begin()
+					// XXX This loop needs bettre failure modes!
+					// this stuff needs to be buffered, perhaps WAL?
 					if err != nil {
+						log.Println("Payment Broker couldn't start txn, mark invoice paid", err)
+						return
+					}
+
+					err = txn.MarkInvoiceAsPaid(giga.Address(e.ID))
+					if err != nil {
+						txn.Rollback()
 						log.Println("error marking invoice with id", e.ID, "as paid:", err)
 						return
+					}
+
+					err = txn.Commit()
+					if err != nil {
+						log.Println("Payment Broker couldn't commit txn, mark invoice paid", err)
 					}
 				}
 			case e := <-storedInvoices:

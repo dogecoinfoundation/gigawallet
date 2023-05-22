@@ -15,12 +15,12 @@
   rpcuser = "gigawallet"
 
 [dogecoind.mainnet]
-  host    = "localhost"
+  host    = "192.168.1.41"
   zmqport = 28332
-  rpchost = "127.0.0.1"
+  rpchost = "192.168.1.41"
   rpcport = 22555
-  rpcpass = "gigawallet"
-  rpcuser = "gigawallet"
+  rpcpass = "suchpay"
+  rpcuser = "suchpay"
 
 [loggers.events]
   path = "./events.log"
