@@ -25,37 +25,59 @@ CREATE TABLE IF NOT EXISTS account (
 	payout_frequency TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS account_address (
+	address TEXT NOT NULL PRIMARY KEY,
+	key_index INTEGER NOT NULL,
+	account_address TEXT NOT NULL,
+);
+CREATE INDEX IF NOT EXISTS account_address_i ON account_address (account_address);
+
 CREATE TABLE IF NOT EXISTS invoice (
-	invoice_address TEXT NOT NULL,
+	invoice_address TEXT NOT NULL PRIMARY KEY,
 	account_address TEXT NOT NULL,
 	txn_id TEXT NOT NULL,
 	vendor TEXT NOT NULL,
 	items TEXT NOT NULL,
-	key_index INTEGER NOT NULL,
-	block_id TEXT NOT NULL,
+	key_index INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
+
+CREATE TABLE IF NOT EXISTS txn (
+	txn_id TEXT NOT NULL PRIMARY KEY,
+	account_address TEXT NOT NULL,
+	invoice_address TEXT,
 	on_chain_height INTEGER,
 	verified_height INTEGER,
-	dirty BOOLEAN NOT NULL
+	send_verified BOOLEAN NOT NULL,
+	send_rollback BOOLEAN NOT NULL
 );
+CREATE INDEX IF NOT EXISTS txn_account_i ON txn (account_address);
 
 CREATE TABLE IF NOT EXISTS utxo (
-	account_address TEXT NOT NULL,
 	txn_id TEXT NOT NULL,
 	vout INTEGER NOT NULL,
-	status TEXT NOT NULL,
+	account_address TEXT NOT NULL,
 	value TEXT NOT NULL,
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
+	key_index INTEGER,
 	adding_height INTEGER,
 	available_height INTEGER,
 	spending_height INTEGER,
 	spent_height INTEGER,
-	dirty BOOLEAN NOT NULL
+	PRIMARY KEY (txn_id,vout)
 );
+CREATE INDEX IF NOT EXISTS utxo_account_i ON utxo (account_address);
 
 CREATE TABLE IF NOT EXISTS chainstate (
 	best_hash TEXT NOT NULL,
 	best_height INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS address_block (
+	address TEXT NOT NULL,
+	height INTEGER NOT NULL,
+	PRIMARY KEY (address,height)
 );
 `
 

@@ -112,3 +112,12 @@ type ChainState struct {
 	BestBlockHash   string
 	BestBlockHeight int64
 }
+
+type InsertUTXO struct {
+}
+
+type InsertUTXOAddress struct {
+	Addr   Address
+	TxHash string
+	Index  uint32
+}
