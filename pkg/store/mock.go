@@ -54,7 +54,19 @@ func (m Mock) ListInvoices(account giga.Address, cursor int, limit int) (items [
 	return
 }
 
-func (m Mock) StoreAccount(account giga.Account) error {
+func (m Mock) CreateAccount(account giga.Account) error {
+	if _, exists := m.accounts[account.ForeignID]; exists {
+		return giga.NewErr(giga.AlreadyExists, "account already exists: %s", account.ForeignID)
+	}
+	m.accounts[account.ForeignID] = account
+	m.accountsByAddress[account.Address] = account
+	return nil
+}
+
+func (m Mock) UpdateAccount(account giga.Account) error {
+	if _, exists := m.accounts[account.ForeignID]; !exists {
+		return giga.NewErr(giga.AlreadyExists, "account does not exist: %s", account.ForeignID)
+	}
 	m.accounts[account.ForeignID] = account
 	m.accountsByAddress[account.Address] = account
 	return nil
@@ -78,6 +90,22 @@ func (m Mock) GetAccountByAddress(id giga.Address) (giga.Account, error) {
 
 func (m Mock) GetAllUnreservedUTXOs(account giga.Address) ([]giga.UTXO, error) {
 	return nil, nil
+}
+
+func (m Mock) GetChainState() (giga.ChainState, error) {
+	return giga.ChainState{}, nil
+}
+
+func (m Mock) UpdateChainState(state giga.ChainState) error {
+	return nil
+}
+
+func (m Mock) RevertUTXOsAboveHeight(maxValidHeight int64) error {
+	return nil
+}
+
+func (m Mock) RevertTxnsAboveHeight(maxValidHeight int64) error {
+	return nil
 }
 
 func (m Mock) Commit(updates []any) error {

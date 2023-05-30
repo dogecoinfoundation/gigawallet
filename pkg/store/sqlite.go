@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/shopspring/decimal"
@@ -14,32 +15,69 @@ import (
 
 var SETUP_SQL string = `
 CREATE TABLE IF NOT EXISTS account (
+	address TEXT NOT NULL PRIMARY KEY,
 	foreign_id TEXT NOT NULL UNIQUE,
-	address TEXT NOT NULL UNIQUE,
 	privkey TEXT NOT NULL,
 	next_int_key INTEGER NOT NULL,
-	next_ext_key INTEGER NOT NULL
+	next_ext_key INTEGER NOT NULL,
+	payout_address TEXT NOT NULL,
+	payout_threshold TEXT NOT NULL,
+	payout_frequency TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS account_address (
+	address TEXT NOT NULL PRIMARY KEY,
+	key_index INTEGER NOT NULL,
+	account_address TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS account_address_i ON account_address (account_address);
+
 CREATE TABLE IF NOT EXISTS invoice (
-	invoice_address TEXT NOT NULL,
+	invoice_address TEXT NOT NULL PRIMARY KEY,
 	account_address TEXT NOT NULL,
 	txn_id TEXT NOT NULL,
 	vendor TEXT NOT NULL,
 	items TEXT NOT NULL,
-	key_index INTEGER NOT NULL,
-	block_id TEXT NOT NULL,
-	confirmations INTEGER NOT NULL
+	key_index INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
+
+CREATE TABLE IF NOT EXISTS txn (
+	txn_id TEXT NOT NULL PRIMARY KEY,
+	account_address TEXT NOT NULL,
+	invoice_address TEXT,
+	on_chain_height INTEGER,
+	verified_height INTEGER,
+	send_verified BOOLEAN NOT NULL,
+	send_rollback BOOLEAN NOT NULL
+);
+CREATE INDEX IF NOT EXISTS txn_account_i ON txn (account_address);
 
 CREATE TABLE IF NOT EXISTS utxo (
-	account_address TEXT NOT NULL,
 	txn_id TEXT NOT NULL,
 	vout INTEGER NOT NULL,
-	status TEXT NOT NULL,
+	account_address TEXT NOT NULL,
 	value TEXT NOT NULL,
 	script_type TEXT NOT NULL,
-	script_address TEXT NOT NULL
+	script_address TEXT NOT NULL,
+	key_index INTEGER,
+	adding_height INTEGER,
+	available_height INTEGER,
+	spending_height INTEGER,
+	spent_height INTEGER,
+	PRIMARY KEY (txn_id, vout)
+);
+CREATE INDEX IF NOT EXISTS utxo_account_i ON utxo (account_address);
+
+CREATE TABLE IF NOT EXISTS chainstate (
+	best_hash TEXT NOT NULL,
+	best_height INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS address_block (
+	address TEXT NOT NULL,
+	height INTEGER NOT NULL,
+	PRIMARY KEY (address, height)
 );
 `
 
@@ -73,7 +111,7 @@ func (s SQLiteStore) Close() {
 func (s SQLiteStore) Begin() (giga.StoreTransaction, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return SQLiteStoreTransaction{}, err
+		return &SQLiteStoreTransaction{}, err
 	}
 	return NewStoreTransaction(tx), nil
 }
@@ -160,14 +198,31 @@ func (s SQLiteStore) GetPendingInvoices() (<-chan giga.Invoice, error) {
 func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 	row := s.db.QueryRow("SELECT foreign_id, address, privkey, next_int_key, next_ext_key FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
-	err := row.Scan(&acc.ForeignID, &acc.Address, &acc.Privkey, &acc.NextInternalKey, &acc.NextExternalKey)
+	err := row.Scan(
+		&acc.ForeignID, &acc.Address, &acc.Privkey,
+		&acc.NextInternalKey, &acc.NextExternalKey, &acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
+		// MUST detect this error to fulfil the API contract.
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
 	}
 	if err != nil {
 		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
 	}
 	return acc, nil
+}
+
+func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
+	row := s.db.QueryRow("SELECT best_hash, best_height FROM chainstate")
+	var state giga.ChainState
+	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight)
+	if err == sql.ErrNoRows {
+		// MUST detect this error to fulfil the API contract.
+		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
+	}
+	if err != nil {
+		return giga.ChainState{}, dbErr(err, "GetChainState: row.Scan")
+	}
+	return state, nil
 }
 
 func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
@@ -198,18 +253,18 @@ func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.
 }
 
 /****** SQLiteStoreTransaction implements giga.StoreTransaction ******/
-var _ giga.StoreTransaction = SQLiteStoreTransaction{}
+var _ giga.StoreTransaction = &SQLiteStoreTransaction{}
 
 type SQLiteStoreTransaction struct {
 	tx       *sql.Tx
 	finality bool
 }
 
-func NewStoreTransaction(txn *sql.Tx) SQLiteStoreTransaction {
-	return SQLiteStoreTransaction{txn, false}
+func NewStoreTransaction(txn *sql.Tx) *SQLiteStoreTransaction {
+	return &SQLiteStoreTransaction{txn, false}
 }
 
-func (t SQLiteStoreTransaction) Commit() error {
+func (t *SQLiteStoreTransaction) Commit() error {
 	err := t.tx.Commit()
 	if err != nil {
 		return err
@@ -331,9 +386,39 @@ func (t SQLiteStoreTransaction) StoreAccount(acc giga.Account) error {
 		return dbErr(err, "createAccount: preparing insert")
 	}
 	defer stmt.Close()
-	_, err = stmt.Exec(acc.ForeignID, acc.Address, acc.Privkey, acc.NextInternalKey, acc.NextExternalKey)
+	_, err = stmt.Exec(
+		acc.ForeignID, acc.Address, acc.Privkey, // only in createAccount.
+		acc.NextInternalKey, acc.NextExternalKey, acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency) // common (see updateAccount)
 	if err != nil {
+		// MUST detect this error to fulfil the API contract.
+		if strings.HasPrefix(err.Error(), "UNIQUE constraint failed") {
+			return giga.NewErr(giga.AlreadyExists, "account already exists: %s", acc.ForeignID)
+		}
 		return dbErr(err, "createAccount: executing insert")
+	}
+	return nil
+}
+
+// FIXME: not used, but StoreAccount only handles insert.
+func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
+	stmt, err := t.tx.Prepare("update account set next_int_key = MAX(next_int_key, ?), next_ext_key = MAX(next_ext_key, ?), payout_address = ?, payout_threshold = ?, payout_frequency = ? where foreign_id = ?")
+	if err != nil {
+		return dbErr(err, "updateAccount: preparing update")
+	}
+	defer stmt.Close()
+	res, err := stmt.Exec(
+		acc.NextInternalKey, acc.NextExternalKey, acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency, // common (see createAccount)
+		acc.ForeignID) // only in updateAccount.
+	if err != nil {
+		return dbErr(err, "updateAccount: executing update")
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		return dbErr(err, "updateAccount: res.RowsAffected")
+	}
+	if num_rows < 1 {
+		// MUST detect this error to fulfil the API contract.
+		return giga.NewErr(giga.NotFound, "account not found: %s", acc.ForeignID)
 	}
 	return nil
 }
@@ -409,6 +494,102 @@ func (t SQLiteStoreTransaction) MarkInvoiceAsPaid(address giga.Address) error {
 	_, err = stmt.Exec(1, address)
 	if err != nil {
 		return dbErr(err, "markInvoiceAsPaid: executing update")
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
+	stmt, err := t.tx.Prepare("UPDATE chainstate SET best_hash = ?, best_height = ?")
+	if err != nil {
+		return dbErr(err, "UpdateChainState: preparing update")
+	}
+	defer stmt.Close()
+	res, err := stmt.Exec(state.BestBlockHash, state.BestBlockHeight)
+	if err != nil {
+		return dbErr(err, "UpdateChainState: executing update")
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		return dbErr(err, "UpdateChainState: res.RowsAffected")
+	}
+	if num_rows < 1 {
+		// this is the first call to UpdateChainState: insert the row.
+		stmt, err := t.tx.Prepare("INSERT INTO chainstate (best_hash, best_height) VALUES (?, ?)")
+		if err != nil {
+			return dbErr(err, "UpdateChainState: preparing insert")
+		}
+		defer stmt.Close()
+		_, err = stmt.Exec(state.BestBlockHash, state.BestBlockHeight)
+		if err != nil {
+			return dbErr(err, "UpdateChainState: executing insert")
+		}
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) error {
+	// The presence of a height in adding_height, available_height, spending_height or spent_height
+	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
+	// reserved for spending, or has been spent (confirmed)
+	stmt1, err := t.tx.Prepare("UPDATE utxo SET adding_height = NULL, available_height = NULL, spending_height = NULL, spent_height = NULL, dirty = true WHERE adding_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 1")
+	}
+	defer stmt1.Close()
+	stmt2, err := t.tx.Prepare("UPDATE utxo SET available_height = NULL, spending_height = NULL, spent_height = NULL, dirty = true WHERE available_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 2")
+	}
+	defer stmt2.Close()
+	stmt3, err := t.tx.Prepare("UPDATE utxo SET spending_height = NULL, spent_height = NULL, dirty = true WHERE spending_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 3")
+	}
+	defer stmt3.Close()
+	stmt4, err := t.tx.Prepare("UPDATE utxo SET spent_height = NULL, dirty = true WHERE spent_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 4")
+	}
+	defer stmt4.Close()
+	_, err = stmt1.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 1")
+	}
+	_, err = stmt2.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 2")
+	}
+	_, err = stmt3.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 3")
+	}
+	_, err = stmt4.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertUTXOsAboveHeight: executing update 4")
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) error {
+	// The presence of a height in on_chain_height or verified_height indicates
+	// that the invoice is in a block (on-chain) or has been verified (N blocks later)
+	stmt1, err := t.tx.Prepare("UPDATE invoice SET on_chain_height = NULL, verified_height = NULL, dirty = true WHERE on_chain_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: preparing update 1")
+	}
+	defer stmt1.Close()
+	stmt2, err := t.tx.Prepare("UPDATE invoice SET verified_height = NULL, dirty = true WHERE verified_height > ?")
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: preparing update 2")
+	}
+	defer stmt2.Close()
+	_, err = stmt1.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: executing update 1")
+	}
+	_, err = stmt2.Exec(maxValidHeight)
+	if err != nil {
+		return dbErr(err, "RevertTxnsAboveHeight: executing update 2")
 	}
 	return nil
 }

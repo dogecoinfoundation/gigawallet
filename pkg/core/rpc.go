@@ -116,6 +116,17 @@ func (l L1CoreRPC) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
 	return
 }
 
+func (l L1CoreRPC) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err error) {
+	decode := true // to get back JSON rather than HEX
+	err = l.request("getblockheader", []any{blockHash, decode}, &txn)
+	return
+}
+
+func (l L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
+	err = l.request("getbestblockhash", []any{}, &blockHash)
+	return
+}
+
 func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	decode := true // to get back JSON rather than HEX
 	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn)

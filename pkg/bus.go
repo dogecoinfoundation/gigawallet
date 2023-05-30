@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 )
 
 // MessageSubscribers are things that subscribe to the bus and handle
@@ -45,7 +46,7 @@ type Subscription struct {
 func NewMessageBus() MessageBus {
 	return MessageBus{
 		receivers: make(map[*Subscription]bool),
-		inbound:   make(chan Message, 1),
+		inbound:   make(chan Message, 1000),
 	}
 }
 
@@ -116,7 +117,7 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 						case (*sub).dest.GetChan() <- message:
 						default:
 							// if we are unable to send, cansel the sub
-							b.Send(SYS_ERR, struct{ msg string }{msg: "reciever failed to handle msg, closing"})
+							log.Println("MessageBus: reciever failed to handle msg, closing")
 							b.Unregister(sub)
 						}
 					}
@@ -125,14 +126,11 @@ func (b MessageBus) Run(started, stopped chan bool, stop chan context.Context) e
 		}()
 
 		started <- true
-		select {
-		//case ctx := <-stop:
-		case <-stop:
-			// do some shutdown stuff then signal we're done
-			close(stopBus)
-			stopped <- true
-		}
-
+		// wait for shutdown.
+		<-stop
+		// do some shutdown stuff then signal we're done
+		close(stopBus)
+		stopped <- true
 	}()
 	return nil
 }

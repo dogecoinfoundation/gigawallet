@@ -6,6 +6,7 @@ import (
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
+	"github.com/dogecoinfoundation/gigawallet/pkg/chaintracker"
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 	"github.com/dogecoinfoundation/gigawallet/pkg/core"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
@@ -36,8 +37,8 @@ func main() {
 	bus := giga.NewMessageBus()
 	c.Service("MessageBus", bus)
 
-	// Configure loggers
-	receivers.SetupLoggers(c, bus, conf)
+	// Set up all configured receivers
+	receivers.SetUpReceivers(c, bus, conf)
 
 	// Set up the L1 interface to Core
 	l1_core, err := core.NewDogecoinCoreRPC(conf)
@@ -56,24 +57,24 @@ func main() {
 	}
 	defer store.Close()
 
-	// Start the TxnConfirmer service
-	cf, err := broker.NewTxnConfirmer(conf, l1)
+	// Start the Chain Tracker
+	tipc, err := chaintracker.StartChainTracker(c, conf, l1, store)
 	if err != nil {
 		panic(err)
 	}
-	c.Service("Confirmer", cf)
 
-	// Start the PaymentBroker service
+	// Start the PaymentBroker service (deprecated)
 	pb := broker.NewPaymentBroker(conf, store)
 	c.Service("Payment Broker", pb)
 
 	// Start the Core listener service (ZMQ)
-	z, err := core.NewCoreReceiver(bus, conf)
+	corez, err := core.NewCoreZMQReceiver(bus, conf)
 	if err != nil {
 		panic(err)
 	}
-	z.Subscribe(cf.ReceiveFromNode)
-	c.Service("ZMQ Listener", z)
+	corez.Subscribe(tipc.ReceiveFromCore)
+	c.Service("ZMQ Listener", corez)
+
 	// Start the Payment API
 	p, err := webapi.NewWebAPI(conf, l1, store, bus)
 	if err != nil {

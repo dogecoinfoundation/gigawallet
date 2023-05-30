@@ -17,7 +17,7 @@ type MessageLogger struct {
 	Log *log.Logger
 }
 
-// Implements goga.MessageSubscriber
+// Implements giga.MessageSubscriber
 func (l MessageLogger) GetChan() chan giga.Message {
 	return l.Rec
 }
@@ -48,7 +48,7 @@ func (l MessageLogger) Run(started, stopped chan bool, stop chan context.Context
 func NewMessageLogger(path string) MessageLogger {
 	// create a MessageLogger
 	l := MessageLogger{
-		make(chan giga.Message),
+		make(chan giga.Message, 1000),
 		log.New(&lumberjack.Logger{
 			Filename: path,
 			Compress: true,

@@ -20,6 +20,10 @@ type Store interface {
 	// GetAccount returns the account with the given ForeignID.
 	GetAccount(foreignID string) (Account, error)
 
+	// GetChainState gets the last saved Best Block information (checkpoint for restart)
+	// It returns giga.NotFound if the chainstate record does not exist.
+	GetChainState() (ChainState, error)
+
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
@@ -33,9 +37,11 @@ type StoreTransaction interface {
 	Rollback() error
 
 	// StoreInvoice stores an invoice.
+	// It returns an unspecified error if the invoice ID already exists (FIXME)
 	StoreInvoice(invoice Invoice) error
 
 	// GetInvoice returns the invoice with the given ID.
+	// It returns giga.NotFound if the invoice does not exist (key: ID/address)
 	GetInvoice(id Address) (Invoice, error)
 
 	// ListInvoices returns a filtered list of invoices for an account.
@@ -47,10 +53,12 @@ type StoreTransaction interface {
 	// GetPendingInvoices sends all invoices that are pending to the given channel.
 	GetPendingInvoices() (<-chan Invoice, error)
 
-	// Stot.txcount stores an account.
+	// StoreAccount stores an account.
+	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)
 	StoreAccount(account Account) error
 
 	// GetAccount returns the account with the given ForeignID.
+	// It returns giga.NotFound if the account does not exist (key: ForeignID)
 	GetAccount(foreignID string) (Account, error)
 
 	// List all unreserved UTXOs in the account's wallet.
@@ -60,10 +68,26 @@ type StoreTransaction interface {
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
 	MarkInvoiceAsPaid(address Address) error
+
+	// UpdateChainState updates the Best Block information (checkpoint for restart)
+	UpdateChainState(state ChainState) error
+
+	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
+	// This serves to roll back the effects of adding or spending those UTXOs.
+	RevertUTXOsAboveHeight(maxValidHeight int64) error
+
+	// RevertTxnsAboveHeight clears chain-heights above the given height recorded in Txns.
+	// This serves to roll back the effects of creating or confirming those Txns.
+	RevertTxnsAboveHeight(maxValidHeight int64) error
 }
 
-// Upsert: Account, unconditional.
-type UpsertAccount struct {
+// Create Account: foreignID must not exist.
+type CreateAccount struct {
+	Account Account
+}
+
+// Update Account: foreignID must already exist.
+type UpdateAccount struct {
 	Account Account
 }
 
@@ -82,4 +106,18 @@ type UpsertInvoice struct {
 // Update, unconditional.
 type MarkInvoiceAsPaid struct {
 	InvoiceID Address
+}
+
+type ChainState struct {
+	BestBlockHash   string
+	BestBlockHeight int64
+}
+
+type InsertUTXO struct {
+}
+
+type InsertUTXOAddress struct {
+	Addr   Address
+	TxHash string
+	Index  uint32
 }
