@@ -68,7 +68,7 @@ func main() {
 	c.Service("Payment Broker", pb)
 
 	// Start the Core listener service (ZMQ)
-	corez, err := core.NewCoreReceiver(bus, conf)
+	corez, err := core.NewCoreZMQReceiver(bus, conf)
 	if err != nil {
 		panic(err)
 	}

@@ -12,31 +12,31 @@ import (
 )
 
 // interface guard ensures ZMQEmitter implements giga.NodeEmitter
-var _ giga.NodeEmitter = &CoreReceiver{}
+var _ giga.NodeEmitter = &CoreZMQReceiver{}
 
-// CoreReceiver receives ZMQ messages from Dogecoin Core.
+// CoreZMQReceiver receives ZMQ messages from Dogecoin Core.
 // CAUTION: the protocol is not authenticated!
 // CAUTION: subscribers MUST validate the received data since it may be out of date, incomplete or even invalid (fake)
-type CoreReceiver struct {
+type CoreZMQReceiver struct {
 	bus         giga.MessageBus
 	sock        *zmq4.Socket
 	listeners   []chan<- giga.NodeEvent
 	nodeAddress string
 }
 
-func (e *CoreReceiver) Subscribe(ch chan<- giga.NodeEvent) {
+func (e *CoreZMQReceiver) Subscribe(ch chan<- giga.NodeEvent) {
 	e.listeners = append(e.listeners, ch)
 }
 
-func NewCoreReceiver(bus giga.MessageBus, config giga.Config) (*CoreReceiver, error) {
-	return &CoreReceiver{
+func NewCoreZMQReceiver(bus giga.MessageBus, config giga.Config) (*CoreZMQReceiver, error) {
+	return &CoreZMQReceiver{
 		bus:         bus,
 		listeners:   make([]chan<- giga.NodeEvent, 0, 10),
 		nodeAddress: fmt.Sprintf("tcp://%s:%d", config.Dogecoind[config.Gigawallet.Dogecoind].Host, config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort),
 	}, nil
 }
 
-func (z *CoreReceiver) Run(started, stopped chan bool, stop chan context.Context) error {
+func (z *CoreZMQReceiver) Run(started, stopped chan bool, stop chan context.Context) error {
 	sock, err := zmq4.NewSocket(zmq4.SUB)
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func (z *CoreReceiver) Run(started, stopped chan bool, stop chan context.Context
 	return nil
 }
 
-func (z *CoreReceiver) notify(tag giga.NodeEventType, id string, data string) {
+func (z *CoreZMQReceiver) notify(tag giga.NodeEventType, id string, data string) {
 	e := giga.NodeEvent{
 		Type: tag, ID: id, Data: data,
 	}
