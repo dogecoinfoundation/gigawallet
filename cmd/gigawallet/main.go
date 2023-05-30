@@ -6,6 +6,7 @@ import (
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
+	"github.com/dogecoinfoundation/gigawallet/pkg/chaintracker"
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 	"github.com/dogecoinfoundation/gigawallet/pkg/core"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
@@ -56,32 +57,24 @@ func main() {
 	}
 	defer store.Close()
 
-	// Start the TipChaser service
-	tc, err := broker.NewTipChaser(conf, l1)
+	// Start the Chain Tracker
+	tipc, err := chaintracker.StartChainTracker(c, conf, l1, store)
 	if err != nil {
 		panic(err)
 	}
-	c.Service("TipChaser", tc)
-
-	// Start the ChainFollower service
-	cf, err := broker.NewChainFollower(conf, l1, store)
-	if err != nil {
-		panic(err)
-	}
-	tc.Subscribe(cf.ReceiveBestBlock, false) // non-blocking.
-	c.Service("ChainFollower", cf)
 
 	// Start the PaymentBroker service
 	pb := broker.NewPaymentBroker(conf, store)
 	c.Service("Payment Broker", pb)
 
 	// Start the Core listener service (ZMQ)
-	z, err := core.NewCoreReceiver(bus, conf)
+	corez, err := core.NewCoreReceiver(bus, conf)
 	if err != nil {
 		panic(err)
 	}
-	z.Subscribe(tc.ReceiveFromNode)
-	c.Service("ZMQ Listener", z)
+	corez.Subscribe(tipc.ReceiveFromCore)
+	c.Service("ZMQ Listener", corez)
+
 	// Start the Payment API
 	p, err := webapi.NewWebAPI(conf, l1, store, bus)
 	if err != nil {

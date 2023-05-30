@@ -1,4 +1,4 @@
-package broker
+package chaintracker
 
 import (
 	"context"
@@ -20,7 +20,7 @@ type TipSubscription struct {
 type TipChaser struct {
 	// bus             giga.MessageBus
 	l1              giga.L1
-	ReceiveFromNode chan giga.NodeEvent
+	ReceiveFromCore chan giga.NodeEvent
 	listeners       []TipSubscription
 }
 
@@ -33,7 +33,7 @@ type TipChaser struct {
 func NewTipChaser(conf giga.Config, l1 giga.L1) (*TipChaser, error) {
 	result := &TipChaser{
 		l1:              l1,
-		ReceiveFromNode: make(chan giga.NodeEvent, 1000),
+		ReceiveFromCore: make(chan giga.NodeEvent, 1000),
 	}
 	return result, nil
 }
@@ -51,7 +51,7 @@ func (c *TipChaser) Run(started, stopped chan bool, stop chan context.Context) e
 			case <-stop:
 				stopped <- true
 				return
-			case e := <-c.ReceiveFromNode:
+			case e := <-c.ReceiveFromCore:
 				switch e.Type {
 				case giga.Block:
 					txid := e.ID
