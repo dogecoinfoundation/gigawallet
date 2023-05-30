@@ -10,7 +10,10 @@ The purpose of the GigaWallet is to promote the rapid uptake of
 Dogecoin as a payment option, by taking the complexity and 
 risk out of integrating Dogecoin payments into business. 
 
-You can find what we're currently working on in [TODOs](/TODOs.md)
+
+## Major Components / Architecture overview
+
+![Major components of the GigaWallet / DogeConnect Project](/doc/gigawallet-components.png)
 
 ## DogeConnect: Payment Protocol
 
@@ -30,6 +33,3 @@ well as protocol for how to send a signed txn back via the vendor.
 [DogeConnect Payment Protocol Specification 0.1](/doc/dogeconnect-spec-0.1.md)
 
 
-## Major Components / Architecture overview
-
-![Major components of the GigaWallet / DogeConnect Project](/doc/gigawallet-connect.png)
