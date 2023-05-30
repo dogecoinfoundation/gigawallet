@@ -15,8 +15,8 @@ import (
 
 var SETUP_SQL string = `
 CREATE TABLE IF NOT EXISTS account (
+	address TEXT NOT NULL PRIMARY KEY,
 	foreign_id TEXT NOT NULL UNIQUE,
-	address TEXT NOT NULL UNIQUE,
 	privkey TEXT NOT NULL,
 	next_int_key INTEGER NOT NULL,
 	next_ext_key INTEGER NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS account (
 CREATE TABLE IF NOT EXISTS account_address (
 	address TEXT NOT NULL PRIMARY KEY,
 	key_index INTEGER NOT NULL,
-	account_address TEXT NOT NULL,
+	account_address TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_address_i ON account_address (account_address);
 
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS utxo (
 	available_height INTEGER,
 	spending_height INTEGER,
 	spent_height INTEGER,
-	PRIMARY KEY (txn_id,vout)
+	PRIMARY KEY (txn_id, vout)
 );
 CREATE INDEX IF NOT EXISTS utxo_account_i ON utxo (account_address);
 
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS chainstate (
 CREATE TABLE IF NOT EXISTS address_block (
 	address TEXT NOT NULL,
 	height INTEGER NOT NULL,
-	PRIMARY KEY (address,height)
+	PRIMARY KEY (address, height)
 );
 `
 
