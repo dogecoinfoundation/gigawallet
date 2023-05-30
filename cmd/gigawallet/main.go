@@ -37,8 +37,8 @@ func main() {
 	bus := giga.NewMessageBus()
 	c.Service("MessageBus", bus)
 
-	// Configure loggers
-	receivers.SetupLoggers(c, bus, conf)
+	// Set up all configured receivers
+	receivers.SetUpReceivers(c, bus, conf)
 
 	// Set up the L1 interface to Core
 	l1_core, err := core.NewDogecoinCoreRPC(conf)
@@ -63,7 +63,7 @@ func main() {
 		panic(err)
 	}
 
-	// Start the PaymentBroker service
+	// Start the PaymentBroker service (deprecated)
 	pb := broker.NewPaymentBroker(conf, store)
 	c.Service("Payment Broker", pb)
 
