@@ -96,6 +96,11 @@ func (c *ChainFollower) Run(started, stopped chan bool, stop chan context.Contex
 }
 
 func (c *ChainFollower) walkChainForwards(lastBlockProcessed string, fromGenesis bool) (string, bool) {
+	// Begin a store transaction to contain all of our forward-progress changes.
+	tx := c.beginStoreTxn()
+	if tx == nil {
+		return "", true // stopped.
+	}
 	nextBlockToProcess := lastBlockProcessed
 	if !fromGenesis {
 		// Check if the last-processed block is still on-chain,
@@ -108,6 +113,7 @@ func (c *ChainFollower) walkChainForwards(lastBlockProcessed string, fromGenesis
 		log.Println("ChainFollower: fetching header:", nextBlockToProcess)
 		lastBlock, stopping := c.fetchBlockHeader(lastBlockProcessed)
 		if stopping {
+			tx.Rollback()
 			return "", true // stopped.
 		}
 		if lastBlock.Confirmations != -1 {
@@ -126,16 +132,20 @@ func (c *ChainFollower) walkChainForwards(lastBlockProcessed string, fromGenesis
 	// nextBlockToProcess can be "" if we're already at the tip.
 	// If this encounters a fork along the way, it will interally call rollBackChainState
 	// and then resume from the block it returns (as necessary, until it reaches the tip).
+	var blockCount int = 0
+	var restartPoint = nextBlockToProcess
 	for nextBlockToProcess != "" {
 		log.Println("ChainFollower: fetching block:", nextBlockToProcess)
 		block, stopping := c.fetchBlock(nextBlockToProcess)
 		if stopping {
+			tx.Rollback()
 			return "", true // stopped.
 		}
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
-			stopping := c.processBlock(block)
+			stopping := c.processBlock(tx, block)
 			if stopping {
+				tx.Rollback()
 				return "", true // stopped.
 			}
 			// Continue processing the next block in the chain.
@@ -143,18 +153,27 @@ func (c *ChainFollower) walkChainForwards(lastBlockProcessed string, fromGenesis
 			nextBlockToProcess = block.NextBlockHash // can be ""
 			// Loops must check for shutdown before looping.
 			if c.checkShutdown() {
+				tx.Rollback()
 				return "", true // stopped.
+			}
+			blockCount++
+			if blockCount > 100 {
+				// Commit our progress every 100 blocks.
+				c.commitChainState(tx, block.Hash, block.Height)
 			}
 		} else {
 			// This block is no longer on-chain, so roll back prior blocks until
-			// we find a block that is on-chain.
+			// we find a block that is on-chain. First, commit changes so far.
+			ok, stopped := c.commitChainState()
 			lastBlockProcessed, nextBlockToProcess, stopping = c.rollBackChainState(block.PreviousBlockHash)
 			if stopping {
+				tx.Rollback()
 				return "", true // stopped.
 			}
 		}
 	}
 	// We have reached the tip of the blockchain.
+	c.commitChainState(tx, block.Hash, block.Height)
 	log.Println("ChainFollower: reached the tip of the blockchain:", lastBlockProcessed)
 	return lastBlockProcessed, false
 }
@@ -241,71 +260,50 @@ func (c *ChainFollower) rollBackChainStateToHeight(maxValidHeight int64, blockHa
 	}
 }
 
-func (c *ChainFollower) processBlock(block giga.RpcBlock) bool {
-	log.Println("ChainFollower: processing block", block.Hash, block.Height)
+func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, lastProcessedBlock string, lastBlockHeight int64) (committed, stopping bool) {
+	// Update Best Block in the database (checkpoint for restart)
+	err := tx.UpdateChainState(giga.ChainState{
+		BestBlockHash:   lastProcessedBlock,
+		BestBlockHeight: lastBlockHeight,
+	})
+	if err != nil {
+		tx.Rollback()
+		log.Println("ChainFollower: processBlock: cannot UpdateChainState:", err)
+		if c.sleepInterrupted(RETRY_DELAY) {
+			return false, true // stopped.
+		}
+		return false, false // retry.
+	}
+	err = tx.Commit()
+	if err != nil {
+		log.Println("ChainFollower: processBlock: cannot commit:", err)
+		if c.sleepInterrupted(RETRY_DELAY) {
+			return false, true // stopped.
+		}
+		return false, false // retry.
+	}
+	return true, false // committed.
+}
+
+func (c *ChainFollower) processBatch(block giga.RpcBlock) (nextBlock giga.RpcBlock, stopping bool) {
 	// wrap the following in a transaction with retry.
 	for {
-		tx, err := c.store.Begin()
-		if err != nil {
-			log.Println("ChainFollower: processBlock: cannot begin:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
-			}
-			continue // retry.
+		tx := c.beginStoreTxn()
+		if tx == nil {
+			return block, true // stopped.
 		}
-		// Insert entirely-new UTXOs that don't exist in the database.
-		for _, txn_id := range block.Tx {
-			txn, stopping := c.fetchTransaction(txn_id)
-			if stopping {
-				return true // stopped.
-			}
-			for _, vin := range txn.VIn {
-				// Ignore coinbase inputs, which don't spend UTXOs.
-				if vin.TxID != "" && vin.VOut >= 0 {
-					// Mark this UTXO as spent / remove it from the database.
-					// • Note: a Txn cannot spend its own outputs (but it can spend outputs from previous Txns in the same block)
-					// • We only care about UTXOs that are spendable (i.e. have a positive value and a single address)
-					// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
-					// TODO: finish this...
-				}
-			}
-			for _, vout := range txn.VOut {
-				// Ignore outputs that are not spendable.
-				if vout.Value.IsPositive() && len(vout.ScriptPubKey.Addresses) > 0 {
-					// Gigawallet only knows how to spend these types of UTXOs.
-					// These script-types always contain a single address.
-					// Normal operation once we have caught up and have thousands of wallets:
-					// • new UTXOs need to be associated with a wallet
-					//   • delete them if we roll back?
-					//   • they go back to mempool, but come back again if we switch back?
-					//   • block -> txn -> txid:vout -> wallet.balances
-					//                               -> txn (wallet spend) -> wallet.balances
-					//   • remember: a block can spend txid:vouts that it also creates!
-					// • those that don't match a wallet…
-					// Do we keep a UTXO set keyed on txn:idx? (used to validate blocks)
-					// Do we keep a UTXO set keyed on address? (used when importing wallets)
-					// Do we keep a UTXO set keyed on wallet? (only for existing wallets)
-					// Making a payment: need to find all UTXOs for one wallet: wallet-id in UTXOs.
-					// Receiving payment: need to match new UTXOs to wallet address-sets
-					if vout.ScriptPubKey.Type == "p2pkh" || vout.ScriptPubKey.Type == "p2sh" {
-						// Insert a UTXO for each address in the script?
-						addresses := uniqueStrings(vout.ScriptPubKey.Addresses)
-						addresses = addresses
-						// TODO: finish this...
-					}
-				}
-			}
+		stopping = c.processBlock(tx, block)
+		if stopping {
+			tx.Rollback()
+			return block, true // stopped.
 		}
-		//c.store.InsertUTXOsIfNew()
-		// TODO: insert UTXOs into database.
-
 		// Update Best Block in the database (checkpoint for restart)
-		err = tx.UpdateChainState(giga.ChainState{BestBlockHash: block.Hash, BestBlockHeight: block.Height})
+		err := tx.UpdateChainState(giga.ChainState{BestBlockHash: block.Hash, BestBlockHeight: block.Height})
 		if err != nil {
 			tx.Rollback()
 			log.Println("ChainFollower: processBlock: cannot UpdateChainState:", err)
 			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
+				return block, true // stopped.
 			}
 			continue // retry.
 		}
@@ -313,11 +311,75 @@ func (c *ChainFollower) processBlock(block giga.RpcBlock) bool {
 		if err != nil {
 			log.Println("ChainFollower: processBlock: cannot commit:", err)
 			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
+				return block, true // stopped.
 			}
 			continue // retry.
 		}
-		return false // success.
+		return block, false // success.
+	}
+}
+
+func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlock) (stopping bool) {
+	log.Println("ChainFollower: processing block", block.Hash, block.Height)
+	// Insert entirely-new UTXOs that don't exist in the database.
+	for _, txn_id := range block.Tx {
+		txn, stopping := c.fetchTransaction(txn_id)
+		if stopping {
+			return true // stopped.
+		}
+		for _, vin := range txn.VIn {
+			// Ignore coinbase inputs, which don't spend UTXOs.
+			if vin.TxID != "" && vin.VOut >= 0 {
+				// Mark this UTXO as spent / remove it from the database.
+				// • Note: a Txn cannot spend its own outputs (but it can spend outputs from previous Txns in the same block)
+				// • We only care about UTXOs that are spendable (i.e. have a positive value and a single address)
+				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
+				// TODO: finish this...
+			}
+		}
+		for _, vout := range txn.VOut {
+			// Ignore outputs that are not spendable.
+			if vout.Value.IsPositive() && len(vout.ScriptPubKey.Addresses) > 0 {
+				// Gigawallet only knows how to spend these types of UTXOs.
+				// These script-types always contain a single address.
+				// Normal operation once we have caught up and have thousands of wallets:
+				// • new UTXOs need to be associated with a wallet
+				//   • delete them if we roll back?
+				//   • they go back to mempool, but come back again if we switch back?
+				//   • block -> txn -> txid:vout -> wallet.balances
+				//                               -> txn (wallet spend) -> wallet.balances
+				//   • remember: a block can spend txid:vouts that it also creates!
+				// • those that don't match a wallet…
+				// Do we keep a UTXO set keyed on txn:idx? (used to validate blocks)
+				// Do we keep a UTXO set keyed on address? (used when importing wallets)
+				// Do we keep a UTXO set keyed on wallet? (only for existing wallets)
+				// Making a payment: need to find all UTXOs for one wallet: wallet-id in UTXOs.
+				// Receiving payment: need to match new UTXOs to wallet address-sets
+				if vout.ScriptPubKey.Type == "p2pkh" || vout.ScriptPubKey.Type == "p2sh" {
+					// Insert a UTXO for each address in the script?
+					addresses := uniqueStrings(vout.ScriptPubKey.Addresses)
+					addresses = addresses
+					// TODO: finish this...
+				}
+			}
+		}
+	}
+	//c.store.InsertUTXOsIfNew()
+	// TODO: insert UTXOs into database.
+	return false
+}
+
+func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
+	for {
+		tx, err := c.store.Begin()
+		if err != nil {
+			log.Println("ChainFollower: beginStoreTxn: cannot begin:", err)
+			if c.sleepInterrupted(RETRY_DELAY) {
+				return nil // stopped.
+			}
+			continue // retry.
+		}
+		return tx
 	}
 }
 
