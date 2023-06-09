@@ -30,6 +30,6 @@ This is an extension to BIP 70 payment URLs that provides much more
 structured information about a 'cart' or items being purchased, as 
 well as protocol for how to send a signed txn back via the vendor.
 
-[DogeConnect Payment Protocol Specification 0.1](/doc/dogeconnect-spec-0.1.md)
+[DogeConnect Payment Protocol Specification 0.1](/doc/doge-connect.md)
 
 
