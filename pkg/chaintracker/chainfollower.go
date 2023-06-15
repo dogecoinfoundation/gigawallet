@@ -11,6 +11,8 @@ import (
 const (
 	DOGECOIN_GENESIS_BLOCK_HASH = "1a91e3dace36e2be3bf030a65679fe821aa1d6ef92e7c9902eb318182c355691"
 	RETRY_DELAY                 = 5 * time.Second
+	CONFLICT_DELAY              = 250 * time.Millisecond // quarter second
+	BATCH_SIZE                  = 100                    // number of blocks
 )
 
 type ChainFollower struct {
@@ -19,6 +21,12 @@ type ChainFollower struct {
 	ReceiveBestBlock chan string
 	stop             chan context.Context
 	stopped          chan bool
+}
+
+type ChainPos struct {
+	BlockHash     string // last block processed ("" at genesis)
+	BlockHeight   int64  // height of last block (0 at genesis)
+	NextBlockHash string // optional: if known, else ""
 }
 
 /*
@@ -46,32 +54,32 @@ func (c *ChainFollower) Run(started, stopped chan bool, stop chan context.Contex
 		c.stop, c.stopped = stop, stopped // for helpers.
 		started <- true
 
+		// Recover from panic used to stop the service.
+		// We use this to avoid returning a 'stopping' bool from every single function.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Println("ChainFollower: service stopped (shutdown panic received):", r)
+			}
+		}()
+
 		// Fetch the last processed Best Block hash from the DB (restart point)
 		// INVARIANT: the chainstate in our database contains the effects of
 		// the Best Block we have stored (and all prior blocks per previousblockhash)
 		// We MUST update the chainstate before we update this hash.
 		log.Println("ChainFollower: fetching chainstate")
-		state, stopping := c.fetchChainState()
-		if stopping {
-			return // stopped.
-		}
+		state := c.fetchChainState()
 
 		// Startup: catch up to the current Best Block (tip)
-		var lastBlockProcessed string
+		var pos ChainPos
 		if state.BestBlockHash == "" {
 			// No BestBlockHash stored, so we must be starting from scratch.
 			// Walk the blockchain from the genesis block.
-			lastBlockProcessed, stopping = c.walkChainForwards(DOGECOIN_GENESIS_BLOCK_HASH, true)
-			if stopping {
-				return // stopped.
-			}
+			pos = ChainPos{"", 0, DOGECOIN_GENESIS_BLOCK_HASH}
 		} else {
 			// Walk forwards on the blockchain from BestBlockHash until we reach the tip.
-			lastBlockProcessed, stopping = c.walkChainForwards(state.BestBlockHash, false)
-			if stopping {
-				return // stopped.
-			}
+			pos = ChainPos{state.BestBlockHash, state.BestBlockHeight, ""}
 		}
+		pos = c.followChainToTip(pos)
 
 		// Main loop: catch up to the current Best Block (tip) each time it changes.
 		for {
@@ -84,25 +92,17 @@ func (c *ChainFollower) Run(started, stopped chan bool, stop chan context.Contex
 				log.Println("ChainFollower: received new block signal")
 			}
 
-			// Walk forwards on the blockchain from lastBlockProcessed until we reach the tip.
-			lastBlockProcessed, stopping = c.walkChainForwards(lastBlockProcessed, false)
-			if stopping {
-				return // stopped.
-			}
+			// Walk forwards on the blockchain until we reach the tip.
+			pos = c.followChainToTip(pos)
 		}
 	}()
 
 	return nil
 }
 
-func (c *ChainFollower) walkChainForwards(lastBlockProcessed string, fromGenesis bool) (string, bool) {
-	// Begin a store transaction to contain all of our forward-progress changes.
-	tx := c.beginStoreTxn()
-	if tx == nil {
-		return "", true // stopped.
-	}
-	nextBlockToProcess := lastBlockProcessed
-	if !fromGenesis {
+func (c *ChainFollower) followChainToTip(pos ChainPos) ChainPos {
+	// Make forward progress following the chain, rolling back if we encounter a fork.
+	if pos.BlockHash != "" {
 		// Check if the last-processed block is still on-chain,
 		// and fetch the 'nextblockhash' (if any) from Core's chainstate.
 		// This is necessary because, for example:
@@ -110,223 +110,173 @@ func (c *ChainFollower) walkChainForwards(lastBlockProcessed string, fromGenesis
 		//   had no 'nextblockhash' the last time we fetched it.
 		// • We may have just started up and we're well behind the tip; our block
 		//   might have been part of a fork when we shut down (or any time, really)
-		log.Println("ChainFollower: fetching header:", nextBlockToProcess)
-		lastBlock, stopping := c.fetchBlockHeader(lastBlockProcessed)
-		if stopping {
-			tx.Rollback()
-			return "", true // stopped.
-		}
+		log.Println("ChainFollower: fetching header:", pos.BlockHash)
+		lastBlock := c.fetchBlockHeader(pos.BlockHash)
 		if lastBlock.Confirmations != -1 {
-			// Still on-chain, so begin processing from nextblockhash.
-			nextBlockToProcess = lastBlock.NextBlockHash // can be ""
+			// Still on-chain: resume processing from NextBlockHash.
+			pos.NextBlockHash = lastBlock.NextBlockHash // can be ""
 		} else {
 			// The last block we processed is no longer on-chain, so roll back
 			// that block and prior blocks until we find a block that is on-chain.
-			lastBlockProcessed, nextBlockToProcess, stopping = c.rollBackChainState(lastBlock.PreviousBlockHash)
-			if stopping {
-				return "", true // stopped.
-			}
+			pos = c.rollBackChainState(lastBlock.PreviousBlockHash)
 		}
 	}
-	// Walk forwards on the blockchain from nextBlockToProcess until we reach the tip.
-	// nextBlockToProcess can be "" if we're already at the tip.
+	// Walk forwards on the blockchain until we reach the tip.
 	// If this encounters a fork along the way, it will interally call rollBackChainState
 	// and then resume from the block it returns (as necessary, until it reaches the tip).
-	var blockCount int = 0
-	var restartPoint = nextBlockToProcess
-	for nextBlockToProcess != "" {
-		log.Println("ChainFollower: fetching block:", nextBlockToProcess)
-		block, stopping := c.fetchBlock(nextBlockToProcess)
-		if stopping {
-			tx.Rollback()
-			return "", true // stopped.
-		}
-		if block.Confirmations != -1 {
-			// Still on-chain, so update chainstate from block transactions.
-			stopping := c.processBlock(tx, block)
-			if stopping {
-				tx.Rollback()
-				return "", true // stopped.
-			}
-			// Continue processing the next block in the chain.
-			lastBlockProcessed = block.Hash
-			nextBlockToProcess = block.NextBlockHash // can be ""
-			// Loops must check for shutdown before looping.
-			if c.checkShutdown() {
-				tx.Rollback()
-				return "", true // stopped.
-			}
-			blockCount++
-			if blockCount > 100 {
-				// Commit our progress every 100 blocks.
-				c.commitChainState(tx, block.Hash, block.Height)
-			}
-		} else {
-			// This block is no longer on-chain, so roll back prior blocks until
-			// we find a block that is on-chain. First, commit changes so far.
-			ok, stopped := c.commitChainState()
-			lastBlockProcessed, nextBlockToProcess, stopping = c.rollBackChainState(block.PreviousBlockHash)
-			if stopping {
-				tx.Rollback()
-				return "", true // stopped.
-			}
-		}
+	for pos.NextBlockHash != "" {
+		pos = c.transactionalRollForward(pos)
+		c.checkShutdown() // loops must check for shutdown.
 	}
 	// We have reached the tip of the blockchain.
-	c.commitChainState(tx, block.Hash, block.Height)
-	log.Println("ChainFollower: reached the tip of the blockchain:", lastBlockProcessed)
-	return lastBlockProcessed, false
+	log.Println("ChainFollower: reached the tip of the blockchain:", pos.BlockHash)
+	return pos
 }
 
-func (c *ChainFollower) rollBackChainState(previousBlockHash string) (string, string, bool) {
-	log.Println("ChainFollower: rolling back from:", previousBlockHash)
-	// Walk backwards along the chain to find an on-chain block.
+func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
+	// Within a transaction, follow the chain forwards up to BATCH_SIZE blocks.
+	// If we encounter a fork, commit progress then roll back to the fork-point.
+	var startPos ChainPos = pos
+	var rollbackFrom string = ""
+	var blockCount int = 0
+	tx := c.beginStoreTxn()
+	for pos.NextBlockHash != "" {
+		log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
+		block := c.fetchBlock(pos.NextBlockHash)
+		if block.Confirmations != -1 {
+			// Still on-chain, so update chainstate from block transactions.
+			if !c.processBlock(tx, block) {
+				// Unable to process the block - roll back.
+				tx.Rollback()
+				return startPos
+			}
+			// Progress has been made.
+			pos = ChainPos{block.Hash, block.Height, block.NextBlockHash}
+			blockCount++
+			if blockCount > BATCH_SIZE {
+				// Commit our progress every BATCH_SIZE blocks.
+				break
+			}
+			c.checkShutdown() // loops must check for shutdown.
+		} else {
+			// This block is no longer on-chain: commit progress so far,
+			// then roll back until we find a block that is on-chain.
+			rollbackFrom = block.PreviousBlockHash
+			break
+		}
+	}
+	if blockCount > 0 {
+		// We have made forward progress: commit the transaction.
+		if !c.commitChainState(tx, pos) {
+			// Unable to commit forward progress - roll back.
+			return startPos
+		}
+	} else {
+		// No progress made: no need to commit the transaction.
+		tx.Rollback()
+	}
+	if rollbackFrom != "" {
+		// We found an off-chain block, so also need to roll back.
+		pos = c.rollBackChainState(rollbackFrom)
+	}
+	return pos
+}
+
+func (c *ChainFollower) rollBackChainState(fromHash string) ChainPos {
+	log.Println("ChainFollower: rolling back from:", fromHash)
+	// Walk backwards along the chain (in Core) to find an on-chain block.
 	for {
 		// Fetch the block header for the previous block.
-		log.Println("ChainFollower: fetching previous header:", previousBlockHash)
-		block, stopping := c.fetchBlockHeader(previousBlockHash)
-		if stopping {
-			return "", "", true // stopped.
-		}
+		log.Println("ChainFollower: fetching previous header:", fromHash)
+		block := c.fetchBlockHeader(fromHash)
 		if block.Confirmations == -1 {
-			// This block is no longer on-chain, so keep walking.
-			previousBlockHash = block.PreviousBlockHash
-			// Loops must check for shutdown before looping.
-			if c.checkShutdown() {
-				return "", "", true // stopped.
-			}
+			// This block is no longer on-chain, so keep walking backwards.
+			fromHash = block.PreviousBlockHash
+			c.checkShutdown() // loops must check for shutdown.
 		} else {
-			// Found an on-chain block: roll back chainstate above this block-height.
-			stopping = c.rollBackChainStateToHeight(block.Height, block.Hash)
-			if stopping {
-				return "", "", true // stopped.
-			}
+			// Found an on-chain block: roll back all chainstate above this block-height.
+			pos := ChainPos{block.Hash, block.Height, block.NextBlockHash}
+			c.rollBackChainStateToPos(pos)
 			// Caller needs this block hash and next block hash (if any)
-			return block.Hash, block.NextBlockHash, false
+			return pos
 		}
 	}
 }
 
-func (c *ChainFollower) rollBackChainStateToHeight(maxValidHeight int64, blockHash string) bool {
+func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
+	maxValidHeight := pos.BlockHeight
 	log.Println("ChainFollower: rolling back chainstate to height:", maxValidHeight)
 	// wrap the following in a transaction with retry.
 	for {
 		tx, err := c.store.Begin()
 		if err != nil {
-			log.Println("ChainFollower: rollBackChainStateToHeight: cannot begin:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
-			}
+			log.Println("ChainFollower: rollBackChainStateToPos: cannot begin:", err)
+			c.sleepForRetry(err)
 			continue // retry.
 		}
 		// Roll back chainstate above maxValidHeight.
 		err = tx.RevertUTXOsAboveHeight(maxValidHeight)
 		if err != nil {
 			tx.Rollback()
-			log.Println("ChainFollower: rollBackChainStateToHeight: cannot RevertUTXOsAboveHeight:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
-			}
+			log.Println("ChainFollower: rollBackChainStateToPos: cannot RevertUTXOsAboveHeight:", err)
+			c.sleepForRetry(err)
 			continue // retry.
 		}
 		err = tx.RevertTxnsAboveHeight(maxValidHeight)
 		if err != nil {
 			tx.Rollback()
-			log.Println("ChainFollower: rollBackChainStateToHeight: cannot RevertTxnsAboveHeight:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
-			}
+			log.Println("ChainFollower: rollBackChainStateToPos: cannot RevertTxnsAboveHeight:", err)
+			c.sleepForRetry(err)
 			continue // retry.
 		}
 		// Update Best Block in the database (checkpoint for restart)
-		err = tx.UpdateChainState(giga.ChainState{BestBlockHash: blockHash, BestBlockHeight: maxValidHeight})
+		err = tx.UpdateChainState(giga.ChainState{
+			BestBlockHash:   pos.BlockHash,
+			BestBlockHeight: pos.BlockHeight,
+		})
 		if err != nil {
 			tx.Rollback()
-			log.Println("ChainFollower: rollBackChainStateToHeight: cannot UpdateChainState:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
-			}
+			log.Println("ChainFollower: rollBackChainStateToPos: cannot UpdateChainState:", err)
+			c.sleepForRetry(err)
 			continue // retry.
 		}
 		err = tx.Commit()
 		if err != nil {
-			log.Println("ChainFollower: rollBackChainStateToHeight: cannot commit:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return true // stopped.
-			}
+			log.Println("ChainFollower: rollBackChainStateToPos: cannot commit:", err)
+			c.sleepForRetry(err)
 			continue // retry.
 		}
-		return false // success.
+		return // success.
 	}
 }
 
-func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, lastProcessedBlock string, lastBlockHeight int64) (committed, stopping bool) {
+func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, pos ChainPos) (committed bool) {
 	// Update Best Block in the database (checkpoint for restart)
 	err := tx.UpdateChainState(giga.ChainState{
-		BestBlockHash:   lastProcessedBlock,
-		BestBlockHeight: lastBlockHeight,
+		BestBlockHash:   pos.BlockHash,
+		BestBlockHeight: pos.BlockHeight,
 	})
 	if err != nil {
 		tx.Rollback()
 		log.Println("ChainFollower: processBlock: cannot UpdateChainState:", err)
-		if c.sleepInterrupted(RETRY_DELAY) {
-			return false, true // stopped.
-		}
-		return false, false // retry.
+		c.sleepForRetry(err)
+		return false // retry.
 	}
+	// Commit the entire transaction with all changes in the batch.
 	err = tx.Commit()
 	if err != nil {
 		log.Println("ChainFollower: processBlock: cannot commit:", err)
-		if c.sleepInterrupted(RETRY_DELAY) {
-			return false, true // stopped.
-		}
-		return false, false // retry.
+		c.sleepForRetry(err)
+		return false // retry.
 	}
-	return true, false // committed.
+	return true // committed.
 }
 
-func (c *ChainFollower) processBatch(block giga.RpcBlock) (nextBlock giga.RpcBlock, stopping bool) {
-	// wrap the following in a transaction with retry.
-	for {
-		tx := c.beginStoreTxn()
-		if tx == nil {
-			return block, true // stopped.
-		}
-		stopping = c.processBlock(tx, block)
-		if stopping {
-			tx.Rollback()
-			return block, true // stopped.
-		}
-		// Update Best Block in the database (checkpoint for restart)
-		err := tx.UpdateChainState(giga.ChainState{BestBlockHash: block.Hash, BestBlockHeight: block.Height})
-		if err != nil {
-			tx.Rollback()
-			log.Println("ChainFollower: processBlock: cannot UpdateChainState:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return block, true // stopped.
-			}
-			continue // retry.
-		}
-		err = tx.Commit()
-		if err != nil {
-			log.Println("ChainFollower: processBlock: cannot commit:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return block, true // stopped.
-			}
-			continue // retry.
-		}
-		return block, false // success.
-	}
-}
-
-func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlock) (stopping bool) {
+func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlock) bool {
 	log.Println("ChainFollower: processing block", block.Hash, block.Height)
 	// Insert entirely-new UTXOs that don't exist in the database.
 	for _, txn_id := range block.Tx {
-		txn, stopping := c.fetchTransaction(txn_id)
-		if stopping {
-			return true // stopped.
-		}
+		txn := c.fetchTransaction(txn_id)
 		for _, vin := range txn.VIn {
 			// Ignore coinbase inputs, which don't spend UTXOs.
 			if vin.TxID != "" && vin.VOut >= 0 {
@@ -366,7 +316,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 	}
 	//c.store.InsertUTXOsIfNew()
 	// TODO: insert UTXOs into database.
-	return false
+	return true
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
@@ -374,12 +324,10 @@ func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
 		tx, err := c.store.Begin()
 		if err != nil {
 			log.Println("ChainFollower: beginStoreTxn: cannot begin:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return nil // stopped.
-			}
+			c.sleepForRetry(err)
 			continue // retry.
 		}
-		return tx
+		return tx // store on 'c' for rollback on shutdown?
 	}
 }
 
@@ -398,83 +346,79 @@ func uniqueStrings(source []string) (result []string) {
 	return
 }
 
-func (c *ChainFollower) fetchChainState() (giga.ChainState, bool) {
+func (c *ChainFollower) fetchChainState() giga.ChainState {
 	for {
 		state, err := c.store.GetChainState()
 		if err != nil {
 			if giga.IsNotFoundError(err) {
-				return giga.ChainState{}, false // empty chainstate.
+				return giga.ChainState{} // empty chainstate.
 			}
 			log.Println("ChainFollower: error retrieving best block:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return giga.ChainState{}, true // stopped.
-			}
+			c.sleepForRetry(err)
 		} else {
-			return state, false
+			return state
 		}
 	}
 }
 
-func (c *ChainFollower) fetchBlock(blockHash string) (giga.RpcBlock, bool) {
+func (c *ChainFollower) fetchBlock(blockHash string) giga.RpcBlock {
 	for {
 		block, err := c.l1.GetBlock(blockHash)
 		if err != nil {
 			log.Println("ChainFollower: error retrieving block:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return giga.RpcBlock{}, true // stopped.
-			}
+			c.sleepForRetry(err)
 		} else {
-			return block, false
+			return block
 		}
 	}
 }
 
-func (c *ChainFollower) fetchBlockHeader(blockHash string) (giga.RpcBlockHeader, bool) {
+func (c *ChainFollower) fetchBlockHeader(blockHash string) giga.RpcBlockHeader {
 	for {
 		block, err := c.l1.GetBlockHeader(blockHash)
 		if err != nil {
 			log.Println("ChainFollower: error retrieving block header:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return giga.RpcBlockHeader{}, true // stopped.
-			}
+			c.sleepForRetry(err)
 		} else {
-			return block, false
+			return block
 		}
 	}
 }
 
-func (c *ChainFollower) fetchTransaction(txHash string) (giga.RawTxn, bool) {
+func (c *ChainFollower) fetchTransaction(txHash string) giga.RawTxn {
 	for {
 		txn, err := c.l1.GetTransaction(txHash)
 		if err != nil {
 			log.Println("ChainFollower: error retrieving transaction:", err)
-			if c.sleepInterrupted(RETRY_DELAY) {
-				return giga.RawTxn{}, true // stopped.
-			}
+			c.sleepForRetry(err)
 		} else {
-			return txn, false
+			return txn
 		}
 	}
 }
 
-func (c *ChainFollower) sleepInterrupted(d time.Duration) bool {
+func (c *ChainFollower) sleepForRetry(err error) {
+	delay := RETRY_DELAY
+	if giga.IsDBConflictError(err) {
+		delay = CONFLICT_DELAY
+	}
 	select {
 	case <-c.stop:
 		// no work to do, just shut down.
 		c.stopped <- true
-		return true
-	case <-time.After(d):
-		return false
+		panic("stopped") // caught in `Run` method.
+	case <-time.After(delay):
+		return
 	}
 }
 
-func (c *ChainFollower) checkShutdown() bool {
+func (c *ChainFollower) checkShutdown() {
 	select {
 	case <-c.stop:
 		// no work to do, just shut down.
 		c.stopped <- true
-		return true
+		panic("stopped") // caught in `Run` method.
 	default:
-		return false
+		return
 	}
 }
