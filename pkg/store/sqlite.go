@@ -10,7 +10,7 @@ import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/shopspring/decimal"
 
-	_ "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
 var SETUP_SQL string = `
@@ -595,5 +595,17 @@ func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) erro
 }
 
 func dbErr(err error, where string) error {
+	if sqErr, isSq := err.(sqlite3.Error); isSq {
+		if sqErr.Code == sqlite3.ErrConstraint {
+			// Constraint violation, e.g. a duplicate key.
+			return giga.NewErr(giga.AlreadyExists, "SQLiteStore error: %s: %v", where, err)
+		}
+		if sqErr.Code == sqlite3.ErrBusy || sqErr.Code == sqlite3.ErrLocked {
+			// SQLite has a single-writer policy, even in WAL (write-ahead) mode.
+			// SQLite will return BUSY if the database is locked by another connection.
+			// We treat this as a transient database conflict, and the caller should retry.
+			return giga.NewErr(giga.DBConflict, "SQLiteStore error: %s: %v", where, err)
+		}
+	}
 	return giga.NewErr(giga.NotAvailable, "SQLiteStore error: %s: %v", where, err)
 }

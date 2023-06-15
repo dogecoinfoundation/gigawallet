@@ -11,6 +11,7 @@ const (
 	NotAvailable  ErrorCode = "not-available"
 	NotFound      ErrorCode = "not-found"
 	AlreadyExists ErrorCode = "already-exists"
+	DBConflict    ErrorCode = "db-conflict"
 	UnknownError  ErrorCode = "unknown-error"
 )
 
@@ -28,15 +29,20 @@ func NewErr(code ErrorCode, format string, args ...any) error {
 }
 
 func IsNotFoundError(err error) bool {
-	if e, ok := err.(*ErrorInfo); ok {
-		return e.Code == NotFound
-	}
-	return false
+	return IsError(err, NotFound)
 }
 
 func IsAlreadyExistsError(err error) bool {
+	return IsError(err, AlreadyExists)
+}
+
+func IsDBConflictError(err error) bool {
+	return IsError(err, DBConflict)
+}
+
+func IsError(err error, ofType ErrorCode) bool {
 	if e, ok := err.(*ErrorInfo); ok {
-		return e.Code == AlreadyExists
+		return e.Code == ofType
 	}
 	return false
 }

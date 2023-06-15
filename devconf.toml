@@ -15,9 +15,9 @@
   rpcuser = "gigawallet"
 
 [dogecoind.mainnet]
-  host    = "192.168.1.41"
+  host    = "127.0.0.1"
   zmqport = 28332
-  rpchost = "192.168.1.41"
+  rpchost = "127.0.0.1"
   rpcport = 22555
   rpcpass = "suchpay"
   rpcuser = "suchpay"
