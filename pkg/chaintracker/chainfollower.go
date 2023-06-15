@@ -242,7 +242,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 		}
 		err = tx.Commit()
 		if err != nil {
-			log.Println("ChainFollower: rollBackChainStateToPos: cannot commit:", err)
+			log.Println("ChainFollower: rollBackChainStateToPos: cannot commit DB transaction:", err)
 			c.sleepForRetry(err)
 			continue // retry.
 		}
@@ -252,6 +252,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 
 func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, pos ChainPos) (committed bool) {
 	// Update Best Block in the database (checkpoint for restart)
+	log.Println("ChainFollower: commiting chain state:", pos.BlockHash, pos.BlockHeight)
 	err := tx.UpdateChainState(giga.ChainState{
 		BestBlockHash:   pos.BlockHash,
 		BestBlockHeight: pos.BlockHeight,
@@ -265,7 +266,7 @@ func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, pos ChainPos)
 	// Commit the entire transaction with all changes in the batch.
 	err = tx.Commit()
 	if err != nil {
-		log.Println("ChainFollower: processBlock: cannot commit:", err)
+		log.Println("ChainFollower: processBlock: cannot commit DB transaction:", err)
 		c.sleepForRetry(err)
 		return false // retry.
 	}
