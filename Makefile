@@ -10,4 +10,4 @@ build/gigawallet: clean
 
 
 dev:
-	GIGA_ENV=devconf go run ./cmd/gigawallet/main.go devconf.toml
+	GIGA_ENV=devconf go run ./cmd/gigawallet/main.go server 
