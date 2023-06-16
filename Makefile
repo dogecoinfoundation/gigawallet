@@ -6,8 +6,8 @@ clean:
 
 build/gigawallet: clean
 	mkdir -p build/
-	go build -o build/gigawallet ./cmd/gigawallet/main.go 
+	go build -o build/gigawallet ./cmd/gigawallet/. 
 
 
 dev:
-	go run ./cmd/gigawallet/main.go devconf.toml
+	GIGA_ENV=devconf go run ./cmd/gigawallet/main.go devconf.toml
