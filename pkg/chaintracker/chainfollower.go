@@ -281,43 +281,67 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 		for _, vin := range txn.VIn {
 			// Ignore coinbase inputs, which don't spend UTXOs.
 			if vin.TxID != "" && vin.VOut >= 0 {
-				// Mark this UTXO as spent / remove it from the database.
+				// Mark this UTXO as spent (at this block height)
 				// • Note: a Txn cannot spend its own outputs (but it can spend outputs from previous Txns in the same block)
-				// • We only care about UTXOs that are spendable (i.e. have a positive value and a single address)
+				// • We only care about UTXOs that are spendable (i.e. have a positive value and an address/PKH)
 				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
-				// TODO: finish this...
+				// log.Println("ChainFollower: marking UTXO spent", vin.TxID, vin.VOut, block.Height)
+				err := tx.MarkUTXOSpent(vin.TxID, vin.VOut, block.Height)
+				if err != nil {
+					log.Println("ChainFollower: processBlock: cannot mark UTXO in DB:", err, vin.TxID, vin.VOut)
+					c.sleepForRetry(err)
+					return false // retry.
+				}
 			}
 		}
 		for _, vout := range txn.VOut {
 			// Ignore outputs that are not spendable.
 			if vout.Value.IsPositive() && len(vout.ScriptPubKey.Addresses) > 0 {
-				// Gigawallet only knows how to spend these types of UTXOs.
-				// These script-types always contain a single address.
-				// Normal operation once we have caught up and have thousands of wallets:
-				// • new UTXOs need to be associated with a wallet
-				//   • delete them if we roll back?
-				//   • they go back to mempool, but come back again if we switch back?
-				//   • block -> txn -> txid:vout -> wallet.balances
-				//                               -> txn (wallet spend) -> wallet.balances
-				//   • remember: a block can spend txid:vouts that it also creates!
-				// • those that don't match a wallet…
-				// Do we keep a UTXO set keyed on txn:idx? (used to validate blocks)
-				// Do we keep a UTXO set keyed on address? (used when importing wallets)
-				// Do we keep a UTXO set keyed on wallet? (only for existing wallets)
-				// Making a payment: need to find all UTXOs for one wallet: wallet-id in UTXOs.
-				// Receiving payment: need to match new UTXOs to wallet address-sets
-				if vout.ScriptPubKey.Type == "p2pkh" || vout.ScriptPubKey.Type == "p2sh" {
-					// Insert a UTXO for each address in the script?
-					addresses := uniqueStrings(vout.ScriptPubKey.Addresses)
-					addresses = addresses
-					// TODO: finish this...
+				// Create a UTXO associated with the wallet that owns the address.
+				scriptType := typeOfScript(vout.ScriptPubKey.Type)
+				if scriptType == "p2pkh" || scriptType == "p2sh" || scriptType == "p2pk" {
+					// These script-types always contain a single address.
+					pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
+					// Use an address-to-wallet index (utxo_account_i) to find the wallet.
+					accountID, keyIndex, err := tx.FindAccountForAddress(pkhAddress)
+					if err != nil {
+						if giga.IsNotFoundError(err) {
+							log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
+						} else {
+							log.Println("ChainFollower: processBlock: cannot query FindAccountForAddress in DB:", err, pkhAddress)
+							c.sleepForRetry(err)
+							return false // retry.
+						}
+					} else {
+						err = tx.CreateUTXO(txn_id, vout.N, vout.Value, scriptType, pkhAddress, accountID, keyIndex, block.Height)
+						if err != nil {
+							log.Println("ChainFollower: processBlock: cannot create UTXO in DB:", err, txn_id, vout.N)
+							c.sleepForRetry(err)
+							return false // retry.
+						}
+					}
+				} else {
+					log.Println("ChainFollower: unknown script type:", txn_id, vout.N, vout.ScriptPubKey.Type)
 				}
+			} else {
+				log.Println("ChainFollower: no value or no address:", txn_id, vout.N, vout.ScriptPubKey.Type)
 			}
 		}
 	}
-	//c.store.InsertUTXOsIfNew()
-	// TODO: insert UTXOs into database.
 	return true
+}
+
+func typeOfScript(name string) string {
+	if name == "pubkeyhash" {
+		return "p2pkh"
+	}
+	if name == "scripthash" {
+		return "p2sh"
+	}
+	if name == "pubkey" {
+		return "p2pk"
+	}
+	return name
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {

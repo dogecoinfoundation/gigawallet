@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS utxo (
 	value TEXT NOT NULL,
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
-	key_index INTEGER,
+	key_index INTEGER NOT NULL,
 	adding_height INTEGER,
 	available_height INTEGER,
 	spending_height INTEGER,
@@ -436,6 +436,20 @@ func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, erro
 	return acc, nil
 }
 
+func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, error) {
+	row := t.tx.QueryRow("SELECT account_address, key_index FROM account_address WHERE address = ?", address)
+	var accountID giga.Address
+	var keyIndex uint32
+	err := row.Scan(&accountID, &keyIndex)
+	if err == sql.ErrNoRows {
+		return "", 0, giga.NewErr(giga.NotFound, "no matching account for address: %s", address)
+	}
+	if err != nil {
+		return "", 0, dbErr(err, "FindAccountForAddress: error scanning row")
+	}
+	return accountID, keyIndex, nil
+}
+
 func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
 	rows_found := 0
 	rows, err := t.tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
@@ -523,6 +537,32 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
 		if err != nil {
 			return dbErr(err, "UpdateChainState: executing insert")
 		}
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, blockHeight int64) error {
+	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, adding_height)")
+	if err != nil {
+		return dbErr(err, "CreateUTXO: preparing insert")
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(txID, vOut, accountID, value, scriptType, pkhAddress, keyIndex, blockHeight)
+	if err != nil {
+		return dbErr(err, "CreateUTXO: executing insert")
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) error {
+	stmt, err := t.tx.Prepare("UPDATE utxo SET spending_height = ? WHERE txn_id = ? AND vout = ?")
+	if err != nil {
+		return dbErr(err, "MarkUTXOSpent: preparing update")
+	}
+	defer stmt.Close()
+	_, err = stmt.Exec(blockHeight, txID, vOut)
+	if err != nil {
+		return dbErr(err, "MarkUTXOSpent: executing update")
 	}
 	return nil
 }
