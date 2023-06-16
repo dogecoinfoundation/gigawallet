@@ -61,9 +61,19 @@ type StoreTransaction interface {
 	// It returns giga.NotFound if the account does not exist (key: ForeignID)
 	GetAccount(foreignID string) (Account, error)
 
+	// Find the accountID (HD root PKH) that owns the given Dogecoin address.
+	// Also find the key index of `pkhAddress` within the HD wallet.
+	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, err error)
+
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
+
+	// Create an Unspent Transaction Output (at the given block height)
+	CreateUTXO(txID string, vOut int64, value CoinAmount, scriptType string, pkhAddress Address, accountID Address, keyIndex uint32, blockHeight int64) error
+
+	// Mark an Unspent Transaction Output as spent (at the given block height)
+	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) error
 
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
