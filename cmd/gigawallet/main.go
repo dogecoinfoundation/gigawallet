@@ -1,86 +1,94 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
-	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
-	"github.com/dogecoinfoundation/gigawallet/pkg/chaintracker"
-	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
-	"github.com/dogecoinfoundation/gigawallet/pkg/core"
-	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
-	"github.com/dogecoinfoundation/gigawallet/pkg/receivers"
-	"github.com/dogecoinfoundation/gigawallet/pkg/store"
-	"github.com/dogecoinfoundation/gigawallet/pkg/webapi"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		os.Stderr.WriteString("usage: gigawallet <config-file> # e.g. devconf.toml\n")
+	// Load config
+	var configPath string
+	var config giga.Config
+
+	LoadConfig(configPath, &config)
+
+	// define root command
+	rootCmd := &cobra.Command{
+		Use: "gigawallet",
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Help()
+			os.Exit(0)
+		},
+	}
+
+	// Add flags for each configuration option
+	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceName, "service-name", "", "Service name")
+	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceDomain, "service-domain", "", "Service domain")
+	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceIconURL, "service-icon-url", "", "Service icon URL")
+	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceKeyHash, "service-key-hash", "", "Service key hash")
+	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.Dogecoind, "dogecoind", "", "Dogecoind")
+	rootCmd.PersistentFlags().IntVar(&config.Gigawallet.ConfirmationsNeeded, "confirmations-needed", 0, "Confirmations needed")
+	rootCmd.PersistentFlags().StringVar(&config.WebAPI.Port, "webapi-port", "", "Web API port")
+	rootCmd.PersistentFlags().StringVar(&config.WebAPI.Bind, "webapi-bind", "", "Web API bind")
+	rootCmd.PersistentFlags().StringVar(&config.Store.DBFile, "store-db-file", "", "Store DB file")
+	// ...
+	// Bind flags to config fields
+	viper.BindPFlags(rootCmd.PersistentFlags())
+
+	serverCmd := &cobra.Command{
+		Use:   "server",
+		Short: "Start the GigaWallet server",
+		Run: func(cmd *cobra.Command, args []string) {
+			Server(config)
+		},
+	}
+
+	configCmd := &cobra.Command{
+		Use:   "showconf",
+		Short: "Print the config state and exit",
+		Run: func(cmd *cobra.Command, args []string) {
+			o, _ := json.MarshalIndent(config, ">", " ")
+			fmt.Println(string(o))
+			os.Exit(0)
+		},
+	}
+
+	rootCmd.AddCommand(serverCmd)
+	rootCmd.AddCommand(configCmd)
+
+	// Execute the Cobra command
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+	}
+
+}
+
+func LoadConfig(configPath string, config *giga.Config) {
+
+	configFileName, set := os.LookupEnv("GIGA_ENV")
+	if set {
+		viper.SetConfigName(configFileName)
+	} else {
+		viper.SetConfigName("config")
+	}
+
+	// Set config file name and search paths
+	viper.SetConfigType("toml")
+	viper.AddConfigPath(".")
+	viper.AddConfigPath("/etc/gigawallet/")
+	viper.AddConfigPath("$HOME/.gigawallet")
+
+	if err := viper.ReadInConfig(); err != nil {
+		fmt.Println("failed to find config file: ", err)
 		os.Exit(1)
 	}
-	conf := giga.LoadConfig(os.Args[1])
 
-	rpc, err := dogecoin.NewL1Libdogecoin(conf, nil)
-	if err != nil {
-		panic(err)
+	if err := viper.Unmarshal(&config); err != nil {
+		panic(fmt.Errorf("failed to unmarshal config: %s", err))
 	}
-	fmt.Println(rpc.MakeAddress())
-
-	c := conductor.NewConductor(
-		conductor.HookSignals(),
-		conductor.Noisy(),
-	)
-
-	// Start the MessageBus Service
-	bus := giga.NewMessageBus()
-	c.Service("MessageBus", bus)
-
-	// Set up all configured receivers
-	receivers.SetUpReceivers(c, bus, conf)
-
-	// Set up the L1 interface to Core
-	l1_core, err := core.NewDogecoinCoreRPC(conf)
-	if err != nil {
-		panic(err)
-	}
-	l1, err := dogecoin.NewL1Libdogecoin(conf, l1_core)
-	if err != nil {
-		panic(err)
-	}
-
-	// Setup a Store, SQLite for now
-	store, err := store.NewSQLiteStore(conf.Store.DBFile)
-	if err != nil {
-		panic(err)
-	}
-	defer store.Close()
-
-	// Start the Chain Tracker
-	tipc, err := chaintracker.StartChainTracker(c, conf, l1, store)
-	if err != nil {
-		panic(err)
-	}
-
-	// Start the PaymentBroker service (deprecated)
-	pb := broker.NewPaymentBroker(conf, store)
-	c.Service("Payment Broker", pb)
-
-	// Start the Core listener service (ZMQ)
-	corez, err := core.NewCoreZMQReceiver(bus, conf)
-	if err != nil {
-		panic(err)
-	}
-	corez.Subscribe(tipc.ReceiveFromCore)
-	c.Service("ZMQ Listener", corez)
-
-	// Start the Payment API
-	p, err := webapi.NewWebAPI(conf, l1, store, bus)
-	if err != nil {
-		panic(err)
-	}
-	c.Service("Payment API", p)
-
-	<-c.Start()
 }

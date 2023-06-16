@@ -17,6 +17,15 @@ type NodeConfig struct {
 
 type Config struct {
 	Gigawallet struct {
+		// Keys used by Doge Connect to identify and verify this
+		// Gigawallet instance.
+		ServiceName string `default:"Example Dogecoin Store"`
+		// ServiceDomain will be used to lookup the ServiceKey from
+		// DNS TXT record and verified against ServiceKeyHash.
+		ServiceDomain  string `default:"example.com"`
+		ServiceIconURL string `default:"https://example.com/icon.png"`
+		ServiceKeyHash string `default:""`
+
 		// key for which Dogecoind struct to use
 		Dogecoind           string `default:"testnet" required:"true" env:"network"`
 		ConfirmationsNeeded int    `default:"60" required:"false"`
