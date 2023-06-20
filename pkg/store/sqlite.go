@@ -11,7 +11,7 @@ import (
 	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
-var SETUP_SQL string = `
+const SETUP_SQL string = `
 CREATE TABLE IF NOT EXISTS account (
 	address TEXT NOT NULL PRIMARY KEY,
 	foreign_id TEXT NOT NULL UNIQUE,
@@ -95,6 +95,11 @@ func NewSQLiteStore(fileName string) (SQLiteStore, error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return SQLiteStore{}, dbErr(err, "opening database")
+	}
+	// WAL mode provides more concurrency
+	_, err = db.Exec("PRAGMA journal_mode=WAL")
+	if err != nil {
+		return SQLiteStore{}, dbErr(err, "creating database schema")
 	}
 	// init tables / indexes
 	_, err = db.Exec(SETUP_SQL)
@@ -372,7 +377,7 @@ func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, l
 }
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext) values(?,?,?,?,?,?,?)")
+	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext,payout_address,payout_threshold,payout_frequency) values(?,?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "createAccount: preparing insert")
 	}

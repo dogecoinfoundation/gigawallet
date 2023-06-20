@@ -141,7 +141,7 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 	var blockCount int = 0
 	tx := c.beginStoreTxn()
 	for pos.NextBlockHash != "" {
-		log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
+		//log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
 		block := c.fetchBlock(pos.NextBlockHash)
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
@@ -306,7 +306,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 					accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(pkhAddress)
 					if err != nil {
 						if giga.IsNotFoundError(err) {
-							log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
+							//log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
 						} else {
 							log.Println("ChainFollower: processBlock: cannot query FindAccountForAddress in DB:", err, pkhAddress)
 							c.sleepForRetry(err)
