@@ -25,7 +25,7 @@ type InvoiceCreateRequest struct {
 }
 
 func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invoice, error) {
-	txn, err := a.Store.Begin()
+	txn, err := a.Store.Begin(0)
 	if err != nil {
 		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to begin txn: %s", err))
 		return Invoice{}, err
@@ -103,7 +103,7 @@ func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoices
 func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error) {
 	// Transaction retry loop.
 	for {
-		txn, err := a.Store.Begin()
+		txn, err := a.Store.Begin(0)
 		if err != nil {
 			a.bus.Send(SYS_ERR, fmt.Sprintf("CreateAccount: Failed to begin txn: %s", err))
 			return AccountPublic{}, err
@@ -170,7 +170,7 @@ func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 
 // Update any of the 'settings' fields on an Account
 func (a API) UpdateAccountSettings(foreignID string, update map[string]interface{}) (AccountPublic, error) {
-	txn, err := a.Store.Begin()
+	txn, err := a.Store.Begin(0)
 	if err != nil {
 		a.bus.Send(SYS_ERR, fmt.Sprintf("UpdateAccountSettings: Failed to begin txn: %s", err))
 		return AccountPublic{}, err

@@ -39,7 +39,7 @@ func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context
 					p.sendEvent(giga.BrokerEvent{Type: giga.NewInvoice, ID: e.ID})
 				case giga.InvoiceConfirmed:
 					// from Confirmer
-					txn, err := p.store.Begin()
+					txn, err := p.store.Begin(0)
 					// XXX This loop needs bettre failure modes!
 					// this stuff needs to be buffered, perhaps WAL?
 					if err != nil {

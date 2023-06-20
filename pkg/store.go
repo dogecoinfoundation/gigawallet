@@ -1,9 +1,12 @@
 package giga
 
+import "time"
+
 // A store represents a connection to a database
 // with a transactional API that
 type Store interface {
-	Begin() (StoreTransaction, error)
+	// Optional transaction timeout (default 5 seconds)
+	Begin(timeout time.Duration) (StoreTransaction, error)
 
 	// GetInvoice returns the invoice with the given ID.
 	GetInvoice(id Address) (Invoice, error)

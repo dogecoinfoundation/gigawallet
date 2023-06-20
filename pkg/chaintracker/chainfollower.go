@@ -12,7 +12,8 @@ const (
 	DOGECOIN_GENESIS_BLOCK_HASH = "82bc68038f6034c0596b6e313729793a887fded6e92a31fbdf70863f89d9bea2" // Mainnet 1
 	RETRY_DELAY                 = 5 * time.Second
 	CONFLICT_DELAY              = 250 * time.Millisecond // quarter second
-	BATCH_SIZE                  = 100                    // number of blocks
+	BATCH_SIZE                  = 10                     // number of blocks
+	BATCH_TIMEOUT               = 30 * time.Second       // DB timeout for a batch
 )
 
 type ChainFollower struct {
@@ -208,7 +209,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 	log.Println("ChainFollower: rolling back chainstate to height:", maxValidHeight)
 	// wrap the following in a transaction with retry.
 	for {
-		tx, err := c.store.Begin()
+		tx, err := c.store.Begin(BATCH_TIMEOUT)
 		if err != nil {
 			log.Println("ChainFollower: rollBackChainStateToPos: cannot begin:", err)
 			c.sleepForRetry(err)
@@ -346,7 +347,7 @@ func typeOfScript(name string) string {
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
 	for {
-		tx, err := c.store.Begin()
+		tx, err := c.store.Begin(BATCH_TIMEOUT)
 		if err != nil {
 			log.Println("ChainFollower: beginStoreTxn: cannot begin:", err)
 			c.sleepForRetry(err)
