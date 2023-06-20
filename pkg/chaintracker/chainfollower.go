@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DOGECOIN_GENESIS_BLOCK_HASH = "1a91e3dace36e2be3bf030a65679fe821aa1d6ef92e7c9902eb318182c355691"
+	DOGECOIN_GENESIS_BLOCK_HASH = "82bc68038f6034c0596b6e313729793a887fded6e92a31fbdf70863f89d9bea2" // Mainnet 1
 	RETRY_DELAY                 = 5 * time.Second
 	CONFLICT_DELAY              = 250 * time.Millisecond // quarter second
 	BATCH_SIZE                  = 100                    // number of blocks
@@ -303,7 +303,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 					// These script-types always contain a single address.
 					pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
 					// Use an address-to-wallet index (utxo_account_i) to find the wallet.
-					accountID, keyIndex, err := tx.FindAccountForAddress(pkhAddress)
+					accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(pkhAddress)
 					if err != nil {
 						if giga.IsNotFoundError(err) {
 							log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
@@ -313,7 +313,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 							return false // retry.
 						}
 					} else {
-						err = tx.CreateUTXO(txn_id, vout.N, vout.Value, scriptType, pkhAddress, accountID, keyIndex, block.Height)
+						err = tx.CreateUTXO(txn_id, vout.N, vout.Value, scriptType, pkhAddress, accountID, keyIndex, isInternal, block.Height)
 						if err != nil {
 							log.Println("ChainFollower: processBlock: cannot create UTXO in DB:", err, txn_id, vout.N)
 							c.sleepForRetry(err)

@@ -1,8 +1,6 @@
 package store
 
 import (
-	"log"
-
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -20,12 +18,6 @@ type Mock struct {
 func (m Mock) MarkInvoiceAsPaid(id giga.Address) error {
 	//TODO implement me
 	panic("implement me")
-}
-
-func (m Mock) GetPendingInvoices() (<-chan giga.Invoice, error) {
-	//TODO implement me
-	log.Print("GetPendingInvoices: not implemented")
-	return make(chan giga.Invoice), nil
 }
 
 // NewMock returns a giga.PaymentsStore implementor that stores orders in memory

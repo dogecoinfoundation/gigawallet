@@ -53,6 +53,11 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 		return Invoice{}, err
 	}
 
+	// Reserve the Invoice Address in the account.
+	acc.NextExternalKey = i.KeyIndex + 1
+	acc.UpdatePoolAddresses(txn, a.L1)
+	txn.UpdateAccount(acc)
+
 	err = txn.Commit()
 	if err != nil {
 		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to commit: %s", foreignID))
@@ -124,8 +129,16 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 			ForeignID: foreignID,
 			Privkey:   priv,
 		}
-		// FIXME: This is mis-named, because it fails with AlreadyExists if the account exists.
-		err = txn.StoreAccount(account)
+
+		// Generate and store addresses for transaction discovery on blockchain.
+		// This must be done before we store the account!
+		err = account.UpdatePoolAddresses(txn, a.L1)
+		if err != nil {
+			return AccountPublic{}, NewErr(NotAvailable, "cannot generate addresses for account: %v", err)
+		}
+
+		// This fails with AlreadyExists if the account exists:
+		err = txn.CreateAccount(account)
 		if err != nil {
 			if IsAlreadyExistsError(err) {
 				// retry: another concurrent request created the account.
@@ -180,7 +193,7 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 			a.bus.Send(SYS_ERR, fmt.Sprintf("Invalid account setting: %s", k))
 		}
 	}
-	err = txn.StoreAccount(acc)
+	err = txn.UpdateAccount(acc)
 	if err != nil {
 		return AccountPublic{}, err
 	}

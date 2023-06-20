@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
-	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/shopspring/decimal"
@@ -20,6 +18,8 @@ CREATE TABLE IF NOT EXISTS account (
 	privkey TEXT NOT NULL,
 	next_int_key INTEGER NOT NULL,
 	next_ext_key INTEGER NOT NULL,
+	max_pool_int INTEGER NOT NULL,
+	max_pool_ext INTEGER NOT NULL,
 	payout_address TEXT NOT NULL,
 	payout_threshold TEXT NOT NULL,
 	payout_frequency TEXT NOT NULL
@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS account (
 CREATE TABLE IF NOT EXISTS account_address (
 	address TEXT NOT NULL PRIMARY KEY,
 	key_index INTEGER NOT NULL,
+	is_internal BOOLEAN NOT NULL,
 	account_address TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS account_address_i ON account_address (account_address);
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS utxo (
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
+	is_internal BOOLEAN NOT NULL,
 	adding_height INTEGER,
 	available_height INTEGER,
 	spending_height INTEGER,
@@ -151,7 +153,7 @@ func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 }
 
 func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
-	// MUST order by key_index (or sqlite OID) to support the cursor API:
+	// MUST order by key_index to support the cursor API:
 	// we need a way to resume the query next time from whatever next_cursor we return,
 	// and the aggregate result SHOULD be stable even as the DB is modified.
 	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
@@ -189,18 +191,14 @@ func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (
 	return
 }
 
-func (s SQLiteStore) GetPendingInvoices() (<-chan giga.Invoice, error) {
-	//TODO implement me
-	log.Print("GetPendingInvoices: not implemented")
-	return make(chan giga.Invoice), nil
-}
-
 func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
-	row := s.db.QueryRow("SELECT foreign_id, address, privkey, next_int_key, next_ext_key FROM account WHERE foreign_id = ?", foreignID)
+	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
 	err := row.Scan(
 		&acc.ForeignID, &acc.Address, &acc.Privkey,
-		&acc.NextInternalKey, &acc.NextExternalKey, &acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
+		&acc.NextInternalKey, &acc.NextExternalKey,
+		&acc.MaxPoolInternal, &acc.MaxPoolExternal,
+		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
 		// MUST detect this error to fulfil the API contract.
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
@@ -297,8 +295,7 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	if err != nil {
 		return dbErr(err, "createInvoice: stmt.Exec insert")
 	}
-
-	return t.updateAccountNextExternal(inv.Account, inv.KeyIndex)
+	return nil
 }
 
 func (t SQLiteStoreTransaction) GetInvoice(addr giga.Address) (giga.Invoice, error) {
@@ -374,41 +371,34 @@ func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, l
 	return
 }
 
-func (t SQLiteStoreTransaction) GetPendingInvoices() (<-chan giga.Invoice, error) {
-	//TODO implement me
-	log.Print("GetPendingInvoices: not implemented")
-	return make(chan giga.Invoice), nil
-}
-
-func (t SQLiteStoreTransaction) StoreAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("insert into account(foreign_id, address, privkey, next_int_key, next_ext_key) values(?, ?, ?, ?, ?)")
+func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
+	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext) values(?,?,?,?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "createAccount: preparing insert")
 	}
 	defer stmt.Close()
 	_, err = stmt.Exec(
 		acc.ForeignID, acc.Address, acc.Privkey, // only in createAccount.
-		acc.NextInternalKey, acc.NextExternalKey, acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency) // common (see updateAccount)
+		acc.NextInternalKey, acc.NextExternalKey, // common (see updateAccount) ...
+		acc.MaxPoolInternal, acc.MaxPoolExternal,
+		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency)
 	if err != nil {
-		// MUST detect this error to fulfil the API contract.
-		if strings.HasPrefix(err.Error(), "UNIQUE constraint failed") {
-			return giga.NewErr(giga.AlreadyExists, "account already exists: %s", acc.ForeignID)
-		}
 		return dbErr(err, "createAccount: executing insert")
 	}
 	return nil
 }
 
-// FIXME: not used, but StoreAccount only handles insert.
 func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("update account set next_int_key = MAX(next_int_key, ?), next_ext_key = MAX(next_ext_key, ?), payout_address = ?, payout_threshold = ?, payout_frequency = ? where foreign_id = ?")
+	stmt, err := t.tx.Prepare("update account set next_int_key=MAX(next_int_key,?), max_pool_int=MAX(max_pool_int,?), max_pool_ext=MAX(max_pool_ext,?), next_ext_key=MAX(next_ext_key,?), payout_address=?, payout_threshold=?, payout_frequency=? where foreign_id=?")
 	if err != nil {
 		return dbErr(err, "updateAccount: preparing update")
 	}
 	defer stmt.Close()
 	res, err := stmt.Exec(
-		acc.NextInternalKey, acc.NextExternalKey, acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency, // common (see createAccount)
-		acc.ForeignID) // only in updateAccount.
+		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
+		acc.MaxPoolInternal, acc.MaxPoolExternal,
+		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
+		acc.ForeignID) // the Key (not updated)
 	if err != nil {
 		return dbErr(err, "updateAccount: executing update")
 	}
@@ -419,6 +409,23 @@ func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
 	if num_rows < 1 {
 		// MUST detect this error to fulfil the API contract.
 		return giga.NewErr(giga.NotFound, "account not found: %s", acc.ForeignID)
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses []giga.Address, firstAddress uint32, isInternal bool) error {
+	// Associate a list of addresses with an accountID in the account_address table.
+	stmt, err := t.tx.Prepare("INSERT INTO account_address (address,key_index,is_internal,account_address) VALUES (?,?,?)")
+	if err != nil {
+		return dbErr(err, "StoreAddresses: preparing insert")
+	}
+	defer stmt.Close()
+	firstKey := firstAddress
+	for n, addr := range addresses {
+		_, err = stmt.Exec(addr, firstKey+uint32(n), isInternal, accountID)
+		if err != nil {
+			return dbErr(err, "StoreAddresses: executing insert")
+		}
 	}
 	return nil
 }
@@ -436,18 +443,19 @@ func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, erro
 	return acc, nil
 }
 
-func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, error) {
-	row := t.tx.QueryRow("SELECT account_address, key_index FROM account_address WHERE address = ?", address)
+func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, bool, error) {
+	row := t.tx.QueryRow("SELECT account_address,key_index,is_internal FROM account_address WHERE address = ?", address)
 	var accountID giga.Address
 	var keyIndex uint32
-	err := row.Scan(&accountID, &keyIndex)
+	var isInternal bool
+	err := row.Scan(&accountID, &keyIndex, &isInternal)
 	if err == sql.ErrNoRows {
-		return "", 0, giga.NewErr(giga.NotFound, "no matching account for address: %s", address)
+		return "", 0, false, giga.NewErr(giga.NotFound, "no matching account for address: %s", address)
 	}
 	if err != nil {
-		return "", 0, dbErr(err, "FindAccountForAddress: error scanning row")
+		return "", 0, false, dbErr(err, "FindAccountForAddress: error scanning row")
 	}
-	return accountID, keyIndex, nil
+	return accountID, keyIndex, isInternal, nil
 }
 
 func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
@@ -475,28 +483,6 @@ func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (res
 		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
 	return
-}
-
-func (t SQLiteStoreTransaction) updateAccountNextExternal(account giga.Address, keyIndex uint32) error {
-	stmt, err := t.tx.Prepare("update account set next_ext_key = MAX(next_ext_key, ?) where address = ?")
-	if err != nil {
-		return dbErr(err, "StoreInvoice: tx.Prepare update")
-	}
-	defer stmt.Close()
-
-	// update Account to mark KeyIndex as used.
-	res, err := stmt.Exec(keyIndex+1, account)
-	if err != nil {
-		return dbErr(err, "StoreInvoice: update.Exec")
-	}
-	num_rows, err := res.RowsAffected()
-	if err != nil {
-		return dbErr(err, "StoreInvoice: res.RowsAffected")
-	}
-	if num_rows < 1 {
-		return giga.NewErr(giga.NotFound, "unknown account: %s", account)
-	}
-	return nil
 }
 
 func (t SQLiteStoreTransaction) MarkInvoiceAsPaid(address giga.Address) error {
@@ -541,13 +527,13 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, blockHeight int64) error {
-	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, adding_height)")
+func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, isInternal bool, blockHeight int64) error {
+	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height)")
 	if err != nil {
 		return dbErr(err, "CreateUTXO: preparing insert")
 	}
 	defer stmt.Close()
-	_, err = stmt.Exec(txID, vOut, accountID, value, scriptType, pkhAddress, keyIndex, blockHeight)
+	_, err = stmt.Exec(txID, vOut, accountID, value, scriptType, pkhAddress, keyIndex, isInternal, blockHeight)
 	if err != nil {
 		return dbErr(err, "CreateUTXO: executing insert")
 	}
@@ -637,6 +623,7 @@ func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) erro
 func dbErr(err error, where string) error {
 	if sqErr, isSq := err.(sqlite3.Error); isSq {
 		if sqErr.Code == sqlite3.ErrConstraint {
+			// MUST detect 'AlreadyExists' to fulfil the API contract!
 			// Constraint violation, e.g. a duplicate key.
 			return giga.NewErr(giga.AlreadyExists, "SQLiteStore error: %s: %v", where, err)
 		}

@@ -22,11 +22,11 @@ func (p *PaymentBroker) Subscribe(ch chan<- giga.BrokerEvent) {
 }
 
 func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context) error {
-	storedInvoices, err := p.store.GetPendingInvoices()
-	if err != nil {
-		log.Println("Error getting pending invoices:", err)
-		return err
-	}
+	// storedInvoices, err := p.store.GetPendingInvoices()
+	// if err != nil {
+	// 	log.Println("Error getting pending invoices:", err)
+	// 	return err
+	// }
 	go func() {
 		started <- true
 		for {
@@ -59,8 +59,8 @@ func (p PaymentBroker) Run(started, stopped chan bool, stop chan context.Context
 						log.Println("Payment Broker couldn't commit txn, mark invoice paid", err)
 					}
 				}
-			case e := <-storedInvoices:
-				p.sendEvent(giga.BrokerEvent{Type: giga.NewInvoice, ID: string(e.ID)})
+			// case e := <-storedInvoices:
+			// 	p.sendEvent(giga.BrokerEvent{Type: giga.NewInvoice, ID: string(e.ID)})
 			case <-stop:
 				stopped <- true
 				return
