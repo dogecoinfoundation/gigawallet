@@ -24,6 +24,9 @@ type Store interface {
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
+
+	// Close the store.
+	Close()
 }
 
 type StoreTransaction interface {

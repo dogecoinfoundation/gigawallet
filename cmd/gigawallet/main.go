@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
@@ -11,7 +12,7 @@ import (
 	"github.com/dogecoinfoundation/gigawallet/pkg/core"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
 	"github.com/dogecoinfoundation/gigawallet/pkg/receivers"
-	"github.com/dogecoinfoundation/gigawallet/pkg/store"
+	gstore "github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"github.com/dogecoinfoundation/gigawallet/pkg/webapi"
 )
 
@@ -50,8 +51,13 @@ func main() {
 		panic(err)
 	}
 
-	// Setup a Store, SQLite for now
-	store, err := store.NewSQLiteStore(conf.Store.DBFile)
+	// Set up the configured Store
+	var store giga.Store
+	if strings.HasPrefix(conf.Store.DBFile, "postgres:") {
+		store, err = gstore.NewPostgresStore(conf.Store.DBFile)
+	} else {
+		store, err = gstore.NewSQLiteStore(conf.Store.DBFile)
+	}
 	if err != nil {
 		panic(err)
 	}
