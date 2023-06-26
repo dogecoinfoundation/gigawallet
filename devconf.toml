@@ -2,10 +2,10 @@
 
 [WebAPI]
   bind = "localhost"  # avoids macOS firewall confirmation!
-  port = "8080"
+  port = "8081"
 
 [gigawallet]
-  dogecoind = "mainnet"  # which dogecoind to connect to
+  network = "mainnet"  # which dogecoind to connect to
 
 [dogecoind.testnet]
   host    = "localhost"

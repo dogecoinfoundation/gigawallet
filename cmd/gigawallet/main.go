@@ -2,93 +2,114 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 
+	"github.com/BurntSushi/toml"
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
-	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func main() {
-	// Load config
-	var configPath string
-	var config giga.Config
 
-	LoadConfig(configPath, &config)
+	// building the config is a multi step process, starting with
+	// default arguments, then loading config file, then applying
+	// any command-line flags:
 
-	// define root command
-	rootCmd := &cobra.Command{
-		Use: "gigawallet",
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
-			os.Exit(0)
+	// Default config values
+	var config giga.Config = giga.Config{
+		Gigawallet: giga.GigawalletConfig{
+			ServiceName:         "Example Dogecoin Store",
+			ServiceDomain:       "example.com",
+			ServiceIconURL:      "https://example.com/icon.png",
+			ServiceKeyHash:      "",
+			Network:             "testnet",
+			ConfirmationsNeeded: 60,
 		},
-	}
-
-	// Add flags for each configuration option
-	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceName, "service-name", "", "Service name")
-	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceDomain, "service-domain", "", "Service domain")
-	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceIconURL, "service-icon-url", "", "Service icon URL")
-	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.ServiceKeyHash, "service-key-hash", "", "Service key hash")
-	rootCmd.PersistentFlags().StringVar(&config.Gigawallet.Dogecoind, "dogecoind", "", "Dogecoind")
-	rootCmd.PersistentFlags().IntVar(&config.Gigawallet.ConfirmationsNeeded, "confirmations-needed", 0, "Confirmations needed")
-	rootCmd.PersistentFlags().StringVar(&config.WebAPI.Port, "webapi-port", "", "Web API port")
-	rootCmd.PersistentFlags().StringVar(&config.WebAPI.Bind, "webapi-bind", "", "Web API bind")
-	rootCmd.PersistentFlags().StringVar(&config.Store.DBFile, "store-db-file", "", "Store DB file")
-	// ...
-	// Bind flags to config fields
-	viper.BindPFlags(rootCmd.PersistentFlags())
-
-	serverCmd := &cobra.Command{
-		Use:   "server",
-		Short: "Start the GigaWallet server",
-		Run: func(cmd *cobra.Command, args []string) {
-			Server(config)
+		WebAPI: giga.WebAPIConfig{
+			Port: "8080",
+			Bind: "",
 		},
-	}
-
-	configCmd := &cobra.Command{
-		Use:   "showconf",
-		Short: "Print the config state and exit",
-		Run: func(cmd *cobra.Command, args []string) {
-			o, _ := json.MarshalIndent(config, ">", " ")
-			fmt.Println(string(o))
-			os.Exit(0)
+		Store: giga.StoreConfig{
+			DBFile: "gigawallet.db",
 		},
+		Loggers:   make(map[string]giga.LoggersConfig),
+		Dogecoind: make(map[string]giga.NodeConfig),
+		Core:      giga.NodeConfig{},
 	}
 
-	rootCmd.AddCommand(serverCmd)
-	rootCmd.AddCommand(configCmd)
-
-	// Execute the Cobra command
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-	}
-
-}
-
-func LoadConfig(configPath string, config *giga.Config) {
-
-	configFileName, set := os.LookupEnv("GIGA_ENV")
-	if set {
-		viper.SetConfigName(configFileName)
-	} else {
-		viper.SetConfigName("config")
-	}
-
-	// Set config file name and search paths
-	viper.SetConfigType("toml")
-	viper.AddConfigPath(".")
-	viper.AddConfigPath("/etc/gigawallet/")
-	viper.AddConfigPath("$HOME/.gigawallet")
-
-	if err := viper.ReadInConfig(); err != nil {
-		fmt.Println("failed to find config file: ", err)
+	// Config file loading:
+	err := mergeConfigFromFile(&config)
+	if err != nil {
+		fmt.Println("Failed to load config file:", err)
 		os.Exit(1)
 	}
 
-	if err := viper.Unmarshal(&config); err != nil {
-		panic(fmt.Errorf("failed to unmarshal config: %s", err))
+	// cli flag loading
+	applyFlags(&config)
+
+	// set config.Core to the network block specified in
+	// config.Gigawallet.Network
+	if len(config.Gigawallet.Network) < 1 {
+		panic("bad config: missing network")
 	}
+	config.Core = config.Dogecoind[config.Gigawallet.Network]
+	if len(config.Core.Host) < 1 {
+		panic(fmt.Sprintf("bad config: missing network: %s", config.Gigawallet.Network))
+	}
+
+	// Sub commands!
+	switch flag.Arg(0) {
+	case "server":
+		Server(config)
+		os.Exit(0)
+	case "printconf":
+		o, _ := json.MarshalIndent(config, ">", " ")
+		fmt.Println(string(o))
+		os.Exit(0)
+	default:
+		fmt.Println("Invalid subcommand:", flag.Arg(0))
+		os.Exit(1)
+	}
+}
+
+// we search for a config.toml in /etc/gigawallet, $HOME/.gigawallet or .
+// if GIGA_ENV is provided it replaces the config filename, ie: $GIGA_ENV.toml
+func mergeConfigFromFile(config *giga.Config) error {
+
+	filename := ""
+	searchPaths := []string{"./", "/etc/gigawallet/", "$HOME/.gigawallet/"}
+
+	// Check if GIGA_ENV environment variable is set and add its value as a filename
+	gigaEnv, set := os.LookupEnv("GIGA_ENV")
+	if set {
+		filename = gigaEnv + ".toml"
+	} else {
+		filename = "config.toml"
+	}
+
+	// Try to find and load the config file
+	for _, path := range searchPaths {
+		filePath := os.ExpandEnv(path + filename)
+		_, err := os.Stat(filePath)
+		if err == nil {
+			_, err := toml.DecodeFile(filePath, config)
+			return err
+		}
+	}
+
+	return fmt.Errorf("config file %s not found in %s", filename, searchPaths)
+}
+
+func applyFlags(config *giga.Config) {
+	flag.StringVar(&config.Gigawallet.ServiceName, "service-name", config.Gigawallet.ServiceName, "Service name")
+	flag.StringVar(&config.Gigawallet.ServiceDomain, "service-domain", config.Gigawallet.ServiceDomain, "Service domain")
+	flag.StringVar(&config.Gigawallet.ServiceIconURL, "service-icon-url", config.Gigawallet.ServiceIconURL, "Service icon URL")
+	flag.StringVar(&config.Gigawallet.ServiceKeyHash, "service-key-hash", config.Gigawallet.ServiceKeyHash, "Service key hash")
+	flag.StringVar(&config.Gigawallet.Network, "network", config.Gigawallet.Network, "Network")
+	flag.IntVar(&config.Gigawallet.ConfirmationsNeeded, "confirmations-needed", config.Gigawallet.ConfirmationsNeeded, "Confirmations needed")
+	flag.StringVar(&config.WebAPI.Port, "webapi-port", config.WebAPI.Port, "Web API port")
+	flag.StringVar(&config.WebAPI.Bind, "webapi-bind", config.WebAPI.Bind, "Web API bind")
+	flag.StringVar(&config.Store.DBFile, "store-db-file", config.Store.DBFile, "Store DB file")
+	flag.Parse()
 }
