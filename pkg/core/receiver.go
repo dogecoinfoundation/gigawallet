@@ -32,7 +32,7 @@ func NewCoreZMQReceiver(bus giga.MessageBus, config giga.Config) (*CoreZMQReceiv
 	return &CoreZMQReceiver{
 		bus:         bus,
 		listeners:   make([]chan<- giga.NodeEvent, 0, 10),
-		nodeAddress: fmt.Sprintf("tcp://%s:%d", config.Dogecoind[config.Gigawallet.Dogecoind].Host, config.Dogecoind[config.Gigawallet.Dogecoind].ZMQPort),
+		nodeAddress: fmt.Sprintf("tcp://%s:%d", config.Core.Host, config.Core.ZMQPort),
 	}, nil
 }
 
