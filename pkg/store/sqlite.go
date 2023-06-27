@@ -199,7 +199,7 @@ func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (
 }
 
 func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
-	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext FROM account WHERE foreign_id = ?", foreignID)
+	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
 	err := row.Scan(
 		&acc.ForeignID, &acc.Address, &acc.Privkey,
