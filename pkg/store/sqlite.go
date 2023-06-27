@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS invoice (
 	txn_id TEXT NOT NULL,
 	vendor TEXT NOT NULL,
 	items TEXT NOT NULL,
-	key_index INTEGER NOT NULL
+	key_index INTEGER NOT NULL,
+	block_id TEXT NOT NULL,
+	confirmations INTEGER NOT NULL	
 );
 CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
 
