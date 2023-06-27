@@ -1,5 +1,10 @@
 package giga
 
+import "log"
+
+// The number of addresses HD Wallet discovery will scan beyond the last-used address.
+const HD_DISCOVERY_RANGE = 20
+
 // Account is a single user account (Wallet) managed by Gigawallet.
 /*
  -- Payouts
@@ -7,16 +12,65 @@ package giga
 	 - PayoutThreshold, if non-zero, auto-payout if balance is greater
 	 - PayoutFrequency, if set, payout at this schedule
 */
-
 type Account struct {
-	Address         Address
-	Privkey         Privkey
-	ForeignID       string
-	NextInternalKey uint32
-	NextExternalKey uint32
+	Address         Address // HD Wallet master public key as a dogecoin address (Account ID)
+	Privkey         Privkey // HD Wallet master extended private key.
+	ForeignID       string  // unique identifier supplied by the organisation using Gigawallet.
+	NextInternalKey uint32  // next internal HD Wallet address to use for txn change outputs.
+	NextExternalKey uint32  // next external HD Wallet address to use for an invoice or pay-to address.
+	MaxPoolInternal uint32  // maximum internal HD Wallet address inserted into account_address table.
+	MaxPoolExternal uint32  // maximum external HD Wallet address inserted into account_address table.
 	PayoutAddress   string
 	PayoutThreshold string
 	PayoutFrequency string
+}
+
+// Generate and store HD Wallet addresses up to 20 beyond any currently-used addresses.
+func (a *Account) UpdatePoolAddresses(tx StoreTransaction, lib L1) error {
+	// HD Wallet discovery requires us to detect any transactions on the blockchain
+	// that use addresses we haven't used yet (up to 20 beyond any used address)
+	// We use an account_address table to track all used and future addresses,
+	// so when we receive a new block we can query that table to find the account.
+	// ASSUMES: NextExternalKey covers all used external addresses on blockchain.
+	externalPoolEnd := a.NextExternalKey + HD_DISCOVERY_RANGE
+	internalPoolEnd := a.NextInternalKey + HD_DISCOVERY_RANGE
+	firstExternal := a.MaxPoolExternal + 1
+	if firstExternal < externalPoolEnd {
+		numberToAdd := externalPoolEnd - firstExternal
+		log.Println("UpdatePoolAddresses: generating", numberToAdd, "new external addresses for", a.ForeignID, "starting at", firstExternal)
+		addresses, err := a.GenerateAddresses(lib, firstExternal, numberToAdd, false)
+		if err != nil {
+			return err
+		}
+		tx.StoreAddresses(a.Address, addresses, firstExternal, false)
+	}
+	firstInternal := a.MaxPoolInternal + 1
+	if firstInternal < internalPoolEnd {
+		numberToAdd := internalPoolEnd - firstInternal
+		log.Println("UpdatePoolAddresses: generating", numberToAdd, "new internal addresses for", a.ForeignID, "starting at", firstInternal)
+		addresses, err := a.GenerateAddresses(lib, firstInternal, numberToAdd, false)
+		if err != nil {
+			return err
+		}
+		tx.StoreAddresses(a.Address, addresses, firstInternal, false)
+	}
+	// These must be updated in the DB by calling tx.StoreAccount(a)
+	a.MaxPoolInternal = internalPoolEnd
+	a.MaxPoolExternal = externalPoolEnd
+	return nil
+}
+
+// Generate sequential HD Wallet addresses, either external or internal.
+func (a *Account) GenerateAddresses(lib L1, first uint32, count uint32, isInternal bool) ([]Address, error) {
+	var result []Address
+	for addressIndex := first; addressIndex < first+count; addressIndex++ {
+		addr, err := lib.MakeChildAddress(a.Privkey, addressIndex, isInternal)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, addr)
+	}
+	return result, nil
 }
 
 // NextChangeAddress generates the next unused "internal address"

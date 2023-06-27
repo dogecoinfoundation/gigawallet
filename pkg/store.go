@@ -14,9 +14,6 @@ type Store interface {
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
 
-	// GetPendingInvoices sends all invoices that are pending to the given channel.
-	GetPendingInvoices() (<-chan Invoice, error)
-
 	// GetAccount returns the account with the given ForeignID.
 	GetAccount(foreignID string) (Account, error)
 
@@ -37,6 +34,7 @@ type StoreTransaction interface {
 	Rollback() error
 
 	// StoreInvoice stores an invoice.
+	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
 	// It returns an unspecified error if the invoice ID already exists (FIXME)
 	StoreInvoice(invoice Invoice) error
 
@@ -50,12 +48,18 @@ type StoreTransaction interface {
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
 
-	// GetPendingInvoices sends all invoices that are pending to the given channel.
-	GetPendingInvoices() (<-chan Invoice, error)
-
-	// StoreAccount stores an account.
+	// CreateAccount stores a NEW account.
 	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)
-	StoreAccount(account Account) error
+	CreateAccount(account Account) error
+
+	// UpdateAccount updates an existing account.
+	// It returns giga.NotFound if the account does not exist (key: ForeignID)
+	// NOTE: will not update 'Privkey' or 'Address' (changes ignored or rejected)
+	// NOTE: counters can only be advanced, not regressed (e.g. NextExternalKey) (ignored or rejected)
+	UpdateAccount(account Account) error
+
+	// StoreAddresses associates a list of addresses with an accountID
+	StoreAddresses(accountID Address, addresses []Address, firstAddress uint32, internal bool) error
 
 	// GetAccount returns the account with the given ForeignID.
 	// It returns giga.NotFound if the account does not exist (key: ForeignID)
@@ -63,14 +67,14 @@ type StoreTransaction interface {
 
 	// Find the accountID (HD root PKH) that owns the given Dogecoin address.
 	// Also find the key index of `pkhAddress` within the HD wallet.
-	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, err error)
+	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, isInternal bool, err error)
 
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
 	// Create an Unspent Transaction Output (at the given block height)
-	CreateUTXO(txID string, vOut int64, value CoinAmount, scriptType string, pkhAddress Address, accountID Address, keyIndex uint32, blockHeight int64) error
+	CreateUTXO(txID string, vOut int64, value CoinAmount, scriptType string, pkhAddress Address, accountID Address, keyIndex uint32, isInternal bool, blockHeight int64) error
 
 	// Mark an Unspent Transaction Output as spent (at the given block height)
 	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) error

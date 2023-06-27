@@ -27,7 +27,7 @@ type L1 interface {
 }
 
 type Address string // Dogecoin address (base-58 public key hash aka PKH)
-type Privkey string //
+type Privkey string // Extended Private Key for HD Wallet
 type CoinAmount = decimal.Decimal
 
 var ZeroCoins = decimal.NewFromInt(0)                         // 0 DOGE
