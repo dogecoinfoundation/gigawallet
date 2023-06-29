@@ -35,6 +35,8 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 
 		// Internal APIs
 
+		mux.POST("/admin/setsyncheight/:blockheight", t.setSyncHeight)
+
 		// POST { account } /account/:foreignID -> { account } upsert account
 		mux.POST("/account/:foreignID", t.upsertAccount)
 
@@ -92,10 +94,34 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 	return nil
 }
 
+// SetSyncHeight resets the sync height for GigaWallet, which will cause
+// chain-follower to start re-scanning the blockchain from that point.
+// This can be used when starting a NEW GigaWallet instance to avoid
+// scanning the entire blockchain, if you have no imported wallets with
+// old transactions.
+//
+// WARNING:  Using this on an active/production GigaWallet will PAUSE
+// the discovery of any new transactions until the re-scan has completed,
+// meaning that any users waiting for Invoice Paid confirmations will
+// be on hold until everything is reindexed. USE WITH CAUTION.
+func (t WebAPI) setSyncHeight(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	n, err := strconv.ParseInt(p.ByName("blockheight"), 10, 64)
+	if err == nil {
+		sendBadRequest(w, "blockheight bust convert to int64")
+		return
+	}
+
+	err := t.api.SetSyncHeight(n)
+	if err != nil {
+		sendError(w, "SetSyncHeight failed", err)
+		return
+	}
+	sendResponse(w, "Set sync height")
+}
+
 // createInvoice returns the ID of the created Invoice (which is the one-time address for this transaction) for the foreignID in the URL and the InvoiceCreateRequest in the body
 func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the foreignID is a 3rd-party ID for the account
-	fmt.Println("here")
 	foreignID := p.ByName("foreignID")
 	if foreignID == "" {
 		sendBadRequest(w, "missing invoice ID in URL")
