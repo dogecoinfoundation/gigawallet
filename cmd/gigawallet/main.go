@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/BurntSushi/toml"
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -38,6 +39,8 @@ func main() {
 		Core:      giga.NodeConfig{},
 	}
 
+	subCommandArgs := SubCommandArgs{}
+
 	// Config file loading:
 	err := mergeConfigFromFile(&config)
 	if err != nil {
@@ -46,7 +49,7 @@ func main() {
 	}
 
 	// cli flag loading
-	applyFlags(&config)
+	applyFlags(&config, &subCommandArgs)
 
 	// set config.Core to the network block specified in
 	// config.Gigawallet.Network
@@ -66,6 +69,19 @@ func main() {
 	case "printconf":
 		o, _ := json.MarshalIndent(config, ">", " ")
 		fmt.Println(string(o))
+		os.Exit(0)
+	case "setsyncheight":
+		// Sets the sync block height and re-indexes the chain of a
+		// running GigaWallet instance.
+		if flag.Arg(1) == "" {
+			fmt.Println("Provide a block height, ie: gigawallet setsyncheight 12345")
+			os.Exit(0)
+		}
+		err := SetSyncHeight(flag.Arg(1), config, subCommandArgs)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	default:
 		fmt.Println("Invalid subcommand:", flag.Arg(0))
@@ -101,7 +117,8 @@ func mergeConfigFromFile(config *giga.Config) error {
 	return fmt.Errorf("config file %s not found in %s", filename, searchPaths)
 }
 
-func applyFlags(config *giga.Config) {
+func applyFlags(config *giga.Config, subs *SubCommandArgs) {
+	// Config file overrides
 	flag.StringVar(&config.Gigawallet.ServiceName, "service-name", config.Gigawallet.ServiceName, "Service name")
 	flag.StringVar(&config.Gigawallet.ServiceDomain, "service-domain", config.Gigawallet.ServiceDomain, "Service domain")
 	flag.StringVar(&config.Gigawallet.ServiceIconURL, "service-icon-url", config.Gigawallet.ServiceIconURL, "Service icon URL")
@@ -111,5 +128,11 @@ func applyFlags(config *giga.Config) {
 	flag.StringVar(&config.WebAPI.Port, "webapi-port", config.WebAPI.Port, "Web API port")
 	flag.StringVar(&config.WebAPI.Bind, "webapi-bind", config.WebAPI.Bind, "Web API bind")
 	flag.StringVar(&config.Store.DBFile, "store-db-file", config.Store.DBFile, "Store DB file")
+	// Extra arguments for various subcommands
+	flag.StringVar(&subs.RemoteAdminServer, "remote-admin-server", "", "http/s base URL for a remote GigaWallet server to command")
 	flag.Parse()
+}
+
+type SubCommandArgs struct {
+	RemoteAdminServer string
 }
