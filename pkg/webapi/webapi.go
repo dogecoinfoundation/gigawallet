@@ -106,12 +106,12 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 // be on hold until everything is reindexed. USE WITH CAUTION.
 func (t WebAPI) setSyncHeight(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	n, err := strconv.ParseInt(p.ByName("blockheight"), 10, 64)
-	if err == nil {
-		sendBadRequest(w, "blockheight bust convert to int64")
+	if err != nil {
+		sendBadRequest(w, "blockheight invalid, must convert to int64")
 		return
 	}
 
-	err := t.api.SetSyncHeight(n)
+	err = t.api.SetSyncHeight(n)
 	if err != nil {
 		sendError(w, "SetSyncHeight failed", err)
 		return
