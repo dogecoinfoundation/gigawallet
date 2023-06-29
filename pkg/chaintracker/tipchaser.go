@@ -30,7 +30,7 @@ type TipChaser struct {
  * It receives NodeEvent ('Block') from CoreReceiver ZMQ listener.
  * If it doesn't receive ZMQ notifications for a while, it will poll the node instead.
  */
-func NewTipChaser(conf giga.Config, l1 giga.L1) (*TipChaser, error) {
+func newTipChaser(conf giga.Config, l1 giga.L1) (*TipChaser, error) {
 	result := &TipChaser{
 		l1:              l1,
 		ReceiveFromCore: make(chan giga.NodeEvent, 1000),

@@ -93,7 +93,7 @@ type SQLiteStore struct {
 }
 
 // NewSQLiteStore returns a giga.PaymentsStore implementor that uses sqlite
-func NewSQLiteStore(fileName string) (SQLiteStore, error) {
+func NewSQLiteStore(fileName string) (giga.Store, error) {
 	db, err := sql.Open("sqlite3", fileName)
 	if err != nil {
 		return SQLiteStore{}, dbErr(err, "opening database")

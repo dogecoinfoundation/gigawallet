@@ -10,13 +10,14 @@ const (
 )
 
 type API struct {
-	Store Store
-	L1    L1
-	bus   MessageBus
+	Store    Store
+	L1       L1
+	bus      MessageBus
+	follower ChainFollower
 }
 
-func NewAPI(store Store, l1 L1, bus MessageBus) API {
-	return API{store, l1, bus}
+func NewAPI(store Store, l1 L1, bus MessageBus, follower ChainFollower) API {
+	return API{store, l1, bus, follower}
 }
 
 type InvoiceCreateRequest struct {
@@ -257,6 +258,16 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	// TODO: mark the transaction as 'in progress' in the DB (must affect both accounts)
 	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": invoiceAmount})
 	return txn.TxnHex, nil
+}
+
+// Re-sync from a specific block height, or skip ahead (for now)
+func (a API) SetSyncHeight(height int64) error {
+	hash, err := a.L1.GetBlockHash(height)
+	if err != nil {
+		return err
+	}
+	a.follower.SendCommand(ReSyncChainFollowerCmd{BlockHash: hash})
+	return nil
 }
 
 // chooseUTXOsToSpend selects unspent UTXOs from the Account (Wallet)

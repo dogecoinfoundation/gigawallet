@@ -52,7 +52,7 @@ func Server(conf giga.Config) {
 	defer store.Close()
 
 	// Start the Chain Tracker
-	tipc, err := chaintracker.StartChainTracker(c, conf, l1, store)
+	chaser, follower, err := chaintracker.StartChainTracker(c, conf, l1, store)
 	if err != nil {
 		panic(err)
 	}
@@ -66,11 +66,13 @@ func Server(conf giga.Config) {
 	if err != nil {
 		panic(err)
 	}
-	corez.Subscribe(tipc.ReceiveFromCore)
+	corez.Subscribe(chaser)
 	c.Service("ZMQ Listener", corez)
 
+	api := giga.NewAPI(store, l1, bus, follower)
+
 	// Start the Payment API
-	p, err := webapi.NewWebAPI(conf, l1, store, bus)
+	p, err := webapi.NewWebAPI(conf, api)
 	if err != nil {
 		panic(err)
 	}
