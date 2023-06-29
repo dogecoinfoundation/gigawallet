@@ -135,6 +135,13 @@ func (l L1Libdogecoin) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader
 	return giga.RpcBlockHeader{}, fmt.Errorf("not implemented")
 }
 
+func (l L1Libdogecoin) GetBlockHash(height int64) (hash string, err error) {
+	if l.fallback != nil {
+		return l.fallback.GetBlockHash(height)
+	}
+	return "", fmt.Errorf("not implemented")
+}
+
 func (l L1Libdogecoin) GetBestBlockHash() (blockHash string, err error) {
 	if l.fallback != nil {
 		return l.fallback.GetBestBlockHash()

@@ -40,6 +40,10 @@ func (l L1Mock) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err e
 	return giga.RpcBlockHeader{}, fmt.Errorf("not implemented")
 }
 
+func (l L1Mock) GetBlockHash(height int64) (hash string, err error) {
+	return "", fmt.Errorf("not implemented")
+}
+
 func (l L1Mock) GetBestBlockHash() (blockHash string, err error) {
 	return "", fmt.Errorf("not implemented")
 }

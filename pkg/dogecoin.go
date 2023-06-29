@@ -21,6 +21,7 @@ type L1 interface {
 	DecodeTransaction(txnHex string) (RawTxn, error)
 	GetBlock(blockHash string) (RpcBlock, error)
 	GetBlockHeader(blockHash string) (RpcBlockHeader, error)
+	GetBlockHash(height int64) (string, error)
 	GetBestBlockHash() (string, error)
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(NewTxn) error

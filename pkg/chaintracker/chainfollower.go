@@ -19,8 +19,9 @@ type ChainFollower struct {
 	l1               giga.L1
 	store            giga.Store
 	ReceiveBestBlock chan string
-	stop             chan context.Context
-	stopped          chan bool
+	Commands         chan any
+	stopping         bool
+	SetSync          *giga.ReSyncChainFollowerCmd
 }
 
 type ChainPos struct {
@@ -40,64 +41,120 @@ type ChainPos struct {
  * tip has changed since last time we checked (i.e. dirty flag); we don't
  * care about the actual block hash.
  */
-func NewChainFollower(conf giga.Config, l1 giga.L1, store giga.Store) (*ChainFollower, error) {
+func newChainFollower(conf giga.Config, l1 giga.L1, store giga.Store) (*ChainFollower, error) {
 	result := &ChainFollower{
 		l1:               l1,
 		store:            store,
 		ReceiveBestBlock: make(chan string, 1), // signal that tip has changed.
+		Commands:         make(chan any, 10),   // commands to the service.
 	}
 	return result, nil
 }
 
+func (c *ChainFollower) SendCommand(cmd any) {
+	c.Commands <- cmd
+}
+
 func (c *ChainFollower) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
-		c.stop, c.stopped = stop, stopped // for helpers.
+		// Forward `stop` to the `Commands` channel.
+		ctx := <-stop
+		c.Commands <- &giga.StopChainFollowerCmd{Ctx: ctx}
+	}()
+	go func() {
+		// Loop because the service can be internally restarted.
 		started <- true
-
-		// Recover from panic used to stop the service.
-		// We use this to avoid returning a 'stopping' bool from every single function.
-		defer func() {
-			if r := recover(); r != nil {
-				log.Println("ChainFollower: service stopped (shutdown panic received):", r)
-			}
-		}()
-
-		// Fetch the last processed Best Block hash from the DB (restart point)
-		// INVARIANT: the chainstate in our database contains the effects of
-		// the Best Block we have stored (and all prior blocks per previousblockhash)
-		// We MUST update the chainstate before we update this hash.
-		log.Println("ChainFollower: fetching chainstate")
-		state := c.fetchChainState()
-
-		// Startup: catch up to the current Best Block (tip)
-		var pos ChainPos
-		if state.BestBlockHash == "" {
-			// No BestBlockHash stored, so we must be starting from scratch.
-			// Walk the blockchain from the genesis block.
-			pos = ChainPos{"", 0, DOGECOIN_GENESIS_BLOCK_HASH}
-		} else {
-			// Walk forwards on the blockchain from BestBlockHash until we reach the tip.
-			pos = ChainPos{state.BestBlockHash, state.BestBlockHeight, ""}
+		for !c.stopping {
+			c.serviceMain()
 		}
-		pos = c.followChainToTip(pos)
+		stopped <- true
+	}()
+	return nil
+}
 
-		// Main loop: catch up to the current Best Block (tip) each time it changes.
-		for {
-			// Wait for Core to signal a new Best Block (new block mined)
-			select {
-			case <-stop:
-				stopped <- true
-				return
-			case <-c.ReceiveBestBlock:
-				log.Println("ChainFollower: received new block signal")
-			}
-
-			// Walk forwards on the blockchain until we reach the tip.
-			pos = c.followChainToTip(pos)
+func (c *ChainFollower) serviceMain() {
+	// Recover from panic used to stop or restart the service.
+	// We use this to avoid returning a 'stopping' bool from every single function.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println("ChainFollower: panic received:", r)
 		}
 	}()
 
-	return nil
+	// Fetch the last processed Best Block hash from the DB (restart point)
+	// INVARIANT: the chainstate in our database contains the effects of
+	// the Best Block we have stored (and all prior blocks per previousblockhash)
+	// We MUST update the chainstate before we update this hash.
+	log.Println("ChainFollower: fetching chainstate")
+	state := c.fetchChainState()
+
+	// Work out the current Chain Position.
+	var pos ChainPos
+	if state.BestBlockHash == "" {
+		// No BestBlockHash stored, so we must be starting from scratch.
+		// Walk the blockchain from the genesis block.
+		pos = ChainPos{"", 0, DOGECOIN_GENESIS_BLOCK_HASH}
+	} else {
+		// Walk forwards on the blockchain from BestBlockHash until we reach the tip.
+		pos = ChainPos{state.BestBlockHash, state.BestBlockHeight, ""}
+	}
+
+	// Execute any pending commands.
+	if c.SetSync != nil {
+		cmd := c.SetSync
+		c.SetSync = nil
+		pos = c.setSyncHeight(*cmd, pos)
+	}
+
+	// Walk forwards on the blockchain until we reach the tip.
+	pos = c.followChainToTip(pos)
+
+	// Main loop: catch up to the current Best Block (tip) each time it changes.
+	for {
+		// Wait for Core to signal a new Best Block (new block mined)
+		// or a Command to arrive.
+		select {
+		case cmd := <-c.Commands:
+			log.Println("ChainFollower: received command")
+			switch cmt := cmd.(type) {
+			case giga.StopChainFollowerCmd:
+				c.stopping = true
+				return
+			case giga.RestartChainFollowerCmd:
+				return
+			case giga.ReSyncChainFollowerCmd:
+				pos = c.setSyncHeight(cmt, pos)
+				// fall through to followChainToTip.
+			default:
+				log.Println("ChainFollower: unknown command received!")
+				continue
+			}
+		case <-c.ReceiveBestBlock:
+			log.Println("ChainFollower: received new block signal")
+		}
+
+		// Walk forwards on the blockchain until we reach the tip.
+		pos = c.followChainToTip(pos)
+	}
+}
+
+func (c *ChainFollower) setSyncHeight(cmd giga.ReSyncChainFollowerCmd, pos ChainPos) ChainPos {
+	hdr := c.fetchBlockHeader(cmd.BlockHash)
+	if hdr.Height > pos.BlockHeight {
+		// New sync block is after current block.
+		log.Println("ChainFollower: ReSync: skipping", hdr.Height-pos.BlockHeight, "blocks")
+	} else if hdr.Height < pos.BlockHeight {
+		// New sync block is before current block.
+		log.Println("ChainFollower: ReSync: rolling back", pos.BlockHeight-hdr.Height, "blocks")
+	} else {
+		// New sync block equals current block.
+		log.Println("ChainFollower: ReSync: matches current block, no changes made.")
+		return pos
+	}
+	// This is correct in both cases: if the new block is after current,
+	// nothing will match the rollback queries, it will just update ChainState.
+	pos = c.rollBackChainState(cmd.BlockHash)
+	return pos
 }
 
 func (c *ChainFollower) followChainToTip(pos ChainPos) ChainPos {
@@ -356,20 +413,20 @@ func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
 	}
 }
 
-func uniqueStrings(source []string) (result []string) {
-	if len(source) == 1 { // common.
-		result = source // alias to avoid allocation.
-		return
-	}
-	unique := make(map[string]bool)
-	for _, addr := range source {
-		if !unique[addr] {
-			unique[addr] = true
-			result = append(result, addr)
-		}
-	}
-	return
-}
+// func uniqueStrings(source []string) (result []string) {
+// 	if len(source) == 1 { // common.
+// 		result = source // alias to avoid allocation.
+// 		return
+// 	}
+// 	unique := make(map[string]bool)
+// 	for _, addr := range source {
+// 		if !unique[addr] {
+// 			unique[addr] = true
+// 			result = append(result, addr)
+// 		}
+// 	}
+// 	return
+// }
 
 func (c *ChainFollower) fetchChainState() giga.ChainState {
 	for {
@@ -410,6 +467,18 @@ func (c *ChainFollower) fetchBlockHeader(blockHash string) giga.RpcBlockHeader {
 	}
 }
 
+// func (c *ChainFollower) fetchBlockHash(height int64) (string, error) {
+// 	for {
+// 		hash, err := c.l1.GetBlockHash(height)
+// 		if err != nil {
+// 			log.Println("ChainFollower: error retrieving block hash:", err)
+// 			c.sleepForRetry(err)
+// 		} else {
+// 			return hash, nil
+// 		}
+// 	}
+// }
+
 func (c *ChainFollower) fetchTransaction(txHash string) giga.RawTxn {
 	for {
 		txn, err := c.l1.GetTransaction(txHash)
@@ -428,10 +497,20 @@ func (c *ChainFollower) sleepForRetry(err error) {
 		delay = CONFLICT_DELAY
 	}
 	select {
-	case <-c.stop:
-		// no work to do, just shut down.
-		c.stopped <- true
-		panic("stopped") // caught in `Run` method.
+	case cmd := <-c.Commands:
+		log.Println("ChainFollower: received command")
+		switch cmd.(type) {
+		case giga.StopChainFollowerCmd:
+			c.stopping = true
+			panic("stopped") // caught in `Run` method.
+		case giga.RestartChainFollowerCmd:
+			panic("stopped") // caught in `Run` method.
+		case giga.ReSyncChainFollowerCmd:
+			c.SetSync = cmd.(*giga.ReSyncChainFollowerCmd)
+			panic("restart") // caught in `Run` method.
+		default:
+			log.Println("ChainFollower: unknown command received!")
+		}
 	case <-time.After(delay):
 		return
 	}
@@ -439,10 +518,20 @@ func (c *ChainFollower) sleepForRetry(err error) {
 
 func (c *ChainFollower) checkShutdown() {
 	select {
-	case <-c.stop:
-		// no work to do, just shut down.
-		c.stopped <- true
-		panic("stopped") // caught in `Run` method.
+	case cmd := <-c.Commands:
+		log.Println("ChainFollower: received command")
+		switch cmd.(type) {
+		case giga.StopChainFollowerCmd:
+			c.stopping = true
+			panic("stopped") // caught in `Run` method.
+		case giga.RestartChainFollowerCmd:
+			panic("stopped") // caught in `Run` method.
+		case giga.ReSyncChainFollowerCmd:
+			c.SetSync = cmd.(*giga.ReSyncChainFollowerCmd)
+			panic("restart") // caught in `Run` method.
+		default:
+			log.Println("ChainFollower: unknown command received!")
+		}
 	default:
 		return
 	}

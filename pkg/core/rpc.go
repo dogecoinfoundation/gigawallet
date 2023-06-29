@@ -122,6 +122,11 @@ func (l L1CoreRPC) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, er
 	return
 }
 
+func (l L1CoreRPC) GetBlockHash(height int64) (hash string, err error) {
+	err = l.request("getblockhash", []any{height}, &hash)
+	return
+}
+
 func (l L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
 	err = l.request("getbestblockhash", []any{}, &blockHash)
 	return
