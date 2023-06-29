@@ -29,7 +29,7 @@ import (
 
 func SetSyncHeight(blockHeight string, c giga.Config, s SubCommandArgs) error {
 	fmt.Println(s)
-	url, err := adminAPIURL(c, s, fmt.Sprintf("/admin/setsynchheight/%s", blockHeight))
+	url, err := adminAPIURL(c, s, fmt.Sprintf("/admin/setsyncheight/%s", blockHeight))
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
