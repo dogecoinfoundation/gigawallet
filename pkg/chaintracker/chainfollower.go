@@ -59,7 +59,7 @@ func (c *ChainFollower) Run(started, stopped chan bool, stop chan context.Contex
 	go func() {
 		// Forward `stop` to the `Commands` channel.
 		ctx := <-stop
-		c.Commands <- &giga.StopChainFollowerCmd{Ctx: ctx}
+		c.Commands <- giga.StopChainFollowerCmd{Ctx: ctx}
 	}()
 	go func() {
 		// Loop because the service can be internally restarted.
@@ -499,14 +499,14 @@ func (c *ChainFollower) sleepForRetry(err error) {
 	select {
 	case cmd := <-c.Commands:
 		log.Println("ChainFollower: received command")
-		switch cmd.(type) {
+		switch cm := cmd.(type) {
 		case giga.StopChainFollowerCmd:
 			c.stopping = true
 			panic("stopped") // caught in `Run` method.
 		case giga.RestartChainFollowerCmd:
 			panic("stopped") // caught in `Run` method.
 		case giga.ReSyncChainFollowerCmd:
-			c.SetSync = cmd.(*giga.ReSyncChainFollowerCmd)
+			c.SetSync = &cm
 			panic("restart") // caught in `Run` method.
 		default:
 			log.Println("ChainFollower: unknown command received!")
@@ -520,14 +520,14 @@ func (c *ChainFollower) checkShutdown() {
 	select {
 	case cmd := <-c.Commands:
 		log.Println("ChainFollower: received command")
-		switch cmd.(type) {
+		switch cm := cmd.(type) {
 		case giga.StopChainFollowerCmd:
 			c.stopping = true
 			panic("stopped") // caught in `Run` method.
 		case giga.RestartChainFollowerCmd:
 			panic("stopped") // caught in `Run` method.
 		case giga.ReSyncChainFollowerCmd:
-			c.SetSync = cmd.(*giga.ReSyncChainFollowerCmd)
+			c.SetSync = &cm
 			panic("restart") // caught in `Run` method.
 		default:
 			log.Println("ChainFollower: unknown command received!")
