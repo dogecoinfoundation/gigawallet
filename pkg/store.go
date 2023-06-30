@@ -80,7 +80,8 @@ type StoreTransaction interface {
 	CreateUTXO(txID string, vOut int64, value CoinAmount, scriptType string, pkhAddress Address, accountID Address, keyIndex uint32, isInternal bool, blockHeight int64) error
 
 	// Mark an Unspent Transaction Output as spent (at the given block height)
-	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) error
+	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
+	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (string, error)
 
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
@@ -96,6 +97,14 @@ type StoreTransaction interface {
 	// RevertTxnsAboveHeight clears chain-heights above the given height recorded in Txns.
 	// This serves to roll back the effects of creating or confirming those Txns.
 	RevertTxnsAboveHeight(maxValidHeight int64) error
+
+	// Increment the chain-sequence-number for multiple accounts.
+	// Use this after modifying accounts' blockchain-derived state (UTXOs, TXNs)
+	IncChainSeqForAccounts(accountIds []string) error
+
+	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
+	// and increment those accounts' chain-sequence-number.
+	IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error)
 }
 
 // Create Account: foreignID must not exist.
