@@ -21,7 +21,9 @@ type ConnectEnvelope struct {
 	Hash           string `json:"hash"`
 }
 
-type ConnectRequest struct {
+// A payload within an envelope that represents an invoice for
+// a list of items that need to be paid
+type ConnectInvoice struct {
 	Type       string          `json:"type"`
 	ID         string          `json:"request_id"`
 	Address    string          `json:"address"`
@@ -31,6 +33,7 @@ type ConnectRequest struct {
 	Items      []ConnectItem   `json:"items"`
 }
 
+// an item within an invoice
 type ConnectItem struct {
 	Type        string          `json:"type"`
 	ID          string          `json:"item_id"`
@@ -41,30 +44,32 @@ type ConnectItem struct {
 	UnitCost    decimal.Decimal `json:"unit_cost"`
 }
 
-// returns a ConnectEnvelope with a signed ConnectRequest
+// returns a ConnectEnvelope with a signed ConnectInvoice
 // for the given Invoice. k is the service private key for
 // this gigawallet and should match the public key available
 // in DNS.
-func InvoiceToConnectRequestEnvelope(i Invoice, k string) (ConnectEnvelope, error) {
+func InvoiceToConnectRequestEnvelope(i Invoice, k string, conf Config) (ConnectEnvelope, error) {
 
-	// build a connect request
-	r := ConnectRequest{}
-	r.Type = "dc:0.1:payment_request"
-	r.ID = string(i.ID)
-	r.Address = string(i.ID)
-	r.Total = i.CalcTotal()
-	r.Initiated = time.Now()
-	r.TimeoutSec = 60 * 30 // TODO should come from the invoice
-	r.Items = []ConnectItem{}
+	// build a connect Invoice
+	r := ConnectInvoice{
+		Type:       "dc:0.1:invoice",
+		ID:         string(i.ID),
+		Address:    string(i.ID),
+		Total:      i.CalcTotal(),
+		Initiated:  time.Now(),
+		TimeoutSec: 60 * 30, // TODO should come from the invoice
+		Items:      []ConnectItem{},
+	}
 
 	for _, item := range i.Items {
-		r.Items = append(r.Items, ConnectItem{"dc:0.1:payment_item",
-			"id",
-			item.ImageLink,
-			item.Name,
-			"Description",
-			item.Quantity,
-			item.Price,
+		r.Items = append(r.Items, ConnectItem{
+			Type:        "dc:0.1:item",
+			ID:          "TODO",
+			Thumb:       item.ImageLink,
+			Name:        item.Name,
+			Description: "Description",
+			UnitCount:   item.Quantity,
+			UnitCost:    item.Price,
 		})
 	}
 	// serialise to JSON then base64 the request
@@ -73,11 +78,18 @@ func InvoiceToConnectRequestEnvelope(i Invoice, k string) (ConnectEnvelope, erro
 	payload := base64.StdEncoding.EncodeToString(payloadJson)
 
 	// sign the request with the service key
+	hash := "TODO"
 
 	// build a connect envelope
-	env := ConnectEnvelope{}
-	env.Payload = payload
+	env := ConnectEnvelope{
+		Type:           "dc:0.1:envelope",
+		ServiceName:    conf.Gigawallet.ServiceName,
+		ServiceIconURL: conf.Gigawallet.ServiceIconURL,
+		ServiceDomain:  conf.Gigawallet.ServiceDomain,
+		ServiceKeyHash: conf.Gigawallet.ServiceKeyHash,
+		Payload:        payload,
+		Hash:           hash,
+	}
 
 	return env, nil
-
 }
