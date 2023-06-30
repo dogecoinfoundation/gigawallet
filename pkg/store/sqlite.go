@@ -18,12 +18,12 @@ CREATE TABLE IF NOT EXISTS account (
 	privkey TEXT NOT NULL,
 	next_int_key INTEGER NOT NULL,
 	next_ext_key INTEGER NOT NULL,
-	max_pool_int INTEGER NOT NULL,
-	max_pool_ext INTEGER NOT NULL,
+	next_pool_int INTEGER NOT NULL,
+	next_pool_ext INTEGER NOT NULL,
 	payout_address TEXT NOT NULL,
 	payout_threshold TEXT NOT NULL,
 	payout_frequency TEXT NOT NULL,
-	chain_seq INTEGER NOT NULL
+	chain_seq INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS account_address (
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS invoice (
 	items TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
 	block_id TEXT NOT NULL,
-	confirmations INTEGER NOT NULL	
+	confirmations INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
 
@@ -52,8 +52,8 @@ CREATE TABLE IF NOT EXISTS txn (
 	invoice_address TEXT,
 	on_chain_height INTEGER,
 	verified_height INTEGER,
-	send_verified BOOLEAN NOT NULL,
-	send_rollback BOOLEAN NOT NULL
+	send_verified BOOLEAN NOT NULL DEFAULT false,
+	send_rollback BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS txn_account_i ON txn (account_address);
 
@@ -200,12 +200,12 @@ func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (
 }
 
 func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
-	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
+	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
 	err := row.Scan(
 		&acc.ForeignID, &acc.Address, &acc.Privkey,
 		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.MaxPoolInternal, &acc.MaxPoolExternal,
+		&acc.NextPoolInternal, &acc.NextPoolExternal,
 		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
 		// MUST detect this error to fulfil the API contract.
@@ -380,7 +380,7 @@ func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, l
 }
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext,payout_address,payout_threshold,payout_frequency) values(?,?,?,?,?,?,?,?,?,?)")
+	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency) values(?,?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "createAccount: preparing insert")
 	}
@@ -388,7 +388,7 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 	_, err = stmt.Exec(
 		acc.ForeignID, acc.Address, acc.Privkey, // only in createAccount.
 		acc.NextInternalKey, acc.NextExternalKey, // common (see updateAccount) ...
-		acc.MaxPoolInternal, acc.MaxPoolExternal,
+		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency)
 	if err != nil {
 		return dbErr(err, "createAccount: executing insert")
@@ -397,14 +397,14 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 }
 
 func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("update account set next_int_key=MAX(next_int_key,?), max_pool_int=MAX(max_pool_int,?), max_pool_ext=MAX(max_pool_ext,?), next_ext_key=MAX(next_ext_key,?), payout_address=?, payout_threshold=?, payout_frequency=? where foreign_id=?")
+	stmt, err := t.tx.Prepare("update account set next_int_key=MAX(next_int_key,?), next_ext_key=MAX(next_ext_key,?), next_pool_int=MAX(next_pool_int,?), next_pool_ext=MAX(next_pool_ext,?), payout_address=?, payout_threshold=?, payout_frequency=? where foreign_id=?")
 	if err != nil {
 		return dbErr(err, "updateAccount: preparing update")
 	}
 	defer stmt.Close()
 	res, err := stmt.Exec(
 		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
-		acc.MaxPoolInternal, acc.MaxPoolExternal,
+		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
 		acc.ForeignID) // the Key (not updated)
 	if err != nil {
@@ -423,7 +423,7 @@ func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
 
 func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses []giga.Address, firstAddress uint32, isInternal bool) error {
 	// Associate a list of addresses with an accountID in the account_address table.
-	stmt, err := t.tx.Prepare("INSERT INTO account_address (address,key_index,is_internal,account_address) VALUES (?,?,?)")
+	stmt, err := t.tx.Prepare("INSERT INTO account_address (address,key_index,is_internal,account_address) VALUES (?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "StoreAddresses: preparing insert")
 	}
@@ -439,9 +439,13 @@ func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses
 }
 
 func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, error) {
-	row := t.tx.QueryRow("SELECT foreign_id, address, privkey, next_int_key, next_ext_key FROM account WHERE foreign_id = ?", foreignID)
+	row := t.tx.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
-	err := row.Scan(&acc.ForeignID, &acc.Address, &acc.Privkey, &acc.NextInternalKey, &acc.NextExternalKey)
+	err := row.Scan(
+		&acc.ForeignID, &acc.Address, &acc.Privkey,
+		&acc.NextInternalKey, &acc.NextExternalKey,
+		&acc.NextPoolInternal, &acc.NextPoolExternal,
+		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
 	}

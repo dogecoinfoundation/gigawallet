@@ -13,16 +13,16 @@ const HD_DISCOVERY_RANGE = 20
 	 - PayoutFrequency, if set, payout at this schedule
 */
 type Account struct {
-	Address         Address // HD Wallet master public key as a dogecoin address (Account ID)
-	Privkey         Privkey // HD Wallet master extended private key.
-	ForeignID       string  // unique identifier supplied by the organisation using Gigawallet.
-	NextInternalKey uint32  // next internal HD Wallet address to use for txn change outputs.
-	NextExternalKey uint32  // next external HD Wallet address to use for an invoice or pay-to address.
-	MaxPoolInternal uint32  // maximum internal HD Wallet address inserted into account_address table.
-	MaxPoolExternal uint32  // maximum external HD Wallet address inserted into account_address table.
-	PayoutAddress   string
-	PayoutThreshold string
-	PayoutFrequency string
+	Address          Address // HD Wallet master public key as a dogecoin address (Account ID)
+	Privkey          Privkey // HD Wallet master extended private key.
+	ForeignID        string  // unique identifier supplied by the organisation using Gigawallet.
+	NextInternalKey  uint32  // next internal HD Wallet address to use for txn change outputs.
+	NextExternalKey  uint32  // next external HD Wallet address to use for an invoice or pay-to address.
+	NextPoolInternal uint32  // next internal HD Wallet address to insert into account_address table.
+	NextPoolExternal uint32  // next external HD Wallet address to insert into account_address table.
+	PayoutAddress    string
+	PayoutThreshold  string
+	PayoutFrequency  string
 }
 
 // Generate and store HD Wallet addresses up to 20 beyond any currently-used addresses.
@@ -34,7 +34,7 @@ func (a *Account) UpdatePoolAddresses(tx StoreTransaction, lib L1) error {
 	// ASSUMES: NextExternalKey covers all used external addresses on blockchain.
 	externalPoolEnd := a.NextExternalKey + HD_DISCOVERY_RANGE
 	internalPoolEnd := a.NextInternalKey + HD_DISCOVERY_RANGE
-	firstExternal := a.MaxPoolExternal + 1
+	firstExternal := a.NextPoolExternal
 	if firstExternal < externalPoolEnd {
 		numberToAdd := externalPoolEnd - firstExternal
 		log.Println("UpdatePoolAddresses: generating", numberToAdd, "new external addresses for", a.ForeignID, "starting at", firstExternal)
@@ -42,21 +42,27 @@ func (a *Account) UpdatePoolAddresses(tx StoreTransaction, lib L1) error {
 		if err != nil {
 			return err
 		}
-		tx.StoreAddresses(a.Address, addresses, firstExternal, false)
-	}
-	firstInternal := a.MaxPoolInternal + 1
-	if firstInternal < internalPoolEnd {
-		numberToAdd := internalPoolEnd - firstInternal
-		log.Println("UpdatePoolAddresses: generating", numberToAdd, "new internal addresses for", a.ForeignID, "starting at", firstInternal)
-		addresses, err := a.GenerateAddresses(lib, firstInternal, numberToAdd, false)
+		err = tx.StoreAddresses(a.Address, addresses, firstExternal, false)
 		if err != nil {
 			return err
 		}
-		tx.StoreAddresses(a.Address, addresses, firstInternal, false)
+	}
+	firstInternal := a.NextPoolInternal
+	if firstInternal < internalPoolEnd {
+		numberToAdd := internalPoolEnd - firstInternal
+		log.Println("UpdatePoolAddresses: generating", numberToAdd, "new internal addresses for", a.ForeignID, "starting at", firstInternal)
+		addresses, err := a.GenerateAddresses(lib, firstInternal, numberToAdd, true)
+		if err != nil {
+			return err
+		}
+		err = tx.StoreAddresses(a.Address, addresses, firstInternal, true)
+		if err != nil {
+			return err
+		}
 	}
 	// These must be updated in the DB by calling tx.StoreAccount(a)
-	a.MaxPoolInternal = internalPoolEnd
-	a.MaxPoolExternal = externalPoolEnd
+	a.NextPoolInternal = internalPoolEnd
+	a.NextPoolExternal = externalPoolEnd
 	return nil
 }
 
