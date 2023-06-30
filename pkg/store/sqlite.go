@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/shopspring/decimal"
@@ -18,11 +19,12 @@ CREATE TABLE IF NOT EXISTS account (
 	privkey TEXT NOT NULL,
 	next_int_key INTEGER NOT NULL,
 	next_ext_key INTEGER NOT NULL,
-	max_pool_int INTEGER NOT NULL,
-	max_pool_ext INTEGER NOT NULL,
+	next_pool_int INTEGER NOT NULL,
+	next_pool_ext INTEGER NOT NULL,
 	payout_address TEXT NOT NULL,
 	payout_threshold TEXT NOT NULL,
-	payout_frequency TEXT NOT NULL
+	payout_frequency TEXT NOT NULL,
+	chain_seq INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS account_address (
@@ -41,7 +43,7 @@ CREATE TABLE IF NOT EXISTS invoice (
 	items TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
 	block_id TEXT NOT NULL,
-	confirmations INTEGER NOT NULL	
+	confirmations INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
 
@@ -51,8 +53,8 @@ CREATE TABLE IF NOT EXISTS txn (
 	invoice_address TEXT,
 	on_chain_height INTEGER,
 	verified_height INTEGER,
-	send_verified BOOLEAN NOT NULL,
-	send_rollback BOOLEAN NOT NULL
+	send_verified BOOLEAN NOT NULL DEFAULT false,
+	send_rollback BOOLEAN NOT NULL DEFAULT false
 );
 CREATE INDEX IF NOT EXISTS txn_account_i ON txn (account_address);
 
@@ -199,12 +201,12 @@ func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (
 }
 
 func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
-	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
+	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
 	err := row.Scan(
 		&acc.ForeignID, &acc.Address, &acc.Privkey,
 		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.MaxPoolInternal, &acc.MaxPoolExternal,
+		&acc.NextPoolInternal, &acc.NextPoolExternal,
 		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
 		// MUST detect this error to fulfil the API contract.
@@ -379,7 +381,7 @@ func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, l
 }
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,max_pool_int,max_pool_ext,payout_address,payout_threshold,payout_frequency) values(?,?,?,?,?,?,?,?,?,?)")
+	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency) values(?,?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "createAccount: preparing insert")
 	}
@@ -387,7 +389,7 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 	_, err = stmt.Exec(
 		acc.ForeignID, acc.Address, acc.Privkey, // only in createAccount.
 		acc.NextInternalKey, acc.NextExternalKey, // common (see updateAccount) ...
-		acc.MaxPoolInternal, acc.MaxPoolExternal,
+		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency)
 	if err != nil {
 		return dbErr(err, "createAccount: executing insert")
@@ -396,14 +398,14 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 }
 
 func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("update account set next_int_key=MAX(next_int_key,?), max_pool_int=MAX(max_pool_int,?), max_pool_ext=MAX(max_pool_ext,?), next_ext_key=MAX(next_ext_key,?), payout_address=?, payout_threshold=?, payout_frequency=? where foreign_id=?")
+	stmt, err := t.tx.Prepare("update account set next_int_key=MAX(next_int_key,?), next_ext_key=MAX(next_ext_key,?), next_pool_int=MAX(next_pool_int,?), next_pool_ext=MAX(next_pool_ext,?), payout_address=?, payout_threshold=?, payout_frequency=? where foreign_id=?")
 	if err != nil {
 		return dbErr(err, "updateAccount: preparing update")
 	}
 	defer stmt.Close()
 	res, err := stmt.Exec(
 		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
-		acc.MaxPoolInternal, acc.MaxPoolExternal,
+		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
 		acc.ForeignID) // the Key (not updated)
 	if err != nil {
@@ -422,7 +424,7 @@ func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
 
 func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses []giga.Address, firstAddress uint32, isInternal bool) error {
 	// Associate a list of addresses with an accountID in the account_address table.
-	stmt, err := t.tx.Prepare("INSERT INTO account_address (address,key_index,is_internal,account_address) VALUES (?,?,?)")
+	stmt, err := t.tx.Prepare("INSERT INTO account_address (address,key_index,is_internal,account_address) VALUES (?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "StoreAddresses: preparing insert")
 	}
@@ -438,9 +440,13 @@ func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses
 }
 
 func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, error) {
-	row := t.tx.QueryRow("SELECT foreign_id, address, privkey, next_int_key, next_ext_key FROM account WHERE foreign_id = ?", foreignID)
+	row := t.tx.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
 	var acc giga.Account
-	err := row.Scan(&acc.ForeignID, &acc.Address, &acc.Privkey, &acc.NextInternalKey, &acc.NextExternalKey)
+	err := row.Scan(
+		&acc.ForeignID, &acc.Address, &acc.Privkey,
+		&acc.NextInternalKey, &acc.NextExternalKey,
+		&acc.NextPoolInternal, &acc.NextPoolExternal,
+		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
 	}
@@ -535,7 +541,7 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
 }
 
 func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, isInternal bool, blockHeight int64) error {
-	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height)")
+	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height) VALUES (?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "CreateUTXO: preparing insert")
 	}
@@ -547,39 +553,86 @@ func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.C
 	return nil
 }
 
-func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) error {
-	stmt, err := t.tx.Prepare("UPDATE utxo SET spending_height = ? WHERE txn_id = ? AND vout = ?")
+func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) (string, error) {
+	var id string
+	rows, err := t.tx.Query("UPDATE utxo SET spending_height = ? WHERE txn_id = ? AND vout = ? RETURNING account_address", blockHeight, txID, vOut)
 	if err != nil {
-		return dbErr(err, "MarkUTXOSpent: preparing update")
+		return "", dbErr(err, "MarkUTXOSpent: executing update")
 	}
-	defer stmt.Close()
-	_, err = stmt.Exec(blockHeight, txID, vOut)
-	if err != nil {
-		return dbErr(err, "MarkUTXOSpent: executing update")
+	defer rows.Close()
+	if rows.Next() {
+		err := rows.Scan(&id)
+		if err != nil {
+			return "", dbErr(err, "MarkUTXOSpent: scanning row")
+		}
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return "", dbErr(err, "MarkUTXOSpent: scanning rows")
+	}
+	return id, nil
+}
+
+func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
+	if len(accountIds) > 0 {
+		// Go's SQL package doesn't implement array/slice arguments,
+		// so to do an 'IN' query we need this kind of nonsense.
+		binds := strings.Repeat(",?", len(accountIds))[1:]
+		args := []any{}
+		for _, id := range accountIds {
+			args = append(args, id)
+		}
+		_, err := t.tx.Exec("UPDATE account SET chain_seq=chain_seq+1 WHERE address IN ("+binds+")", args...)
+		if err != nil {
+			return dbErr(err, "IncAccountChainSeq: executing update")
+		}
 	}
 	return nil
+}
+
+func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error) {
+	rows, err := t.tx.Query(`
+		SELECT DISTINCT address FROM account INNER JOIN utxo ON account.address = utxo.account_address WHERE utxo.adding_height > $1 OR utxo.available_height > $1 OR utxo.spending_height > $1 OR utxo.spent_height > $1
+		UNION SELECT DISTINCT address FROM account INNER JOIN txn ON account.address = txn.account_address WHERE txn.on_chain_height > $1 OR txn.verified_height > $1`, maxValidHeight)
+	if err != nil {
+		return []string{}, dbErr(err, "RevertUTXOsAboveHeight: executing query")
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		err := rows.Scan(&id)
+		if err != nil {
+			return []string{}, dbErr(err, "RevertUTXOsAboveHeight: scanning row")
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return []string{}, dbErr(err, "RevertUTXOsAboveHeight: scanning rows")
+	}
+	err = t.IncChainSeqForAccounts(ids)
+	return ids, err
 }
 
 func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) error {
 	// The presence of a height in adding_height, available_height, spending_height or spent_height
 	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
 	// reserved for spending, or has been spent (confirmed)
-	stmt1, err := t.tx.Prepare("UPDATE utxo SET adding_height = NULL, available_height = NULL, spending_height = NULL, spent_height = NULL, dirty = true WHERE adding_height > ?")
+	stmt1, err := t.tx.Prepare("UPDATE utxo SET adding_height = NULL, available_height = NULL, spending_height = NULL, spent_height = NULL WHERE adding_height > ?")
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 1")
 	}
 	defer stmt1.Close()
-	stmt2, err := t.tx.Prepare("UPDATE utxo SET available_height = NULL, spending_height = NULL, spent_height = NULL, dirty = true WHERE available_height > ?")
+	stmt2, err := t.tx.Prepare("UPDATE utxo SET available_height = NULL, spending_height = NULL, spent_height = NULL WHERE available_height > ?")
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 2")
 	}
 	defer stmt2.Close()
-	stmt3, err := t.tx.Prepare("UPDATE utxo SET spending_height = NULL, spent_height = NULL, dirty = true WHERE spending_height > ?")
+	stmt3, err := t.tx.Prepare("UPDATE utxo SET spending_height = NULL, spent_height = NULL WHERE spending_height > ?")
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 3")
 	}
 	defer stmt3.Close()
-	stmt4, err := t.tx.Prepare("UPDATE utxo SET spent_height = NULL, dirty = true WHERE spent_height > ?")
+	stmt4, err := t.tx.Prepare("UPDATE utxo SET spent_height = NULL WHERE spent_height > ?")
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 4")
 	}
@@ -606,12 +659,12 @@ func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) err
 func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) error {
 	// The presence of a height in on_chain_height or verified_height indicates
 	// that the invoice is in a block (on-chain) or has been verified (N blocks later)
-	stmt1, err := t.tx.Prepare("UPDATE invoice SET on_chain_height = NULL, verified_height = NULL, dirty = true WHERE on_chain_height > ?")
+	stmt1, err := t.tx.Prepare("UPDATE txn SET on_chain_height = NULL, verified_height = NULL WHERE on_chain_height > ?")
 	if err != nil {
 		return dbErr(err, "RevertTxnsAboveHeight: preparing update 1")
 	}
 	defer stmt1.Close()
-	stmt2, err := t.tx.Prepare("UPDATE invoice SET verified_height = NULL, dirty = true WHERE verified_height > ?")
+	stmt2, err := t.tx.Prepare("UPDATE txn SET verified_height = NULL WHERE verified_height > ?")
 	if err != nil {
 		return dbErr(err, "RevertTxnsAboveHeight: preparing update 2")
 	}

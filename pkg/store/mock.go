@@ -100,6 +100,10 @@ func (m Mock) RevertTxnsAboveHeight(maxValidHeight int64) error {
 	return nil
 }
 
+func (m Mock) IncAccountChainSeq(accountId string) error {
+	return nil
+}
+
 func (m Mock) Commit(updates []any) error {
 	return nil
 }
