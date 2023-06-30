@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/shopspring/decimal"
@@ -540,7 +541,7 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
 }
 
 func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, isInternal bool, blockHeight int64) error {
-	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height)")
+	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height) VALUES (?,?,?,?,?,?,?,?,?)")
 	if err != nil {
 		return dbErr(err, "CreateUTXO: preparing insert")
 	}
@@ -573,7 +574,14 @@ func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeig
 
 func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
 	if len(accountIds) > 0 {
-		_, err := t.tx.Exec("UPDATE account SET chain_seq=chain_seq+1 WHERE address IN ?", accountIds)
+		// Go's SQL package doesn't implement array/slice arguments,
+		// so to do an 'IN' query we need this kind of nonsense.
+		binds := strings.Repeat(",?", len(accountIds))[1:]
+		args := []any{}
+		for _, id := range accountIds {
+			args = append(args, id)
+		}
+		_, err := t.tx.Exec("UPDATE account SET chain_seq=chain_seq+1 WHERE address IN ("+binds+")", args...)
 		if err != nil {
 			return dbErr(err, "IncAccountChainSeq: executing update")
 		}

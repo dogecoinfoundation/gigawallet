@@ -202,7 +202,7 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 	var startPos ChainPos = pos
 	var rollbackFrom string = ""
 	var blockCount int = 0
-	var affectedAcconts map[string]any
+	affectedAcconts := make(map[string]any)
 	tx := c.beginStoreTxn()
 	for pos.NextBlockHash != "" {
 		//log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
