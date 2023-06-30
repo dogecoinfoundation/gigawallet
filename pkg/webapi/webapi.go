@@ -16,17 +16,18 @@ import (
 
 // WebAPI implements conductor.Service
 type WebAPI struct {
-	srv  *http.Server
-	bind string
-	port string
-	api  giga.API
+	srv    *http.Server
+	bind   string
+	port   string
+	api    giga.API
+	config giga.Config
 }
 
 // interface guard ensures WebAPI implements conductor.Service
 var _ conductor.Service = WebAPI{}
 
 func NewWebAPI(config giga.Config, api giga.API) (WebAPI, error) {
-	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: api}, nil
+	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: api, config: config}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {
@@ -50,6 +51,8 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		mux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
 
 		mux.GET("/account/:foreignID/invoice/:invoiceID/qr.png", t.getAccountInvoiceQR)
+
+		mux.GET("/account/:foreignID/invoice/:invoiceID/connect", t.getAccountInvoiceConnect)
 
 		// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
 		mux.GET("/invoice/:invoiceID", t.getInvoice)
@@ -179,6 +182,50 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		return
 	}
 	sendResponse(w, invoice)
+}
+
+func (t WebAPI) getAccountInvoiceConnect(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the foreignID is a 3rd-party ID for the account
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	// the invoiceID is the address of the invoice
+	id := p.ByName("invoiceID")
+	if id == "" {
+		sendBadRequest(w, "missing invoice ID")
+		return
+	}
+	acc, err := t.api.GetAccount(foreignID)
+	if err != nil {
+		sendError(w, "GetAccount", err)
+		return
+	}
+	invoice, err := t.api.GetInvoice(giga.Address(id)) // TODO: need a "not found" error-code
+	if err != nil {
+		sendError(w, "GetInvoice", err)
+		return
+	}
+	if invoice.Account != acc.Address {
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
+		return
+	}
+
+	envelope, err := giga.InvoiceToConnectRequestEnvelope(invoice, t.config)
+	if err != nil {
+		sendError(w, "ConnectEnvelopCreate", err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/json")
+	//  Maxage 900 (15 minutes) is because this image should not
+	//  change at all for a given invoice and we expect most invoices
+	// to be complete in far less time than 15 min.. but 15 min allows
+	// us room to upgrade the format between releases if needed..
+	w.Header().Set("Cache-Control", "max-age:=900, immutable")
+	//w.Header().Set("Cache-Control", "no-cache")
+
+	sendResponse(w, envelope)
 }
 
 func (t WebAPI) getAccountInvoiceQR(w http.ResponseWriter, r *http.Request, p httprouter.Params) {

@@ -13,17 +13,32 @@ type Config struct {
 }
 
 type GigawalletConfig struct {
-	// Keys used by Doge Connect to identify and verify this
-	// Gigawallet instance.
+	// Doge Connect service domain, where is GW hosted?
+	ServiceDomain string
+
+	// Doge Connect service name, ie: Doge Payments Inc.
 	ServiceName string
-	// ServiceDomain will be used to lookup the ServiceKey from
-	// DNS TXT record and verified against ServiceKeyHash.
-	ServiceDomain  string
+
+	// Doge Connect service icon, displayed beside name.
 	ServiceIconURL string
+
+	// A DOGENS key-hash that appears in a DOGENS DNS TXT record
+	// at the ServiceDomain, will be looked up by clients to verify
+	// Doge Connect messages were signed with ServiceKeySecret
 	ServiceKeyHash string
 
-	// key for which Dogecoind struct to use
-	Network             string
+	// The private key used by this GW to sign all Doge Connect
+	// envelopes, consider using --service-key-secret with an
+	// appropriate secret management service when deploying, rather
+	// than embedding in your config file.
+	ServiceKeySecret string
+
+	// key for which Dogecoind struct to use, ie: mainnet, testnet
+	Network string
+
+	// Default number of confirmations needed to mark an invoice
+	// as paid, this can be overridden per invoice using the create
+	// invoice API
 	ConfirmationsNeeded int
 }
 
