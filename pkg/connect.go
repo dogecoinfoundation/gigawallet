@@ -44,11 +44,7 @@ type ConnectItem struct {
 	UnitCost    decimal.Decimal `json:"unit_cost"`
 }
 
-// returns a ConnectEnvelope with a signed ConnectInvoice
-// for the given Invoice. k is the service private key for
-// this gigawallet and should match the public key available
-// in DNS.
-func InvoiceToConnectRequestEnvelope(i Invoice, k string, conf Config) (ConnectEnvelope, error) {
+func InvoiceToConnectRequestEnvelope(i Invoice, conf Config) (ConnectEnvelope, error) {
 
 	// build a connect Invoice
 	r := ConnectInvoice{
