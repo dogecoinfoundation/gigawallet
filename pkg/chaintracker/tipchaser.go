@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	expectedBlockInterval = 30 * time.Second
+	expectedBlockInterval = 90 * time.Second
 )
 
 type TipSubscription struct {

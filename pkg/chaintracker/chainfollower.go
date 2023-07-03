@@ -10,19 +10,19 @@ import (
 
 const (
 	DOGECOIN_GENESIS_BLOCK_HASH = "82bc68038f6034c0596b6e313729793a887fded6e92a31fbdf70863f89d9bea2" // Mainnet 1
-	RETRY_DELAY                 = 5 * time.Second
-	CONFLICT_DELAY              = 250 * time.Millisecond // quarter second
-	BATCH_SIZE                  = 100                    // number of blocks
+	RETRY_DELAY                 = 5 * time.Second                                                    // for RPC and Database errors.
+	CONFLICT_DELAY              = 250 * time.Millisecond                                             // for Database conflicts (concurrent transactions)
+	BLOCKS_PER_COMMIT           = 10                                                                 // number of blocks per database commit.
 )
 
 type ChainFollower struct {
 	l1               giga.L1
 	store            giga.Store
-	tx               giga.StoreTransaction
-	ReceiveBestBlock chan string
-	Commands         chan any
-	stopping         bool
-	SetSync          *giga.ReSyncChainFollowerCmd
+	tx               giga.StoreTransaction        // non-nil during a transaction (for cleanup)
+	ReceiveBestBlock chan string                  // receive from TipChaser.
+	Commands         chan any                     // receive ReSyncChainFollowerCmd etc.
+	stopping         bool                         // set to exit the main loop.
+	SetSync          *giga.ReSyncChainFollowerCmd // pending ReSync command.
 }
 
 type ChainPos struct {
@@ -217,7 +217,7 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 			// Progress has been made.
 			pos = ChainPos{block.Hash, block.Height, block.NextBlockHash}
 			blockCount++
-			if blockCount > BATCH_SIZE {
+			if blockCount > BLOCKS_PER_COMMIT {
 				// Commit our progress every BATCH_SIZE blocks.
 				break
 			}
