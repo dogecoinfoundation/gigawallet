@@ -23,3 +23,15 @@ type RestartChainFollowerCmd struct{}
 type StopChainFollowerCmd struct {
 	Ctx context.Context
 }
+
+/** Plugins to update an account when there is blockchain activity */
+type ChainTrackerPlugin interface {
+	// A new transaction has been seen (in a block)
+	AccountTxn(tx StoreTransaction, account Account, txn RawTxn)
+
+	// A new UTXO has been seen (in a block)
+	AccountUTXO(tx StoreTransaction, account Account, txn UTXO)
+
+	// Final pass over all plugins.
+	AccountModified(tx StoreTransaction, account Account)
+}

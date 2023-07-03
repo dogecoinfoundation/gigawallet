@@ -19,6 +19,7 @@ type ChainFollower struct {
 	l1               giga.L1
 	store            giga.Store
 	tx               giga.StoreTransaction        // non-nil during a transaction (for cleanup)
+	plugins          []ChainTrackerPlugin         // plugins to update accounts.
 	ReceiveBestBlock chan string                  // receive from TipChaser.
 	Commands         chan any                     // receive ReSyncChainFollowerCmd etc.
 	stopping         bool                         // set to exit the main loop.
@@ -425,6 +426,16 @@ func typeOfScript(name string) string {
 		return "p2pk"
 	}
 	return name
+}
+
+func (c *ChainFollower) applyPluginsToAccount(tx giga.StoreTransaction, accountId string) error {
+	account, err := tx.GetAccountByID(accountId)
+	if err != nil {
+		return err
+	}
+	for plugin := range c.plugins {
+	}
+	return nil
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {

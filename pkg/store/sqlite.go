@@ -88,6 +88,11 @@ CREATE TABLE IF NOT EXISTS address_block (
 	height INTEGER NOT NULL,
 	PRIMARY KEY (address, height)
 );
+
+CREATE TABLE IF NOT EXISTS service_state (
+	name TEXT NOT NULL PRIMARY KEY,
+	seq INTEGER NOT NULL DEFAULT 0
+);
 `
 
 /****************** SQLiteStore implements giga.Store ********************/

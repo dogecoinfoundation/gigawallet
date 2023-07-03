@@ -16,7 +16,7 @@ func SetUpReceivers(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Co
 	bus.Register(iup, giga.ACC_CHAIN_ACTIVITY)
 
 	// BalanceTracker updates wallet balances after transactions are confirmed.
-	btr := NewBalanceTracker()
+	btr := NewBalanceKeeper()
 	cond.Service("BalanceTracker", btr)
 	bus.Register(iup, giga.ACC_CHAIN_ACTIVITY)
 }
