@@ -38,8 +38,13 @@ type GigawalletConfig struct {
 
 	// Default number of confirmations needed to mark an invoice
 	// as paid, this can be overridden per invoice using the create
-	// invoice API
+	// invoice API, default 6
 	ConfirmationsNeeded int
+
+	// Default number of confirmations after a fork before an invoice
+	// is marked as a double-spend and warnings are thrown. This only
+	// occurs if a confirmation has already been issued. Default 6
+	RejectionsNeeded int
 }
 
 type NodeConfig struct {

@@ -14,15 +14,17 @@ type API struct {
 	L1       L1
 	bus      MessageBus
 	follower ChainFollower
+	config   Config
 }
 
-func NewAPI(store Store, l1 L1, bus MessageBus, follower ChainFollower) API {
-	return API{store, l1, bus, follower}
+func NewAPI(store Store, l1 L1, bus MessageBus, follower ChainFollower, config Config) API {
+	return API{store, l1, bus, follower, config}
 }
 
 type InvoiceCreateRequest struct {
-	Vendor string `json:"vendor"`
-	Items  []Item `json:"items"`
+	Vendor        string `json:"vendor"`
+	Items         []Item `json:"items"`
+	Confirmations int32  `json:"confirmations"` // specify -1 to mean not set
 }
 
 func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invoice, error) {
@@ -48,7 +50,12 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 		return Invoice{}, NewErr(UnknownError, eMsg, err)
 	}
 
-	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex}
+	confirmations := int32(a.config.Gigawallet.ConfirmationsNeeded)
+	if request.Confirmations != -1 {
+		confirmations = request.Confirmations
+	}
+
+	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex, Confirmations: confirmations}
 	err = txn.StoreInvoice(i)
 	if err != nil {
 		return Invoice{}, err

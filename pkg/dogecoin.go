@@ -25,6 +25,7 @@ type L1 interface {
 	GetBestBlockHash() (string, error)
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(NewTxn) error
+	//SignMessage([]byte, Privkey) (string, error)
 }
 
 type Address string // Dogecoin address (base-58 public key hash aka PKH)

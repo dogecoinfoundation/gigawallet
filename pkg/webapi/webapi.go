@@ -130,7 +130,9 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, "missing invoice ID in URL")
 		return
 	}
-	var o giga.InvoiceCreateRequest
+	o := giga.InvoiceCreateRequest{
+		Confirmations: -1,
+	}
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))

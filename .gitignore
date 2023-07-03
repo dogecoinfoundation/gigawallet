@@ -1,5 +1,5 @@
 build/
 .idea
 .DS_Store
-gigawallet.db
+gigawallet.db*
 events.log

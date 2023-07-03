@@ -25,11 +25,12 @@ func main() {
 			ServiceIconURL:      "https://example.com/icon.png",
 			ServiceKeyHash:      "",
 			Network:             "testnet",
-			ConfirmationsNeeded: 60,
+			ConfirmationsNeeded: 6,
+			RejectionsNeeded:    12,
 		},
 		WebAPI: giga.WebAPIConfig{
 			Port: "8080",
-			Bind: "",
+			Bind: "localhost",
 		},
 		Store: giga.StoreConfig{
 			DBFile: "gigawallet.db",
