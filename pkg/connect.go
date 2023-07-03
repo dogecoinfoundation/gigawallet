@@ -12,7 +12,7 @@ import (
 // The Payload is a base64 encoded JSON string containing
 // a ConnectRequest
 type ConnectEnvelope struct {
-	Type           string `json:"type"`
+	Version        string `json:"version"`
 	ServiceName    string `json:"service_name"`
 	ServiceIconURL string `json:"service_icon_url"`
 	ServiceDomain  string `json:"service_domain"`
@@ -24,7 +24,7 @@ type ConnectEnvelope struct {
 // A payload within an envelope that represents an invoice for
 // a list of items that need to be paid
 type ConnectInvoice struct {
-	Type       string          `json:"type"`
+	Type       string          `json:"type"` // invoice
 	ID         string          `json:"request_id"`
 	Address    string          `json:"address"`
 	Total      decimal.Decimal `json:"Total"`
@@ -48,7 +48,7 @@ func InvoiceToConnectRequestEnvelope(i Invoice, conf Config) (ConnectEnvelope, e
 
 	// build a connect Invoice
 	r := ConnectInvoice{
-		Type:       "dc:0.1:invoice",
+		Type:       "invoice",
 		ID:         string(i.ID),
 		Address:    string(i.ID),
 		Total:      i.CalcTotal(),
@@ -59,7 +59,7 @@ func InvoiceToConnectRequestEnvelope(i Invoice, conf Config) (ConnectEnvelope, e
 
 	for _, item := range i.Items {
 		r.Items = append(r.Items, ConnectItem{
-			Type:        "dc:0.1:item",
+			Type:        "item",
 			ID:          "TODO",
 			Thumb:       item.ImageLink,
 			Name:        item.Name,
@@ -78,7 +78,7 @@ func InvoiceToConnectRequestEnvelope(i Invoice, conf Config) (ConnectEnvelope, e
 
 	// build a connect envelope
 	env := ConnectEnvelope{
-		Type:           "dc:0.1:envelope",
+		Version:        "0.1",
 		ServiceName:    conf.Gigawallet.ServiceName,
 		ServiceIconURL: conf.Gigawallet.ServiceIconURL,
 		ServiceDomain:  conf.Gigawallet.ServiceDomain,

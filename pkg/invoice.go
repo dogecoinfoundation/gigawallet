@@ -5,15 +5,15 @@ import "github.com/shopspring/decimal"
 // Invoice is a request for payment created by Gigawallet.
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
-	ID      Address `json:"id"`      // pay-to Address (Invoice ID)
-	Account Address `json:"account"` // an Account.Address (Account ID)
-	TXID    string  `json:"txid"`
-	Vendor  string  `json:"vendor"`
-	Items   []Item  `json:"items"`
+	ID            Address `json:"id"`      // pay-to Address (Invoice ID)
+	Account       Address `json:"account"` // an Account.Address (Account ID)
+	TXID          string  `json:"txid"`
+	Vendor        string  `json:"vendor"`
+	Items         []Item  `json:"items"`
+	Confirmations int32   `json:"confirmations"` // number of confirmed blocks (since block_id)
 	// These are used internally to track invoice status.
-	KeyIndex      uint32 `json:"-"` // which HD Wallet child-key was generated
-	BlockID       string `json:"-"` // transaction seen in this mined block
-	Confirmations int32  `json:"-"` // number of confirmed blocks (since block_id)
+	KeyIndex uint32 `json:"-"` // which HD Wallet child-key was generated
+	BlockID  string `json:"-"` // transaction seen in this mined block
 }
 
 // CalcTotal sums up the Items listed on the Invoice.

@@ -69,7 +69,7 @@ func Server(conf giga.Config) {
 	corez.Subscribe(chaser)
 	c.Service("ZMQ Listener", corez)
 
-	api := giga.NewAPI(store, l1, bus, follower)
+	api := giga.NewAPI(store, l1, bus, follower, conf)
 
 	// Start the Payment API
 	p, err := webapi.NewWebAPI(conf, api)
