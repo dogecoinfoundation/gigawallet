@@ -85,7 +85,7 @@ type StoreTransaction interface {
 
 	// Mark an Unspent Transaction Output as spent (at the given block height)
 	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
-	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (string, error)
+	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (accountId string, scriptAddress Address, err error)
 
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
@@ -109,6 +109,17 @@ type StoreTransaction interface {
 	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
 	// and increment those accounts' chain-sequence-number.
 	IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error)
+
+	// Mark all UTXOs as confirmed (available to spend) after `confirmations` blocks,
+	// at the current block height passed in blockHeight. This should be called each
+	// time a new block is processed, i.e. blockHeight increases, but it is safe to
+	// call less often (e.g. after a batch of blocks)
+	ConfirmUTXOs(confirmations int, blockHeight int64) error
+
+	// Insert (address,block-height) pairs into the Address Index.
+	// The Address Index is used to find all Blocks that contain an Address.
+	// Duplicates will be ignored.
+	IndexAddresses(entries []AddressBlock) error
 }
 
 // Create Account: foreignID must not exist.
@@ -150,4 +161,9 @@ type InsertUTXOAddress struct {
 	Addr   Address
 	TxHash string
 	Index  uint32
+}
+
+type AddressBlock struct {
+	Addr   Address
+	Height int64
 }

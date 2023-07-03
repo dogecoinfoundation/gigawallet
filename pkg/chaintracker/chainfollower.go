@@ -202,6 +202,7 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 	var startPos ChainPos = pos
 	var rollbackFrom string = ""
 	var blockCount int = 0
+	var addressBlocks []giga.AddressBlock
 	affectedAcconts := make(map[string]any)
 	tx := c.beginStoreTxn()
 	for pos.NextBlockHash != "" {
@@ -209,7 +210,8 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 		block := c.fetchBlock(pos.NextBlockHash)
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
-			if !c.processBlock(tx, block, affectedAcconts) {
+			addressBlocks = c.processBlock(tx, block, affectedAcconts, addressBlocks)
+			if addressBlocks == nil {
 				// Unable to process the block - roll back.
 				tx.Rollback()
 				return startPos
@@ -230,6 +232,8 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 		}
 	}
 	if blockCount > 0 {
+		// Add addresses => block-heights to the Address Index.
+		tx.IndexAddresses(addressBlocks)
 		// Increment the chain-seq number on affected accounts.
 		tx.IncChainSeqForAccounts(mapKeys(affectedAcconts))
 		// We have made forward progress: commit the transaction.
@@ -338,21 +342,21 @@ func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, pos ChainPos)
 	})
 	if err != nil {
 		tx.Rollback()
-		log.Println("ChainFollower: processBlock: cannot UpdateChainState:", err)
+		log.Println("ChainFollower: commitChainState: cannot UpdateChainState:", err)
 		c.sleepForRetry(err)
 		return false // retry.
 	}
 	// Commit the entire transaction with all changes in the batch.
 	err = tx.Commit()
 	if err != nil {
-		log.Println("ChainFollower: processBlock: cannot commit DB transaction:", err)
+		log.Println("ChainFollower: commitChainState: cannot commit DB transaction:", err)
 		c.sleepForRetry(err)
 		return false // retry.
 	}
 	return true // committed.
 }
 
-func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlock, affectedAcconts map[string]any) bool {
+func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlock, affectedAcconts map[string]any, addressBlocks []giga.AddressBlock) []giga.AddressBlock {
 	log.Println("ChainFollower: processing block", block.Hash, block.Height)
 	// Insert entirely-new UTXOs that don't exist in the database.
 	for _, txn_id := range block.Tx {
@@ -365,14 +369,20 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 				// • We only care about UTXOs that are spendable (i.e. have a positive value and an address/PKH)
 				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
 				// log.Println("ChainFollower: marking UTXO spent", vin.TxID, vin.VOut, block.Height)
-				accountID, err := tx.MarkUTXOSpent(vin.TxID, vin.VOut, block.Height)
+				accountID, scriptAddress, err := tx.MarkUTXOSpent(vin.TxID, vin.VOut, block.Height)
 				if err != nil {
 					log.Println("ChainFollower: processBlock: cannot mark UTXO in DB:", err, vin.TxID, vin.VOut)
 					c.sleepForRetry(err)
-					return false // retry.
+					return nil // retry.
 				}
 				if accountID != "" {
 					affectedAcconts[accountID] = nil // insert in affectedAcconts.
+				}
+				// FIXME: Address Index won't include addresses from Input UTXOs
+				//        that we don't have in our database (most of them, unless
+				//        we keep the whole Live UTXO set!)
+				if scriptAddress != "" {
+					addressBlocks = append(addressBlocks, giga.AddressBlock{Addr: scriptAddress, Height: block.Height})
 				}
 			}
 		}
@@ -383,7 +393,9 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 				scriptType := typeOfScript(vout.ScriptPubKey.Type)
 				if scriptType == "p2pkh" || scriptType == "p2sh" || scriptType == "p2pk" {
 					// These script-types always contain a single address.
+					// FIXME: re-encode p2pk [and p2sh] as Addresses in a consistent format.
 					pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
+					addressBlocks = append(addressBlocks, giga.AddressBlock{Addr: pkhAddress, Height: block.Height})
 					// Use an address-to-account index (utxo_account_i) to find the account.
 					accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(pkhAddress)
 					if err != nil {
@@ -392,7 +404,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 						} else {
 							log.Println("ChainFollower: processBlock: cannot query FindAccountForAddress in DB:", err, pkhAddress)
 							c.sleepForRetry(err)
-							return false // retry.
+							return nil // retry.
 						}
 					} else {
 						affectedAcconts[string(accountID)] = nil // insert in affectedAcconts.
@@ -400,7 +412,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 						if err != nil {
 							log.Println("ChainFollower: processBlock: cannot create UTXO in DB:", err, txn_id, vout.N)
 							c.sleepForRetry(err)
-							return false // retry.
+							return nil // retry.
 						}
 					}
 				} else {
@@ -411,7 +423,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 			}
 		}
 	}
-	return true
+	return addressBlocks
 }
 
 func typeOfScript(name string) string {

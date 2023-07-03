@@ -83,11 +83,14 @@ CREATE TABLE IF NOT EXISTS chainstate (
 	best_height INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS address_block (
-	address TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS addresses (
+	address TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS address_height (
+	address INTEGER NOT NULL,
 	height INTEGER NOT NULL,
 	PRIMARY KEY (address, height)
-);
+) WITHOUT ROWID;
 `
 
 /****************** SQLiteStore implements giga.Store ********************/
@@ -560,23 +563,22 @@ func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.C
 	return nil
 }
 
-func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) (string, error) {
-	var id string
-	rows, err := t.tx.Query("UPDATE utxo SET spending_height=$1 WHERE txn_id=$2 AND vout=$3 RETURNING account_address", blockHeight, txID, vOut)
+func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) (id string, scriptAddress giga.Address, err error) {
+	rows, err := t.tx.Query("UPDATE utxo SET spending_height=$1 WHERE txn_id=$2 AND vout=$3 RETURNING account_address, script_address", blockHeight, txID, vOut)
 	if err != nil {
-		return "", dbErr(err, "MarkUTXOSpent: executing update")
+		return "", "", dbErr(err, "MarkUTXOSpent: executing update")
 	}
 	defer rows.Close()
 	if rows.Next() {
-		err := rows.Scan(&id)
+		err := rows.Scan(&id, &scriptAddress)
 		if err != nil {
-			return "", dbErr(err, "MarkUTXOSpent: scanning row")
+			return "", "", dbErr(err, "MarkUTXOSpent: scanning row")
 		}
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
-		return "", dbErr(err, "MarkUTXOSpent: scanning rows")
+		return "", "", dbErr(err, "MarkUTXOSpent: scanning rows")
 	}
-	return id, nil
+	return
 }
 
 func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
@@ -601,7 +603,7 @@ func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int
 		SELECT DISTINCT address FROM account INNER JOIN utxo ON account.address = utxo.account_address WHERE utxo.adding_height > $1 OR utxo.available_height > $1 OR utxo.spending_height > $1 OR utxo.spent_height > $1
 		UNION SELECT DISTINCT address FROM account INNER JOIN txn ON account.address = txn.account_address WHERE txn.on_chain_height > $1 OR txn.verified_height > $1`, maxValidHeight)
 	if err != nil {
-		return []string{}, dbErr(err, "RevertUTXOsAboveHeight: executing query")
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: executing query")
 	}
 	defer rows.Close()
 	var ids []string
@@ -609,12 +611,12 @@ func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int
 		var id string
 		err := rows.Scan(&id)
 		if err != nil {
-			return []string{}, dbErr(err, "RevertUTXOsAboveHeight: scanning row")
+			return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning row")
 		}
 		ids = append(ids, id)
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
-		return []string{}, dbErr(err, "RevertUTXOsAboveHeight: scanning rows")
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning rows")
 	}
 	err = t.IncChainSeqForAccounts(ids)
 	return ids, err
@@ -666,11 +668,11 @@ func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) err
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 1")
 	}
-	_, err = t.tx.Exec("UPDATE utxo SET available_height=NULL,spending_height,spent_height=NULL WHERE available_height > ?", maxValidHeight)
+	_, err = t.tx.Exec("UPDATE utxo SET available_height=NULL,spending_height=NULL,spent_height=NULL WHERE available_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 2")
 	}
-	_, err = t.tx.Exec("UPDATE utxo SET spending_height,spent_height=NULL WHERE spending_height > ?", maxValidHeight)
+	_, err = t.tx.Exec("UPDATE utxo SET spending_height=NULL,spent_height=NULL WHERE spending_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 3")
 	}
@@ -691,6 +693,38 @@ func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) erro
 	_, err = t.tx.Exec("UPDATE txn SET on_chain_height = NULL, verified_height = NULL WHERE on_chain_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertTxnsAboveHeight: executing update 2")
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) IndexAddresses(entries []giga.AddressBlock) error {
+	a_stmt, err := t.tx.Prepare("INSERT OR REPLACE INTO addresses (address) VALUES ($1) RETURNING rowid")
+	if err != nil {
+		return dbErr(err, "IndexAddresses: preparing insert")
+	}
+	defer a_stmt.Close()
+	i_stmt, err := t.tx.Prepare("INSERT OR REPLACE INTO address_height (address,height) VALUES ($1,$2)")
+	if err != nil {
+		return dbErr(err, "IndexAddresses: preparing insert")
+	}
+	defer i_stmt.Close()
+	for _, e := range entries {
+		var a_id int64
+		rows, err := a_stmt.Query(string(e.Addr))
+		if err != nil {
+			return dbErr(err, "IndexAddresses: inserting unique address")
+		}
+		if !rows.Next() {
+			return dbErr(err, "IndexAddresses: scanning address result")
+		}
+		err = rows.Scan(&a_id)
+		if err != nil {
+			return dbErr(err, "IndexAddresses: scanning address result")
+		}
+		_, err = i_stmt.Exec(a_id, e.Height)
+		if err != nil {
+			return dbErr(err, "IndexAddresses: inserting address-index")
+		}
 	}
 	return nil
 }
