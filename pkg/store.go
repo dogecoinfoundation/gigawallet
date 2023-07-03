@@ -68,6 +68,10 @@ type StoreTransaction interface {
 	// It returns giga.NotFound if the account does not exist (key: ForeignID)
 	GetAccount(foreignID string) (Account, error)
 
+	// GetAccount returns the account with the given ID.
+	// It returns giga.NotFound if the account does not exist (key: ID)
+	GetAccountByID(ID string) (Account, error)
+
 	// Find the accountID (HD root PKH) that owns the given Dogecoin address.
 	// Also find the key index of `pkhAddress` within the HD wallet.
 	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, isInternal bool, err error)
