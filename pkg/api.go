@@ -56,6 +56,13 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 	}
 
 	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex, Confirmations: confirmations}
+
+	//validate invoice
+	err = i.Validate()
+	if err != nil {
+		return Invoice{}, err
+	}
+
 	err = txn.StoreInvoice(i)
 	if err != nil {
 		return Invoice{}, err

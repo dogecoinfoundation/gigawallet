@@ -1,6 +1,10 @@
 package giga
 
-import "github.com/shopspring/decimal"
+import (
+	"errors"
+
+	"github.com/shopspring/decimal"
+)
 
 // Invoice is a request for payment created by Gigawallet.
 type Invoice struct {
@@ -25,9 +29,56 @@ func (i *Invoice) CalcTotal() CoinAmount {
 	return total
 }
 
+// Various types of line item in an invoice
+var ItemTypes []string = []string{
+	"item",     // general purpose line item
+	"tax",      // some form of tax
+	"fee",      // any fee applied to the invoice
+	"shipping", // shipping cost
+	"discount", // a discount, a negative number
+	"donation", // a donation for some cause
+}
+
 type Item struct {
-	Name      string          `json:"name"`
-	Price     decimal.Decimal `json:"price"`
-	Quantity  int             `json:"quantity"`
-	ImageLink string          `json:"image_link"`
+	Type        string          `json:"type"` //ItemTypes
+	Name        string          `json:"name"`
+	SKU         string          `json:"sku"`
+	Description string          `json:"description"`
+	Price       decimal.Decimal `json:"price"`
+	Quantity    int             `json:"quantity"`
+	ImageLink   string          `json:"image_link"`
+}
+
+func (i *Invoice) Validate() error {
+	// Has items
+	if len(i.Items) == 0 {
+		return errors.New("Invoice contains no items")
+	}
+
+	// Validate each item
+	for _, item := range i.Items {
+		// Quantity should be greater than zero
+		if item.Quantity <= 0 {
+			return errors.New("Item quantity should be greater than zero")
+		}
+
+		// Price should be greater than zero
+		if item.Price.LessThanOrEqual(decimal.Zero) {
+			return errors.New("Item price should be greater than zero")
+		}
+
+		// Validate item type
+		validType := false
+		for _, itemType := range ItemTypes {
+			if item.Type == itemType {
+				validType = true
+				break
+			}
+		}
+		if !validType {
+			return errors.New("Invalid item type")
+		}
+	}
+
+	return nil
 }
