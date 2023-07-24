@@ -122,47 +122,14 @@ type StoreTransaction interface {
 	IndexAddresses(entries []AddressBlock) error
 }
 
-// Create Account: foreignID must not exist.
-type CreateAccount struct {
-	Account Account
-}
-
-// Update Account: foreignID must already exist.
-type UpdateAccount struct {
-	Account Account
-}
-
-// Update: next external key numbers in an Account.
-type UpdateAccountNextExternal struct {
-	Address  Address
-	KeyIndex uint32
-}
-
-// Upsert: Invoice, unconditional.
-type UpsertInvoice struct {
-	Invoice Invoice
-}
-
-// MarkInvoiceAsPaid marks the invoice with the given ID as paid.
-// Update, unconditional.
-type MarkInvoiceAsPaid struct {
-	InvoiceID Address
-}
-
 type ChainState struct {
 	BestBlockHash   string
 	BestBlockHeight int64
 }
 
-type InsertUTXO struct {
 }
 
-type InsertUTXOAddress struct {
-	Addr   Address
-	TxHash string
-	Index  uint32
-}
-
+// Address Index: mapping from one Address to many BlockHeight (experimental)
 type AddressBlock struct {
 	Addr   Address
 	Height int64

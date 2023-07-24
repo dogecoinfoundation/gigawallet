@@ -23,6 +23,7 @@ type ChainFollower struct {
 	Commands         chan any                     // receive ReSyncChainFollowerCmd etc.
 	stopping         bool                         // set to exit the main loop.
 	SetSync          *giga.ReSyncChainFollowerCmd // pending ReSync command.
+	buildAddressIndex bool                         // enable building the Address Index.
 }
 
 type ChainPos struct {
@@ -232,8 +233,10 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 		}
 	}
 	if blockCount > 0 {
-		// Add addresses => block-heights to the Address Index.
-		tx.IndexAddresses(addressBlocks)
+		if c.buildAddressIndex {
+			// Add addresses => block-heights to the Address Index.
+			tx.IndexAddresses(addressBlocks)
+		}
 		// Increment the chain-seq number on affected accounts.
 		tx.IncChainSeqForAccounts(mapKeys(affectedAcconts))
 		// We have made forward progress: commit the transaction.
