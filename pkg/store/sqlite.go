@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS account (
 	payout_frequency TEXT NOT NULL,
 	chain_seq INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS account_foreign_i ON account (foreign_id);
 
 CREATE TABLE IF NOT EXISTS account_address (
 	address TEXT NOT NULL PRIMARY KEY,
@@ -74,16 +75,14 @@ CREATE TABLE IF NOT EXISTS utxo (
 	PRIMARY KEY (txn_id, vout)
 );
 CREATE INDEX IF NOT EXISTS utxo_account_i ON utxo (account_address);
+CREATE INDEX IF NOT EXISTS utxo_added_i ON utxo (adding_height, available_height);
+CREATE INDEX IF NOT EXISTS utxo_spent_i ON utxo (spending_height, spent_height);
 
 CREATE TABLE IF NOT EXISTS chainstate (
+	root_hash TEXT NOT NULL,
+	first_height INTEGER NOT NULL,
 	best_hash TEXT NOT NULL,
 	best_height INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS address_block (
-	address TEXT NOT NULL,
-	height INTEGER NOT NULL,
-	PRIMARY KEY (address, height)
 );
 `
 
@@ -219,9 +218,9 @@ func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 }
 
 func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
-	row := s.db.QueryRow("SELECT best_hash, best_height FROM chainstate")
+	row := s.db.QueryRow("SELECT best_hash, best_height, root_hash, first_height FROM chainstate")
 	var state giga.ChainState
-	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight)
+	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight, &state.RootHash, &state.FirstHeight)
 	if err == sql.ErrNoRows {
 		// MUST detect this error to fulfil the API contract.
 		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
@@ -456,6 +455,23 @@ func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, erro
 	return acc, nil
 }
 
+func (t SQLiteStoreTransaction) GetAccountByID(ID string) (giga.Account, error) {
+	row := t.tx.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE address = ?", ID)
+	var acc giga.Account
+	err := row.Scan(
+		&acc.ForeignID, &acc.Address, &acc.Privkey,
+		&acc.NextInternalKey, &acc.NextExternalKey,
+		&acc.NextPoolInternal, &acc.NextPoolExternal,
+		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
+	if err == sql.ErrNoRows {
+		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", ID)
+	}
+	if err != nil {
+		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
+	}
+	return acc, nil
+}
+
 func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, bool, error) {
 	row := t.tx.QueryRow("SELECT account_address,key_index,is_internal FROM account_address WHERE address = ?", address)
 	var accountID giga.Address
@@ -511,13 +527,14 @@ func (t SQLiteStoreTransaction) MarkInvoiceAsPaid(address giga.Address) error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
-	stmt, err := t.tx.Prepare("UPDATE chainstate SET best_hash = ?, best_height = ?")
-	if err != nil {
-		return dbErr(err, "UpdateChainState: preparing update")
+func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState, writeRoot bool) error {
+	var res sql.Result
+	var err error
+	if writeRoot {
+		res, err = t.tx.Exec("UPDATE chainstate SET best_hash=$1, best_height=$2, root_hash=$3, first_height=$4", state.BestBlockHash, state.BestBlockHeight, state.RootHash, state.FirstHeight)
+	} else {
+		res, err = t.tx.Exec("UPDATE chainstate SET best_hash=$1, best_height=$2", state.BestBlockHash, state.BestBlockHeight)
 	}
-	defer stmt.Close()
-	res, err := stmt.Exec(state.BestBlockHash, state.BestBlockHeight)
 	if err != nil {
 		return dbErr(err, "UpdateChainState: executing update")
 	}
@@ -527,12 +544,7 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
 	}
 	if num_rows < 1 {
 		// this is the first call to UpdateChainState: insert the row.
-		stmt, err := t.tx.Prepare("INSERT INTO chainstate (best_hash, best_height) VALUES (?, ?)")
-		if err != nil {
-			return dbErr(err, "UpdateChainState: preparing insert")
-		}
-		defer stmt.Close()
-		_, err = stmt.Exec(state.BestBlockHash, state.BestBlockHeight)
+		_, err = t.tx.Exec("INSERT INTO chainstate (best_hash,best_height,root_hash,first_height) VALUES ($1,$2,$3,$4)", state.BestBlockHash, state.BestBlockHeight, state.RootHash, state.FirstHeight)
 		if err != nil {
 			return dbErr(err, "UpdateChainState: executing insert")
 		}
@@ -541,35 +553,31 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
 }
 
 func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, isInternal bool, blockHeight int64) error {
-	stmt, err := t.tx.Prepare("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height) VALUES (?,?,?,?,?,?,?,?,?)")
-	if err != nil {
-		return dbErr(err, "CreateUTXO: preparing insert")
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(txID, vOut, accountID, value, scriptType, pkhAddress, keyIndex, isInternal, blockHeight)
+	// psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO"
+	_, err := t.tx.Exec("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO UPDATE SET account_address=$3, value=$4, script_type=$5, script_address=$6, key_index=$7, is_internal=$8, adding_height=$9 WHERE txn_id=$1 AND vout=$2",
+		txID, vOut, accountID, value, scriptType, pkhAddress, keyIndex, isInternal, blockHeight)
 	if err != nil {
 		return dbErr(err, "CreateUTXO: executing insert")
 	}
 	return nil
 }
 
-func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) (string, error) {
-	var id string
-	rows, err := t.tx.Query("UPDATE utxo SET spending_height = ? WHERE txn_id = ? AND vout = ? RETURNING account_address", blockHeight, txID, vOut)
+func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) (id string, scriptAddress giga.Address, err error) {
+	rows, err := t.tx.Query("UPDATE utxo SET spending_height=$1 WHERE txn_id=$2 AND vout=$3 RETURNING account_address, script_address", blockHeight, txID, vOut)
 	if err != nil {
-		return "", dbErr(err, "MarkUTXOSpent: executing update")
+		return "", "", dbErr(err, "MarkUTXOSpent: executing update")
 	}
 	defer rows.Close()
 	if rows.Next() {
-		err := rows.Scan(&id)
+		err := rows.Scan(&id, &scriptAddress)
 		if err != nil {
-			return "", dbErr(err, "MarkUTXOSpent: scanning row")
+			return "", "", dbErr(err, "MarkUTXOSpent: scanning row")
 		}
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
-		return "", dbErr(err, "MarkUTXOSpent: scanning rows")
+		return "", "", dbErr(err, "MarkUTXOSpent: scanning rows")
 	}
-	return id, nil
+	return
 }
 
 func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
@@ -594,7 +602,7 @@ func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int
 		SELECT DISTINCT address FROM account INNER JOIN utxo ON account.address = utxo.account_address WHERE utxo.adding_height > $1 OR utxo.available_height > $1 OR utxo.spending_height > $1 OR utxo.spent_height > $1
 		UNION SELECT DISTINCT address FROM account INNER JOIN txn ON account.address = txn.account_address WHERE txn.on_chain_height > $1 OR txn.verified_height > $1`, maxValidHeight)
 	if err != nil {
-		return []string{}, dbErr(err, "RevertUTXOsAboveHeight: executing query")
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: executing query")
 	}
 	defer rows.Close()
 	var ids []string
@@ -602,54 +610,72 @@ func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int
 		var id string
 		err := rows.Scan(&id)
 		if err != nil {
-			return []string{}, dbErr(err, "RevertUTXOsAboveHeight: scanning row")
+			return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning row")
 		}
 		ids = append(ids, id)
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
-		return []string{}, dbErr(err, "RevertUTXOsAboveHeight: scanning rows")
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning rows")
 	}
 	err = t.IncChainSeqForAccounts(ids)
 	return ids, err
 }
 
+func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) error {
+	stmt, err := t.tx.Prepare("UPDATE account SET incoming=incoming-$2, balance=balance+$2 WHERE address=$1")
+	if err != nil {
+		return dbErr(err, "ConfirmUTXOs: preparing update")
+	}
+	defer stmt.Close()
+	confirmedHeight := blockHeight - int64(confirmations) // from config.
+	// note: there is an index on (adding_height, available_height) for this query.
+	// note: this uses num-confirmations from the invoice being paid, if there is one.
+	// note: this MUST be a LEFT OUTER join (script_address may not match any invoice)
+	rows, err := t.tx.Query(`
+		UPDATE utxo SET available_height=$1
+		WHERE adding_height <= COALESCE((SELECT $1 - confirmations from invoice WHERE invoice_address = utxo.script_address), $2)
+		AND available_height = NULL
+		RETURNING account_address, value
+	`, blockHeight, confirmedHeight)
+	if err != nil {
+		return dbErr(err, "ConfirmUTXOs: updating utxos")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var value string
+		err := rows.Scan(&id, &value)
+		if err != nil {
+			return dbErr(err, "ConfirmUTXOs: scanning row")
+		}
+		stmt.Exec(id, value)
+		if err != nil {
+			return dbErr(err, "ConfirmUTXOs: updating account "+id)
+		}
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return dbErr(err, "ConfirmUTXOs: scanning rows")
+	}
+	return nil
+}
+
 func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) error {
-	// The presence of a height in adding_height, available_height, spending_height or spent_height
+	// The presence of a height in adding_height, available_height, spending_height, spent_height
 	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
 	// reserved for spending, or has been spent (confirmed)
-	stmt1, err := t.tx.Prepare("UPDATE utxo SET adding_height = NULL, available_height = NULL, spending_height = NULL, spent_height = NULL WHERE adding_height > ?")
-	if err != nil {
-		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 1")
-	}
-	defer stmt1.Close()
-	stmt2, err := t.tx.Prepare("UPDATE utxo SET available_height = NULL, spending_height = NULL, spent_height = NULL WHERE available_height > ?")
-	if err != nil {
-		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 2")
-	}
-	defer stmt2.Close()
-	stmt3, err := t.tx.Prepare("UPDATE utxo SET spending_height = NULL, spent_height = NULL WHERE spending_height > ?")
-	if err != nil {
-		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 3")
-	}
-	defer stmt3.Close()
-	stmt4, err := t.tx.Prepare("UPDATE utxo SET spent_height = NULL WHERE spent_height > ?")
-	if err != nil {
-		return dbErr(err, "RevertUTXOsAboveHeight: preparing update 4")
-	}
-	defer stmt4.Close()
-	_, err = stmt1.Exec(maxValidHeight)
+	_, err := t.tx.Exec("UPDATE utxo SET adding_height=NULL,available_height=NULL,spending_height=NULL,spent_height=NULL WHERE adding_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 1")
 	}
-	_, err = stmt2.Exec(maxValidHeight)
+	_, err = t.tx.Exec("UPDATE utxo SET available_height=NULL,spending_height=NULL,spent_height=NULL WHERE available_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 2")
 	}
-	_, err = stmt3.Exec(maxValidHeight)
+	_, err = t.tx.Exec("UPDATE utxo SET spending_height=NULL,spent_height=NULL WHERE spending_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 3")
 	}
-	_, err = stmt4.Exec(maxValidHeight)
+	_, err = t.tx.Exec("UPDATE utxo SET spent_height=NULL WHERE spent_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 4")
 	}
@@ -659,21 +685,11 @@ func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) err
 func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) error {
 	// The presence of a height in on_chain_height or verified_height indicates
 	// that the invoice is in a block (on-chain) or has been verified (N blocks later)
-	stmt1, err := t.tx.Prepare("UPDATE txn SET on_chain_height = NULL, verified_height = NULL WHERE on_chain_height > ?")
-	if err != nil {
-		return dbErr(err, "RevertTxnsAboveHeight: preparing update 1")
-	}
-	defer stmt1.Close()
-	stmt2, err := t.tx.Prepare("UPDATE txn SET verified_height = NULL WHERE verified_height > ?")
-	if err != nil {
-		return dbErr(err, "RevertTxnsAboveHeight: preparing update 2")
-	}
-	defer stmt2.Close()
-	_, err = stmt1.Exec(maxValidHeight)
+	_, err := t.tx.Exec("UPDATE txn SET on_chain_height = NULL, verified_height = NULL WHERE on_chain_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertTxnsAboveHeight: executing update 1")
 	}
-	_, err = stmt2.Exec(maxValidHeight)
+	_, err = t.tx.Exec("UPDATE txn SET on_chain_height = NULL, verified_height = NULL WHERE on_chain_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertTxnsAboveHeight: executing update 2")
 	}

@@ -68,6 +68,10 @@ type StoreTransaction interface {
 	// It returns giga.NotFound if the account does not exist (key: ForeignID)
 	GetAccount(foreignID string) (Account, error)
 
+	// GetAccount returns the account with the given ID.
+	// It returns giga.NotFound if the account does not exist (key: ID)
+	GetAccountByID(ID string) (Account, error)
+
 	// Find the accountID (HD root PKH) that owns the given Dogecoin address.
 	// Also find the key index of `pkhAddress` within the HD wallet.
 	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, isInternal bool, err error)
@@ -81,14 +85,14 @@ type StoreTransaction interface {
 
 	// Mark an Unspent Transaction Output as spent (at the given block height)
 	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
-	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (string, error)
+	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (accountId string, scriptAddress Address, err error)
 
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
 	MarkInvoiceAsPaid(address Address) error
 
 	// UpdateChainState updates the Best Block information (checkpoint for restart)
-	UpdateChainState(state ChainState) error
+	UpdateChainState(state ChainState, writeRoot bool) error
 
 	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
 	// This serves to roll back the effects of adding or spending those UTXOs.
@@ -105,45 +109,20 @@ type StoreTransaction interface {
 	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
 	// and increment those accounts' chain-sequence-number.
 	IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error)
+
+	// Mark all UTXOs as confirmed (available to spend) after `confirmations` blocks,
+	// at the current block height passed in blockHeight. This should be called each
+	// time a new block is processed, i.e. blockHeight increases, but it is safe to
+	// call less often (e.g. after a batch of blocks)
+	ConfirmUTXOs(confirmations int, blockHeight int64) error
 }
 
-// Create Account: foreignID must not exist.
-type CreateAccount struct {
-	Account Account
-}
-
-// Update Account: foreignID must already exist.
-type UpdateAccount struct {
-	Account Account
-}
-
-// Update: next external key numbers in an Account.
-type UpdateAccountNextExternal struct {
-	Address  Address
-	KeyIndex uint32
-}
-
-// Upsert: Invoice, unconditional.
-type UpsertInvoice struct {
-	Invoice Invoice
-}
-
-// MarkInvoiceAsPaid marks the invoice with the given ID as paid.
-// Update, unconditional.
-type MarkInvoiceAsPaid struct {
-	InvoiceID Address
-}
-
+// Current chainstate in the database.
+// Gigawallet TRANSACTIONALLY moves ChainState forward in batches of blocks,
+// updating UTXOs, Invoices and Account Balances in the same DB transaction.
 type ChainState struct {
-	BestBlockHash   string
-	BestBlockHeight int64
-}
-
-type InsertUTXO struct {
-}
-
-type InsertUTXOAddress struct {
-	Addr   Address
-	TxHash string
-	Index  uint32
+	RootHash        string // hash of block at height 1 on the chain being sync'd.
+	FirstHeight     int64  // block height when gigawallet first started to sync this blockchain.
+	BestBlockHash   string // last block processed by gigawallet (effects included in DB)
+	BestBlockHeight int64  // last block height processed by gigawallet (effects included in DB)
 }

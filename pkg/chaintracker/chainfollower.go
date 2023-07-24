@@ -9,20 +9,20 @@ import (
 )
 
 const (
-	DOGECOIN_GENESIS_BLOCK_HASH = "82bc68038f6034c0596b6e313729793a887fded6e92a31fbdf70863f89d9bea2" // Mainnet 1
-	RETRY_DELAY                 = 5 * time.Second
-	CONFLICT_DELAY              = 250 * time.Millisecond // quarter second
-	BATCH_SIZE                  = 100                    // number of blocks
+	RETRY_DELAY       = 5 * time.Second        // for RPC and Database errors.
+	WRONG_CHAIN_DELAY = 5 * time.Minute        // for "Wrong Chain" error (essentially stop)
+	CONFLICT_DELAY    = 250 * time.Millisecond // for Database conflicts (concurrent transactions)
+	BLOCKS_PER_COMMIT = 10                     // number of blocks per database commit.
 )
 
 type ChainFollower struct {
 	l1               giga.L1
 	store            giga.Store
-	tx               giga.StoreTransaction
-	ReceiveBestBlock chan string
-	Commands         chan any
-	stopping         bool
-	SetSync          *giga.ReSyncChainFollowerCmd
+	tx               giga.StoreTransaction        // non-nil during a transaction (for cleanup)
+	ReceiveBestBlock chan string                  // receive from TipChaser.
+	Commands         chan any                     // receive ReSyncChainFollowerCmd etc.
+	stopping         bool                         // set to exit the main loop.
+	SetSync          *giga.ReSyncChainFollowerCmd // pending ReSync command.
 }
 
 type ChainPos struct {
@@ -92,18 +92,7 @@ func (c *ChainFollower) serviceMain() {
 	// the Best Block we have stored (and all prior blocks per previousblockhash)
 	// We MUST update the chainstate before we update this hash.
 	log.Println("ChainFollower: fetching chainstate")
-	state := c.fetchChainState()
-
-	// Work out the current Chain Position.
-	var pos ChainPos
-	if state.BestBlockHash == "" {
-		// No BestBlockHash stored, so we must be starting from scratch.
-		// Walk the blockchain from the genesis block.
-		pos = ChainPos{"", 0, DOGECOIN_GENESIS_BLOCK_HASH}
-	} else {
-		// Walk forwards on the blockchain from BestBlockHash until we reach the tip.
-		pos = ChainPos{state.BestBlockHash, state.BestBlockHeight, ""}
-	}
+	pos := c.fetchStartingPos()
 
 	// Execute any pending commands.
 	if c.SetSync != nil {
@@ -141,6 +130,64 @@ func (c *ChainFollower) serviceMain() {
 
 		// Walk forwards on the blockchain until we reach the tip.
 		pos = c.followChainToTip(pos)
+	}
+}
+
+func (c *ChainFollower) fetchStartingPos() ChainPos {
+	// Retry loop for transaction error or wrong-chain error.
+	for {
+		state := c.fetchChainState()
+		rootBlock := c.fetchBlockHash(1)
+		if state.BestBlockHash != "" {
+			// Resume sync.
+			// Make sure we're syncing the same blockchain as before.
+			if state.RootHash == rootBlock {
+				log.Println("ChainFollower: RESUME SYNC :", state.BestBlockHeight)
+				return ChainPos{state.BestBlockHash, state.BestBlockHeight, ""}
+			} else {
+				log.Println("ChainFollower: WRONG CHAIN!")
+				log.Println("ChainFollower: Block#1 we have in DB:", state.RootHash)
+				log.Println("ChainFollower: Block#1 on Core Node:", rootBlock)
+				log.Println("ChainFollower: Please re-connect to a Core Node running the same blockchain we have in the database, or reset your database tables (please see manual for help)")
+				c.sleepForRetry(nil, WRONG_CHAIN_DELAY)
+			}
+		} else {
+			// Initial sync.
+			// Start at least 100 blocks back from the current Tip,
+			// so we're working with a well-confirmed starting block.
+			firstHeight := c.fetchBlockCount() - 100
+			if firstHeight < 1 {
+				firstHeight = 1
+			}
+			firstBlockHash := c.fetchBlockHash(firstHeight)
+			log.Println("ChainFollower: INITIAL SYNC")
+			log.Println("ChainFollower: Block#1 on Core Node:", rootBlock)
+			log.Println("ChainFollower: Initial Block Height:", firstHeight)
+			// Commit the initial start position to the database.
+			// Wrap the following in a transaction with retry.
+			tx := c.beginStoreTxn()
+			err := tx.UpdateChainState(giga.ChainState{
+				RootHash:        rootBlock,
+				FirstHeight:     firstHeight,
+				BestBlockHash:   firstBlockHash,
+				BestBlockHeight: firstHeight,
+			}, true)
+			if err != nil {
+				tx.Rollback()
+				log.Println("ChainFollower: fetchStartingPos: cannot UpdateChainState:", err)
+				c.sleepForRetry(err, 0)
+				continue // retry.
+			}
+			err = tx.Commit()
+			if err != nil {
+				log.Println("ChainFollower: fetchStartingPos: cannot commit DB transaction:", err)
+				c.sleepForRetry(err, 0)
+				continue // retry.
+			}
+			// Now start again: should resume sync this time.
+			log.Println("ChainFollower: wrote chainstate. ready to resume sync.")
+			continue
+		}
 	}
 }
 
@@ -217,7 +264,7 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 			// Progress has been made.
 			pos = ChainPos{block.Hash, block.Height, block.NextBlockHash}
 			blockCount++
-			if blockCount > BATCH_SIZE {
+			if blockCount > BLOCKS_PER_COMMIT {
 				// Commit our progress every BATCH_SIZE blocks.
 				break
 			}
@@ -290,7 +337,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 		if err != nil {
 			tx.Rollback()
 			log.Println("ChainFollower: rollBackChainStateToPos: cannot IncAccountsAffectedByRollback:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		// Roll back chainstate above maxValidHeight.
@@ -298,31 +345,31 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 		if err != nil {
 			tx.Rollback()
 			log.Println("ChainFollower: rollBackChainStateToPos: cannot RevertUTXOsAboveHeight:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		err = tx.RevertTxnsAboveHeight(maxValidHeight)
 		if err != nil {
 			tx.Rollback()
 			log.Println("ChainFollower: rollBackChainStateToPos: cannot RevertTxnsAboveHeight:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		// Update Best Block in the database (checkpoint for restart)
 		err = tx.UpdateChainState(giga.ChainState{
 			BestBlockHash:   pos.BlockHash,
 			BestBlockHeight: pos.BlockHeight,
-		})
+		}, false)
 		if err != nil {
 			tx.Rollback()
 			log.Println("ChainFollower: rollBackChainStateToPos: cannot UpdateChainState:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		err = tx.Commit()
 		if err != nil {
 			log.Println("ChainFollower: rollBackChainStateToPos: cannot commit DB transaction:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		return // success.
@@ -335,18 +382,18 @@ func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, pos ChainPos)
 	err := tx.UpdateChainState(giga.ChainState{
 		BestBlockHash:   pos.BlockHash,
 		BestBlockHeight: pos.BlockHeight,
-	})
+	}, false)
 	if err != nil {
 		tx.Rollback()
-		log.Println("ChainFollower: processBlock: cannot UpdateChainState:", err)
-		c.sleepForRetry(err)
+		log.Println("ChainFollower: commitChainState: cannot UpdateChainState:", err)
+		c.sleepForRetry(err, 0)
 		return false // retry.
 	}
 	// Commit the entire transaction with all changes in the batch.
 	err = tx.Commit()
 	if err != nil {
-		log.Println("ChainFollower: processBlock: cannot commit DB transaction:", err)
-		c.sleepForRetry(err)
+		log.Println("ChainFollower: commitChainState: cannot commit DB transaction:", err)
+		c.sleepForRetry(err, 0)
 		return false // retry.
 	}
 	return true // committed.
@@ -365,10 +412,10 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 				// • We only care about UTXOs that are spendable (i.e. have a positive value and an address/PKH)
 				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
 				// log.Println("ChainFollower: marking UTXO spent", vin.TxID, vin.VOut, block.Height)
-				accountID, err := tx.MarkUTXOSpent(vin.TxID, vin.VOut, block.Height)
+				accountID, _, err := tx.MarkUTXOSpent(vin.TxID, vin.VOut, block.Height)
 				if err != nil {
 					log.Println("ChainFollower: processBlock: cannot mark UTXO in DB:", err, vin.TxID, vin.VOut)
-					c.sleepForRetry(err)
+					c.sleepForRetry(err, 0)
 					return false // retry.
 				}
 				if accountID != "" {
@@ -383,6 +430,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 				scriptType := typeOfScript(vout.ScriptPubKey.Type)
 				if scriptType == "p2pkh" || scriptType == "p2sh" || scriptType == "p2pk" {
 					// These script-types always contain a single address.
+					// FIXME: re-encode p2pk [and p2sh] as Addresses in a consistent format.
 					pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
 					// Use an address-to-account index (utxo_account_i) to find the account.
 					accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(pkhAddress)
@@ -391,7 +439,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 							//log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
 						} else {
 							log.Println("ChainFollower: processBlock: cannot query FindAccountForAddress in DB:", err, pkhAddress)
-							c.sleepForRetry(err)
+							c.sleepForRetry(err, 0)
 							return false // retry.
 						}
 					} else {
@@ -399,7 +447,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 						err = tx.CreateUTXO(txn_id, vout.N, vout.Value, scriptType, pkhAddress, accountID, keyIndex, isInternal, block.Height)
 						if err != nil {
 							log.Println("ChainFollower: processBlock: cannot create UTXO in DB:", err, txn_id, vout.N)
-							c.sleepForRetry(err)
+							c.sleepForRetry(err, 0)
 							return false // retry.
 						}
 					}
@@ -437,7 +485,7 @@ func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
 		tx, err := c.store.Begin()
 		if err != nil {
 			log.Println("ChainFollower: beginStoreTxn: cannot begin:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		c.tx = tx
@@ -468,7 +516,7 @@ func (c *ChainFollower) fetchChainState() giga.ChainState {
 				return giga.ChainState{} // empty chainstate.
 			}
 			log.Println("ChainFollower: error retrieving best block:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 		} else {
 			return state
 		}
@@ -480,7 +528,7 @@ func (c *ChainFollower) fetchBlock(blockHash string) giga.RpcBlock {
 		block, err := c.l1.GetBlock(blockHash)
 		if err != nil {
 			log.Println("ChainFollower: error retrieving block:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 		} else {
 			return block
 		}
@@ -492,41 +540,55 @@ func (c *ChainFollower) fetchBlockHeader(blockHash string) giga.RpcBlockHeader {
 		block, err := c.l1.GetBlockHeader(blockHash)
 		if err != nil {
 			log.Println("ChainFollower: error retrieving block header:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 		} else {
 			return block
 		}
 	}
 }
 
-// func (c *ChainFollower) fetchBlockHash(height int64) (string, error) {
-// 	for {
-// 		hash, err := c.l1.GetBlockHash(height)
-// 		if err != nil {
-// 			log.Println("ChainFollower: error retrieving block hash:", err)
-// 			c.sleepForRetry(err)
-// 		} else {
-// 			return hash, nil
-// 		}
-// 	}
-// }
+func (c *ChainFollower) fetchBlockHash(height int64) string {
+	for {
+		hash, err := c.l1.GetBlockHash(height)
+		if err != nil {
+			log.Println("ChainFollower: error retrieving block hash:", err)
+			c.sleepForRetry(err, 0)
+		} else {
+			return hash
+		}
+	}
+}
+
+func (c *ChainFollower) fetchBlockCount() int64 {
+	for {
+		count, err := c.l1.GetBlockCount()
+		if err != nil {
+			log.Println("ChainFollower: error retrieving block count:", err)
+			c.sleepForRetry(err, 0)
+		} else {
+			return count
+		}
+	}
+}
 
 func (c *ChainFollower) fetchTransaction(txHash string) giga.RawTxn {
 	for {
 		txn, err := c.l1.GetTransaction(txHash)
 		if err != nil {
 			log.Println("ChainFollower: error retrieving transaction:", err)
-			c.sleepForRetry(err)
+			c.sleepForRetry(err, 0)
 		} else {
 			return txn
 		}
 	}
 }
 
-func (c *ChainFollower) sleepForRetry(err error) {
-	delay := RETRY_DELAY
-	if giga.IsDBConflictError(err) {
-		delay = CONFLICT_DELAY
+func (c *ChainFollower) sleepForRetry(err error, delay time.Duration) {
+	if delay == 0 {
+		delay = RETRY_DELAY
+		if giga.IsDBConflictError(err) {
+			delay = CONFLICT_DELAY
+		}
 	}
 	select {
 	case cmd := <-c.Commands:

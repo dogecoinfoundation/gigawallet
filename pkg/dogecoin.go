@@ -23,6 +23,7 @@ type L1 interface {
 	GetBlockHeader(blockHash string) (RpcBlockHeader, error)
 	GetBlockHash(height int64) (string, error)
 	GetBestBlockHash() (string, error)
+	GetBlockCount() (int64, error)
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(NewTxn) error
 	//SignMessage([]byte, Privkey) (string, error)
@@ -46,7 +47,7 @@ type UTXO struct {
 	Status        string     // 'p' = receive pending; 'c' = receive confirmed; 's' = spent pending; 'x' = spent confirmed
 	Value         CoinAmount // value of the txn output in dogecoin
 	ScriptType    string     // 'p2pkh', 'multisig', etc (by pattern-matching the txn output script code)
-	ScriptAddress string     // the P2PKH address required to spend the txn output (extracted from the script code)
+	ScriptAddress Address    // the P2PKH address required to spend the txn output (extracted from the script code)
 }
 
 // UTXOIterator is used to iterate over UTXOs in the Account.

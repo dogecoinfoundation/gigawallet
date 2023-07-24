@@ -132,6 +132,11 @@ func (l L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
 	return
 }
 
+func (l L1CoreRPC) GetBlockCount() (blockCount int64, err error) {
+	err = l.request("getblockcount", []any{}, &blockCount)
+	return
+}
+
 func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	decode := true // to get back JSON rather than HEX
 	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn)
