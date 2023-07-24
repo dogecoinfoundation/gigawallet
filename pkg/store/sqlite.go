@@ -79,6 +79,8 @@ CREATE INDEX IF NOT EXISTS utxo_added_i ON utxo (adding_height, available_height
 CREATE INDEX IF NOT EXISTS utxo_spent_i ON utxo (spending_height, spent_height);
 
 CREATE TABLE IF NOT EXISTS chainstate (
+	root_hash TEXT NOT NULL,
+	first_height INTEGER NOT NULL,
 	best_hash TEXT NOT NULL,
 	best_height INTEGER NOT NULL
 );
@@ -225,9 +227,9 @@ func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 }
 
 func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
-	row := s.db.QueryRow("SELECT best_hash, best_height FROM chainstate")
+	row := s.db.QueryRow("SELECT best_hash, best_height, root_hash, first_height FROM chainstate")
 	var state giga.ChainState
-	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight)
+	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight, &state.RootHash, &state.FirstHeight)
 	if err == sql.ErrNoRows {
 		// MUST detect this error to fulfil the API contract.
 		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
@@ -534,8 +536,14 @@ func (t SQLiteStoreTransaction) MarkInvoiceAsPaid(address giga.Address) error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
-	res, err := t.tx.Exec("UPDATE chainstate SET best_hash=$1, best_height=$2", state.BestBlockHash, state.BestBlockHeight)
+func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState, writeRoot bool) error {
+	var res sql.Result
+	var err error
+	if writeRoot {
+		res, err = t.tx.Exec("UPDATE chainstate SET best_hash=$1, best_height=$2, root_hash=$3, first_height=$4", state.BestBlockHash, state.BestBlockHeight, state.RootHash, state.FirstHeight)
+	} else {
+		res, err = t.tx.Exec("UPDATE chainstate SET best_hash=$1, best_height=$2", state.BestBlockHash, state.BestBlockHeight)
+	}
 	if err != nil {
 		return dbErr(err, "UpdateChainState: executing update")
 	}
@@ -545,7 +553,7 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState) error {
 	}
 	if num_rows < 1 {
 		// this is the first call to UpdateChainState: insert the row.
-		_, err = t.tx.Exec("INSERT INTO chainstate (best_hash, best_height) VALUES ($1,$2)", state.BestBlockHash, state.BestBlockHeight)
+		_, err = t.tx.Exec("INSERT INTO chainstate (best_hash,best_height,root_hash,first_height) VALUES ($1,$2,$3,$4)", state.BestBlockHash, state.BestBlockHeight, state.RootHash, state.FirstHeight)
 		if err != nil {
 			return dbErr(err, "UpdateChainState: executing insert")
 		}

@@ -48,6 +48,10 @@ func (l L1Mock) GetBestBlockHash() (blockHash string, err error) {
 	return "", fmt.Errorf("not implemented")
 }
 
+func (l L1Mock) GetBlockCount() (blockCount int64, err error) {
+	return 0, fmt.Errorf("not implemented")
+}
+
 func (l L1Mock) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }

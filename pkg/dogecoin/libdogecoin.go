@@ -149,6 +149,13 @@ func (l L1Libdogecoin) GetBestBlockHash() (blockHash string, err error) {
 	return "", fmt.Errorf("not implemented")
 }
 
+func (l L1Libdogecoin) GetBlockCount() (blockCount int64, err error) {
+	if l.fallback != nil {
+		return l.fallback.GetBlockCount()
+	}
+	return 0, fmt.Errorf("not implemented")
+}
+
 func (l L1Libdogecoin) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	if l.fallback != nil {
 		return l.fallback.GetTransaction(txnHash)

@@ -23,6 +23,7 @@ type L1 interface {
 	GetBlockHeader(blockHash string) (RpcBlockHeader, error)
 	GetBlockHash(height int64) (string, error)
 	GetBestBlockHash() (string, error)
+	GetBlockCount() (int64, error)
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(NewTxn) error
 	//SignMessage([]byte, Privkey) (string, error)

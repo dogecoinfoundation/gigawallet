@@ -92,7 +92,7 @@ type StoreTransaction interface {
 	MarkInvoiceAsPaid(address Address) error
 
 	// UpdateChainState updates the Best Block information (checkpoint for restart)
-	UpdateChainState(state ChainState) error
+	UpdateChainState(state ChainState, writeRoot bool) error
 
 	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
 	// This serves to roll back the effects of adding or spending those UTXOs.
@@ -122,11 +122,14 @@ type StoreTransaction interface {
 	IndexAddresses(entries []AddressBlock) error
 }
 
+// Current chainstate in the database.
+// Gigawallet TRANSACTIONALLY moves ChainState forward in batches of blocks,
+// updating UTXOs, Invoices and Account Balances in the same DB transaction.
 type ChainState struct {
-	BestBlockHash   string
-	BestBlockHeight int64
-}
-
+	RootHash        string // hash of block at height 1 on the chain being sync'd.
+	FirstHeight     int64  // block height when gigawallet first started to sync this blockchain.
+	BestBlockHash   string // last block processed by gigawallet (effects included in DB)
+	BestBlockHeight int64  // last block height processed by gigawallet (effects included in DB)
 }
 
 // Address Index: mapping from one Address to many BlockHeight (experimental)
