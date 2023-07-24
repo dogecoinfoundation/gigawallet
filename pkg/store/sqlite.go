@@ -84,15 +84,6 @@ CREATE TABLE IF NOT EXISTS chainstate (
 	best_hash TEXT NOT NULL,
 	best_height INTEGER NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS addresses (
-	address TEXT PRIMARY KEY
-);
-CREATE TABLE IF NOT EXISTS address_height (
-	address INTEGER NOT NULL,
-	height INTEGER NOT NULL,
-	PRIMARY KEY (address, height)
-) WITHOUT ROWID;
 `
 
 /****************** SQLiteStore implements giga.Store ********************/
@@ -701,38 +692,6 @@ func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) erro
 	_, err = t.tx.Exec("UPDATE txn SET on_chain_height = NULL, verified_height = NULL WHERE on_chain_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertTxnsAboveHeight: executing update 2")
-	}
-	return nil
-}
-
-func (t SQLiteStoreTransaction) IndexAddresses(entries []giga.AddressBlock) error {
-	a_stmt, err := t.tx.Prepare("INSERT OR REPLACE INTO addresses (address) VALUES ($1) RETURNING rowid")
-	if err != nil {
-		return dbErr(err, "IndexAddresses: preparing insert")
-	}
-	defer a_stmt.Close()
-	i_stmt, err := t.tx.Prepare("INSERT OR REPLACE INTO address_height (address,height) VALUES ($1,$2)")
-	if err != nil {
-		return dbErr(err, "IndexAddresses: preparing insert")
-	}
-	defer i_stmt.Close()
-	for _, e := range entries {
-		var a_id int64
-		rows, err := a_stmt.Query(string(e.Addr))
-		if err != nil {
-			return dbErr(err, "IndexAddresses: inserting unique address")
-		}
-		if !rows.Next() {
-			return dbErr(err, "IndexAddresses: scanning address result")
-		}
-		err = rows.Scan(&a_id)
-		if err != nil {
-			return dbErr(err, "IndexAddresses: scanning address result")
-		}
-		_, err = i_stmt.Exec(a_id, e.Height)
-		if err != nil {
-			return dbErr(err, "IndexAddresses: inserting address-index")
-		}
 	}
 	return nil
 }

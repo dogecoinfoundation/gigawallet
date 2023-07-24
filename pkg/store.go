@@ -115,11 +115,6 @@ type StoreTransaction interface {
 	// time a new block is processed, i.e. blockHeight increases, but it is safe to
 	// call less often (e.g. after a batch of blocks)
 	ConfirmUTXOs(confirmations int, blockHeight int64) error
-
-	// Insert (address,block-height) pairs into the Address Index.
-	// The Address Index is used to find all Blocks that contain an Address.
-	// Duplicates will be ignored.
-	IndexAddresses(entries []AddressBlock) error
 }
 
 // Current chainstate in the database.
@@ -130,10 +125,4 @@ type ChainState struct {
 	FirstHeight     int64  // block height when gigawallet first started to sync this blockchain.
 	BestBlockHash   string // last block processed by gigawallet (effects included in DB)
 	BestBlockHeight int64  // last block height processed by gigawallet (effects included in DB)
-}
-
-// Address Index: mapping from one Address to many BlockHeight (experimental)
-type AddressBlock struct {
-	Addr   Address
-	Height int64
 }
