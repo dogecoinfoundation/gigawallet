@@ -164,6 +164,40 @@ func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
 	return state, nil
 }
 
+func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool, calculateBalance bool) (giga.Account, error) {
+	// Used to fetch an Account by ID (Address) or by ForeignID.
+	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE "
+	if isForeignKey {
+		query += "foreign_id = $1"
+	} else {
+		query += "address = $1"
+	}
+	row := tx.QueryRow(query, accountKey)
+	var acc giga.Account
+	err := row.Scan(
+		&acc.ForeignID, &acc.Address, &acc.Privkey,
+		&acc.NextInternalKey, &acc.NextExternalKey,
+		&acc.NextPoolInternal, &acc.NextPoolExternal,
+		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
+	if err == sql.ErrNoRows {
+		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", accountKey)
+	}
+	if err != nil {
+		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
+	}
+	if calculateBalance {
+		row = tx.QueryRow(`
+SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0)`, acc.Address)
+		err := row.Scan(&acc.IncomingBalance, &acc.CurrentBalance, &acc.OutgoingBalance)
+		if err != nil {
+			return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
+		}
+	}
+	return acc, nil
+}
+
 func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
 	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
 	var id giga.Address
@@ -235,30 +269,6 @@ func listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit in
 		next_cursor = 0 // meaning "end of query results"
 	}
 	return
-}
-
-func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool, calculateBalance bool) (giga.Account, error) {
-	// Used to fetch an Account by ID (Address) or by ForeignID.
-	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE "
-	if isForeignKey {
-		query += "foreign_id = $1"
-	} else {
-		query += "address = $1"
-	}
-	row := tx.QueryRow(query, accountKey)
-	var acc giga.Account
-	err := row.Scan(
-		&acc.ForeignID, &acc.Address, &acc.Privkey,
-		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.NextPoolInternal, &acc.NextPoolExternal,
-		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
-	if err == sql.ErrNoRows {
-		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", accountKey)
-	}
-	if err != nil {
-		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
-	}
-	return acc, nil
 }
 
 func getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []giga.UTXO, err error) {
