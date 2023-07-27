@@ -5,6 +5,7 @@ type Config struct {
 	WebAPI     WebAPIConfig
 	Store      StoreConfig
 	Loggers    map[string]LoggersConfig
+	Callbacks  map[string]CallbackConfig
 
 	// Map of available networks, config.Core will be set to
 	// the one specified by config.Gigawallet.Network
@@ -66,6 +67,11 @@ type StoreConfig struct {
 }
 
 type LoggersConfig struct {
+	Path  string
+	Types []string
+}
+
+type CallbackConfig struct {
 	Path  string
 	Types []string
 }

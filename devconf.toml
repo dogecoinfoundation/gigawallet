@@ -25,3 +25,9 @@
 [loggers.events]
   path = "./events.log"
   types = ["ALL"]
+
+# To create http callbacks for events to your service:
+
+#[callbacks.example1]
+#  path = "https://example.com/invoiceEvents"
+#  types = ["INV"]

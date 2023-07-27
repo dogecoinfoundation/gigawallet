@@ -34,6 +34,7 @@ func (e EVENT_SYS) Type() string {
 const (
 	SYS_STARTUP EVENT_SYS = "STARTUP"
 	SYS_ERR     EVENT_SYS = "ERR"
+	SYS_MSG     EVENT_SYS = "MSG"
 )
 
 // Network Events
