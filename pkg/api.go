@@ -30,7 +30,7 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 	}
 	defer txn.Rollback()
 
-	acc, err := txn.GetAccount(foreignID)
+	acc, err := txn.GetAccount(foreignID, false)
 	if err != nil {
 		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to find Account: %s", foreignID))
 		return Invoice{}, err
@@ -92,7 +92,7 @@ type ListInvoicesResponse struct {
 }
 
 func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoicesResponse, error) {
-	acc, err := a.Store.GetAccount(foreignID)
+	acc, err := a.Store.GetAccount(foreignID, false)
 	if err != nil {
 		return ListInvoicesResponse{}, err
 	}
@@ -120,7 +120,7 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 		}
 		defer txn.Rollback()
 
-		acc, err := txn.GetAccount(foreignID)
+		acc, err := txn.GetAccount(foreignID, false)
 		if err == nil {
 			// Account already exists.
 			if upsert {
@@ -171,7 +171,7 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 }
 
 func (a API) GetAccount(foreignID string) (AccountPublic, error) {
-	acc, err := a.Store.GetAccount(foreignID)
+	acc, err := a.Store.GetAccount(foreignID, false)
 	if err != nil {
 		return AccountPublic{}, err
 	}
@@ -187,7 +187,7 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 	}
 	defer txn.Rollback()
 
-	acc, err := txn.GetAccount(foreignID)
+	acc, err := txn.GetAccount(foreignID, false)
 	if err != nil {
 		return AccountPublic{}, err
 	}
@@ -224,7 +224,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	if err != nil {
 		return "", err
 	}
-	payFrom, err := a.Store.GetAccount(accountID)
+	payFrom, err := a.Store.GetAccount(accountID, false)
 	if err != nil {
 		return "", err
 	}

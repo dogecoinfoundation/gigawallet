@@ -5,6 +5,9 @@ package giga
 type Store interface {
 	Begin() (StoreTransaction, error)
 
+	// GetAccount returns the account with the given ForeignID.
+	GetAccount(foreignID string, calculateBalance bool) (Account, error)
+
 	// GetInvoice returns the invoice with the given ID.
 	GetInvoice(id Address) (Invoice, error)
 
@@ -14,16 +17,13 @@ type Store interface {
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
 
-	// GetAccount returns the account with the given ForeignID.
-	GetAccount(foreignID string) (Account, error)
+	// List all unreserved UTXOs in the account's wallet.
+	// Unreserved means not already being used in a pending transaction.
+	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
 	// GetChainState gets the last saved Best Block information (checkpoint for restart)
 	// It returns giga.NotFound if the chainstate record does not exist.
 	GetChainState() (ChainState, error)
-
-	// List all unreserved UTXOs in the account's wallet.
-	// Unreserved means not already being used in a pending transaction.
-	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
 	// Close the store.
 	Close()
@@ -36,10 +36,13 @@ type StoreTransaction interface {
 	// be a no-op of Commit has already succeeded
 	Rollback() error
 
-	// StoreInvoice stores an invoice.
-	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
-	// It returns an unspecified error if the invoice ID already exists (FIXME)
-	StoreInvoice(invoice Invoice) error
+	// GetAccount returns the account with the given ForeignID.
+	// It returns giga.NotFound if the account does not exist (key: ForeignID)
+	GetAccount(foreignID string, calculateBalance bool) (Account, error)
+
+	// GetAccount returns the account with the given ID.
+	// It returns giga.NotFound if the account does not exist (key: ID)
+	GetAccountByID(ID string, calculateBalance bool) (Account, error)
 
 	// GetInvoice returns the invoice with the given ID.
 	// It returns giga.NotFound if the invoice does not exist (key: ID/address)
@@ -50,6 +53,15 @@ type StoreTransaction interface {
 	// pagination: when next_cursor == 0, that is the final page of results.
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
+
+	// List all unreserved UTXOs in the account's wallet.
+	// Unreserved means not already being used in a pending transaction.
+	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
+
+	// StoreInvoice stores an invoice.
+	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
+	// It returns an unspecified error if the invoice ID already exists (FIXME)
+	StoreInvoice(invoice Invoice) error
 
 	// CreateAccount stores a NEW account.
 	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)
@@ -64,21 +76,9 @@ type StoreTransaction interface {
 	// StoreAddresses associates a list of addresses with an accountID
 	StoreAddresses(accountID Address, addresses []Address, firstAddress uint32, internal bool) error
 
-	// GetAccount returns the account with the given ForeignID.
-	// It returns giga.NotFound if the account does not exist (key: ForeignID)
-	GetAccount(foreignID string) (Account, error)
-
-	// GetAccount returns the account with the given ID.
-	// It returns giga.NotFound if the account does not exist (key: ID)
-	GetAccountByID(ID string) (Account, error)
-
 	// Find the accountID (HD root PKH) that owns the given Dogecoin address.
 	// Also find the key index of `pkhAddress` within the HD wallet.
 	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, isInternal bool, err error)
-
-	// List all unreserved UTXOs in the account's wallet.
-	// Unreserved means not already being used in a pending transaction.
-	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path

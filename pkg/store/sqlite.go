@@ -93,6 +93,14 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+// The common read-only parts of sql.DB and sql.Tx interfaces, so we can pass either
+// one to some helper functions (for methods that appear on both SQLiteStore and
+// SQLiteStoreTransaction)
+type Queryable interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // NewSQLiteStore returns a giga.PaymentsStore implementor that uses sqlite
 func NewSQLiteStore(fileName string) (giga.Store, error) {
 	db, err := sql.Open("sqlite3", fileName)
@@ -126,8 +134,38 @@ func (s SQLiteStore) Begin() (giga.StoreTransaction, error) {
 	return NewStoreTransaction(tx), nil
 }
 
+func (s SQLiteStore) GetAccount(foreignID string, calculateBalance bool) (giga.Account, error) {
+	return getAccountCommon(s.db, foreignID, true /*isForeignKey*/, calculateBalance)
+}
+
 func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
-	row := s.db.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
+	return getInvoiceCommon(s.db, addr)
+}
+
+func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return listInvoicesCommon(s.db, account, cursor, limit)
+}
+
+func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+	return getAllUnreservedUTXOsCommon(s.db, account)
+}
+
+func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
+	row := s.db.QueryRow("SELECT best_hash, best_height, root_hash, first_height FROM chainstate")
+	var state giga.ChainState
+	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight, &state.RootHash, &state.FirstHeight)
+	if err == sql.ErrNoRows {
+		// MUST detect this error to fulfil the API contract.
+		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
+	}
+	if err != nil {
+		return giga.ChainState{}, dbErr(err, "GetChainState: row.Scan")
+	}
+	return state, nil
+}
+
+func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
+	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
 	var id giga.Address
 	var account giga.Address
 	var tx_id string
@@ -160,13 +198,13 @@ func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 	}, nil
 }
 
-func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
-	// MUST order by key_index to support the cursor API:
+func listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	// MUST order by key_index (or sqlite OID) to support the cursor API:
 	// we need a way to resume the query next time from whatever next_cursor we return,
 	// and the aggregate result SHOULD be stable even as the DB is modified.
 	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
 	rows_found := 0
-	rows, err := s.db.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
+	rows, err := tx.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
 	if err != nil {
 		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
 	}
@@ -199,8 +237,15 @@ func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (
 	return
 }
 
-func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
-	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
+func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool, calculateBalance bool) (giga.Account, error) {
+	// Used to fetch an Account by ID (Address) or by ForeignID.
+	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE "
+	if isForeignKey {
+		query += "foreign_id = $1"
+	} else {
+		query += "address = $1"
+	}
+	row := tx.QueryRow(query, accountKey)
 	var acc giga.Account
 	err := row.Scan(
 		&acc.ForeignID, &acc.Address, &acc.Privkey,
@@ -208,8 +253,7 @@ func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 		&acc.NextPoolInternal, &acc.NextPoolExternal,
 		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
 	if err == sql.ErrNoRows {
-		// MUST detect this error to fulfil the API contract.
-		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
+		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", accountKey)
 	}
 	if err != nil {
 		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
@@ -217,23 +261,9 @@ func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 	return acc, nil
 }
 
-func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
-	row := s.db.QueryRow("SELECT best_hash, best_height, root_hash, first_height FROM chainstate")
-	var state giga.ChainState
-	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight, &state.RootHash, &state.FirstHeight)
-	if err == sql.ErrNoRows {
-		// MUST detect this error to fulfil the API contract.
-		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
-	}
-	if err != nil {
-		return giga.ChainState{}, dbErr(err, "GetChainState: row.Scan")
-	}
-	return state, nil
-}
-
-func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+func getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []giga.UTXO, err error) {
 	rows_found := 0
-	rows, err := s.db.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
+	rows, err := tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
 	if err != nil {
 		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
@@ -286,6 +316,26 @@ func (t SQLiteStoreTransaction) Rollback() error {
 	return nil
 }
 
+func (t SQLiteStoreTransaction) GetAccount(foreignID string, calculateBalance bool) (giga.Account, error) {
+	return getAccountCommon(t.tx, foreignID, true /*isForeignKey*/, calculateBalance)
+}
+
+func (t SQLiteStoreTransaction) GetAccountByID(ID string, calculateBalance bool) (giga.Account, error) {
+	return getAccountCommon(t.tx, ID, false /*isForeignKey*/, calculateBalance)
+}
+
+func (t SQLiteStoreTransaction) GetInvoice(addr giga.Address) (giga.Invoice, error) {
+	return getInvoiceCommon(t.tx, addr)
+}
+
+func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return listInvoicesCommon(t.tx, account, cursor, limit)
+}
+
+func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+	return getAllUnreservedUTXOsCommon(t.tx, account)
+}
+
 // Store an invoice
 func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	items_b, err := json.Marshal(inv.Items)
@@ -304,79 +354,6 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 		return dbErr(err, "createInvoice: stmt.Exec insert")
 	}
 	return nil
-}
-
-func (t SQLiteStoreTransaction) GetInvoice(addr giga.Address) (giga.Invoice, error) {
-	row := t.tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
-	var id giga.Address
-	var account giga.Address
-	var tx_id string
-	var vendor string
-	var items_json string
-	var key_index uint32
-	var block_id string
-	var confirmations int32
-	err := row.Scan(&id, &account, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations)
-	if err == sql.ErrNoRows {
-		return giga.Invoice{}, giga.NewErr(giga.NotFound, "invoice not found: %v", addr)
-	}
-	if err != nil {
-		return giga.Invoice{}, dbErr(err, "GetInvoice: row.Scan")
-	}
-	var items []giga.Item
-	err = json.Unmarshal([]byte(items_json), &items)
-	if err != nil {
-		return giga.Invoice{}, dbErr(err, "GetInvoice: json.Unmarshal")
-	}
-	return giga.Invoice{
-		ID:            id,
-		Account:       account,
-		TXID:          tx_id,
-		Vendor:        vendor,
-		Items:         items,
-		KeyIndex:      key_index,
-		BlockID:       block_id,
-		Confirmations: confirmations,
-	}, nil
-}
-
-func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
-	// MUST order by key_index (or sqlite OID) to support the cursor API:
-	// we need a way to resume the query next time from whatever next_cursor we return,
-	// and the aggregate result SHOULD be stable even as the DB is modified.
-	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
-	rows_found := 0
-	rows, err := t.tx.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
-	if err != nil {
-		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		inv := giga.Invoice{Account: account}
-		var items_json string
-		err := rows.Scan(&inv.ID, &inv.TXID, &inv.Vendor, &items_json, &inv.KeyIndex, &inv.BlockID, &inv.Confirmations)
-		if err != nil {
-			return nil, 0, dbErr(err, "ListInvoices: scanning invoice row")
-		}
-		err = json.Unmarshal([]byte(items_json), &inv.Items)
-		if err != nil {
-			return nil, 0, dbErr(err, "ListInvoices: unmarshalling json")
-		}
-		items = append(items, inv)
-		after_this := int(inv.KeyIndex) + 1 // XXX assumes non-hardened HD Key! (from uint32)
-		if after_this > next_cursor {
-			next_cursor = after_this // NB. starting cursor for next call
-		}
-		rows_found++
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
-	}
-	if rows_found < limit {
-		// in this backend, we know there are no more rows to follow.
-		next_cursor = 0 // meaning "end of query results"
-	}
-	return
 }
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
@@ -438,40 +415,6 @@ func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses
 	return nil
 }
 
-func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, error) {
-	row := t.tx.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
-	var acc giga.Account
-	err := row.Scan(
-		&acc.ForeignID, &acc.Address, &acc.Privkey,
-		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.NextPoolInternal, &acc.NextPoolExternal,
-		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
-	if err == sql.ErrNoRows {
-		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
-	}
-	if err != nil {
-		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
-	}
-	return acc, nil
-}
-
-func (t SQLiteStoreTransaction) GetAccountByID(ID string) (giga.Account, error) {
-	row := t.tx.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE address = ?", ID)
-	var acc giga.Account
-	err := row.Scan(
-		&acc.ForeignID, &acc.Address, &acc.Privkey,
-		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.NextPoolInternal, &acc.NextPoolExternal,
-		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
-	if err == sql.ErrNoRows {
-		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", ID)
-	}
-	if err != nil {
-		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
-	}
-	return acc, nil
-}
-
 func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, bool, error) {
 	row := t.tx.QueryRow("SELECT account_address,key_index,is_internal FROM account_address WHERE address = ?", address)
 	var accountID giga.Address
@@ -485,33 +428,6 @@ func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (gig
 		return "", 0, false, dbErr(err, "FindAccountForAddress: error scanning row")
 	}
 	return accountID, keyIndex, isInternal, nil
-}
-
-func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
-	rows_found := 0
-	rows, err := t.tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
-	if err != nil {
-		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		utxo := giga.UTXO{Account: account, Status: "c"}
-		var value string
-		err := rows.Scan(&utxo.TxnID, &utxo.VOut, &value, &utxo.ScriptType, &utxo.ScriptAddress)
-		if err != nil {
-			return nil, dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
-		}
-		utxo.Value, err = decimal.NewFromString(value)
-		if err != nil {
-			return nil, dbErr(err, fmt.Sprintf("GetAllUnreservedUTXOs: invalid decimal value in UTXO database: %v", value))
-		}
-		result = append(result, utxo)
-		rows_found++
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
-	}
-	return
 }
 
 func (t SQLiteStoreTransaction) MarkInvoiceAsPaid(address giga.Address) error {
