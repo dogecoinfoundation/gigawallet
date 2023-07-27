@@ -4,11 +4,6 @@ import (
 	"fmt"
 )
 
-const (
-	scriptTypeP2PKH    = "p2pkh"
-	scriptTypeMultiSig = "multisig"
-)
-
 type API struct {
 	Store    Store
 	L1       L1

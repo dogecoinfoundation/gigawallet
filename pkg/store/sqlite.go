@@ -552,12 +552,16 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState, writeRoo
 	return nil
 }
 
-func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, isInternal bool, blockHeight int64) error {
-	// psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO"
-	_, err := t.tx.Exec("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO UPDATE SET account_address=$3, value=$4, script_type=$5, script_address=$6, key_index=$7, is_internal=$8, adding_height=$9 WHERE txn_id=$1 AND vout=$2",
-		txID, vOut, accountID, value, scriptType, pkhAddress, keyIndex, isInternal, blockHeight)
+func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.NewUTXO) error {
+	// Create a new Unspent Transaction Output in the database.
+	// Updates Account 'incoming' to indicate unconfirmed funds.
+	// psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE ..."
+	_, err := t.tx.Exec(
+		"INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO UPDATE SET account_address=$3, value=$4, script_type=$5, script_address=$6, key_index=$7, is_internal=$8, added_height=$9 WHERE txn_id=$1 AND vout=$2",
+		utxo.TxID, utxo.VOut, utxo.AccountID, utxo.Value, utxo.ScriptType, utxo.PKHAddress, utxo.KeyIndex, utxo.IsInternal, utxo.BlockHeight,
+	)
 	if err != nil {
-		return dbErr(err, "CreateUTXO: executing insert")
+		return dbErr(err, "CreateUTXO: preparing insert")
 	}
 	return nil
 }

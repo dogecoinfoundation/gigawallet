@@ -80,8 +80,6 @@ type StoreTransaction interface {
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
-	// Create an Unspent Transaction Output (at the given block height)
-	CreateUTXO(txID string, vOut int64, value CoinAmount, scriptType string, pkhAddress Address, accountID Address, keyIndex uint32, isInternal bool, blockHeight int64) error
 
 	// Mark an Unspent Transaction Output as spent (at the given block height)
 	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
@@ -94,6 +92,8 @@ type StoreTransaction interface {
 	// UpdateChainState updates the Best Block information (checkpoint for restart)
 	UpdateChainState(state ChainState, writeRoot bool) error
 
+	// Create a new Unspent Transaction Output in the database.
+	CreateUTXO(utxo NewUTXO) error
 	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
 	// This serves to roll back the effects of adding or spending those UTXOs.
 	RevertUTXOsAboveHeight(maxValidHeight int64) error
@@ -125,4 +125,17 @@ type ChainState struct {
 	FirstHeight     int64  // block height when gigawallet first started to sync this blockchain.
 	BestBlockHash   string // last block processed by gigawallet (effects included in DB)
 	BestBlockHeight int64  // last block height processed by gigawallet (effects included in DB)
+}
+
+// Used when inserting UTXOs into the database in a batch.
+type NewUTXO struct {
+	TxID        string     // UTXO key: Transaction ID (TxnID)
+	VOut        int64      // UTXO key: Transaction Output number.
+	Value       CoinAmount // Output Amount.
+	ScriptType  ScriptType // 'p2pkh' etc, see ScriptType constants.
+	PKHAddress  Address    // Pay-To address embedded in the script.
+	AccountID   Address    // Account ID that owns the Pay-To address.
+	KeyIndex    uint32     // Pay-To address index in the Account's HD Wallet.
+	IsInternal  bool       // Pay-To address is Internal or External in HD Wallet.
+	BlockHeight int64      // Block Height of the Block that contains this Txn.
 }
