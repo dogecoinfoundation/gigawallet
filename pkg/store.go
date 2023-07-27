@@ -80,11 +80,6 @@ type StoreTransaction interface {
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
-
-	// Mark an Unspent Transaction Output as spent (at the given block height)
-	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
-	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (accountId string, scriptAddress Address, err error)
-
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
 	MarkInvoiceAsPaid(address Address) error
@@ -94,6 +89,17 @@ type StoreTransaction interface {
 
 	// Create a new Unspent Transaction Output in the database.
 	CreateUTXO(utxo NewUTXO) error
+
+	// Mark an Unspent Transaction Output as spent (at the given block height)
+	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
+	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (accountId string, scriptAddress Address, err error)
+
+	// Mark all UTXOs as confirmed (available to spend) after `confirmations` blocks,
+	// at the current block height passed in blockHeight. This should be called each
+	// time a new block is processed, i.e. blockHeight increases, but it is safe to
+	// call less often (e.g. after a batch of blocks)
+	ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAcconts []string, err error)
+
 	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
 	// This serves to roll back the effects of adding or spending those UTXOs.
 	RevertUTXOsAboveHeight(maxValidHeight int64) error
@@ -108,13 +114,8 @@ type StoreTransaction interface {
 
 	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
 	// and increment those accounts' chain-sequence-number.
+	// MUST be done before rolling back chainstate, i.e. RevertUTXOsAboveHeight, RevertTxnsAboveHeight.
 	IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error)
-
-	// Mark all UTXOs as confirmed (available to spend) after `confirmations` blocks,
-	// at the current block height passed in blockHeight. This should be called each
-	// time a new block is processed, i.e. blockHeight increases, but it is safe to
-	// call less often (e.g. after a batch of blocks)
-	ConfirmUTXOs(confirmations int, blockHeight int64) error
 }
 
 // Current chainstate in the database.

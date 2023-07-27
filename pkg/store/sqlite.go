@@ -68,14 +68,14 @@ CREATE TABLE IF NOT EXISTS utxo (
 	script_address TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
 	is_internal BOOLEAN NOT NULL,
-	adding_height INTEGER,
-	available_height INTEGER,
+	added_height INTEGER,
+	spendable_height INTEGER,
 	spending_height INTEGER,
 	spent_height INTEGER,
 	PRIMARY KEY (txn_id, vout)
 );
 CREATE INDEX IF NOT EXISTS utxo_account_i ON utxo (account_address);
-CREATE INDEX IF NOT EXISTS utxo_added_i ON utxo (adding_height, available_height);
+CREATE INDEX IF NOT EXISTS utxo_added_i ON utxo (added_height, spendable_height);
 CREATE INDEX IF NOT EXISTS utxo_spent_i ON utxo (spending_height, spent_height);
 
 CREATE TABLE IF NOT EXISTS chainstate (
@@ -584,94 +584,46 @@ func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeig
 	return
 }
 
-func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
-	if len(accountIds) > 0 {
-		// Go's SQL package doesn't implement array/slice arguments,
-		// so to do an 'IN' query we need this kind of nonsense.
-		binds := strings.Repeat(",?", len(accountIds))[1:]
-		args := []any{}
-		for _, id := range accountIds {
-			args = append(args, id)
-		}
-		_, err := t.tx.Exec("UPDATE account SET chain_seq=chain_seq+1 WHERE address IN ("+binds+")", args...)
-		if err != nil {
-			return dbErr(err, "IncAccountChainSeq: executing update")
-		}
-	}
-	return nil
-}
-
-func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error) {
+func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAcconts []string, err error) {
+	confirmedHeight := blockHeight - int64(confirmations) // from config.
+	// note: there is an index on (added_height, spendable_height) for this query.
+	// note: this uses num-confirmations from the invoice being paid, if there is one.
+	// note: this MUST be a LEFT OUTER join (script_address may not match any invoice)
 	rows, err := t.tx.Query(`
-		SELECT DISTINCT address FROM account INNER JOIN utxo ON account.address = utxo.account_address WHERE utxo.adding_height > $1 OR utxo.available_height > $1 OR utxo.spending_height > $1 OR utxo.spent_height > $1
-		UNION SELECT DISTINCT address FROM account INNER JOIN txn ON account.address = txn.account_address WHERE txn.on_chain_height > $1 OR txn.verified_height > $1`, maxValidHeight)
+		UPDATE utxo SET spendable_height=$1
+		WHERE added_height <= COALESCE((SELECT $1 - confirmations from invoice WHERE invoice_address = utxo.script_address), $2)
+		AND spendable_height IS NULL
+		RETURNING account_address
+	`, blockHeight, confirmedHeight)
 	if err != nil {
-		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: executing query")
+		return nil, dbErr(err, "ConfirmUTXOs: updating utxos")
 	}
 	defer rows.Close()
-	var ids []string
 	for rows.Next() {
 		var id string
 		err := rows.Scan(&id)
 		if err != nil {
-			return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning row")
+			return nil, dbErr(err, "ConfirmUTXOs: scanning row")
 		}
-		ids = append(ids, id)
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning rows")
-	}
-	err = t.IncChainSeqForAccounts(ids)
-	return ids, err
-}
-
-func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) error {
-	stmt, err := t.tx.Prepare("UPDATE account SET incoming=incoming-$2, balance=balance+$2 WHERE address=$1")
-	if err != nil {
-		return dbErr(err, "ConfirmUTXOs: preparing update")
-	}
-	defer stmt.Close()
-	confirmedHeight := blockHeight - int64(confirmations) // from config.
-	// note: there is an index on (adding_height, available_height) for this query.
-	// note: this uses num-confirmations from the invoice being paid, if there is one.
-	// note: this MUST be a LEFT OUTER join (script_address may not match any invoice)
-	rows, err := t.tx.Query(`
-		UPDATE utxo SET available_height=$1
-		WHERE adding_height <= COALESCE((SELECT $1 - confirmations from invoice WHERE invoice_address = utxo.script_address), $2)
-		AND available_height = NULL
-		RETURNING account_address, value
-	`, blockHeight, confirmedHeight)
-	if err != nil {
-		return dbErr(err, "ConfirmUTXOs: updating utxos")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		var value string
-		err := rows.Scan(&id, &value)
-		if err != nil {
-			return dbErr(err, "ConfirmUTXOs: scanning row")
-		}
-		stmt.Exec(id, value)
-		if err != nil {
-			return dbErr(err, "ConfirmUTXOs: updating account "+id)
+		if id != "" {
+			affectedAcconts = append(affectedAcconts, id)
 		}
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
-		return dbErr(err, "ConfirmUTXOs: scanning rows")
+		return nil, dbErr(err, "ConfirmUTXOs: scanning rows")
 	}
-	return nil
+	return affectedAcconts, nil
 }
 
 func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) error {
-	// The presence of a height in adding_height, available_height, spending_height, spent_height
+	// The presence of a height in added_height, spendable_height, spending_height, spent_height
 	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
 	// reserved for spending, or has been spent (confirmed)
-	_, err := t.tx.Exec("UPDATE utxo SET adding_height=NULL,available_height=NULL,spending_height=NULL,spent_height=NULL WHERE adding_height > ?", maxValidHeight)
+	_, err := t.tx.Exec("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 1")
 	}
-	_, err = t.tx.Exec("UPDATE utxo SET available_height=NULL,spending_height=NULL,spent_height=NULL WHERE available_height > ?", maxValidHeight)
+	_, err = t.tx.Exec("UPDATE utxo SET spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE spendable_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 2")
 	}
@@ -698,6 +650,52 @@ func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) erro
 		return dbErr(err, "RevertTxnsAboveHeight: executing update 2")
 	}
 	return nil
+}
+
+func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
+	// Increment the chain-sequence-number for multiple accounts.
+	// Use this after modifying accounts' blockchain-derived state (UTXOs, TXNs)
+	if len(accountIds) > 0 {
+		// Go's SQL package doesn't implement array/slice arguments,
+		// so to do an 'IN' query we need this kind of nonsense.
+		binds := strings.Repeat(",?", len(accountIds))[1:]
+		args := []any{}
+		for _, id := range accountIds {
+			args = append(args, id)
+		}
+		_, err := t.tx.Exec("UPDATE account SET chain_seq=chain_seq+1 WHERE address IN ("+binds+")", args...)
+		if err != nil {
+			return dbErr(err, "IncAccountChainSeq: executing update")
+		}
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error) {
+	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
+	// and increment those accounts' chain-sequence-number.
+	// MUST be done before rolling back chainstate, i.e. RevertUTXOsAboveHeight, RevertTxnsAboveHeight.
+	rows, err := t.tx.Query(`
+		SELECT DISTINCT address FROM account INNER JOIN utxo ON account.address = utxo.account_address WHERE utxo.added_height > $1 OR utxo.spendable_height > $1 OR utxo.spending_height > $1 OR utxo.spent_height > $1
+		UNION SELECT DISTINCT address FROM account INNER JOIN txn ON account.address = txn.account_address WHERE txn.on_chain_height > $1 OR txn.verified_height > $1`, maxValidHeight)
+	if err != nil {
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: executing query")
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		err := rows.Scan(&id)
+		if err != nil {
+			return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning row")
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning rows")
+	}
+	err = t.IncChainSeqForAccounts(ids)
+	return ids, err
 }
 
 func dbErr(err error, where string) error {

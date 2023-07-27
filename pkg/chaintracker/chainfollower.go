@@ -21,6 +21,7 @@ type ChainFollower struct {
 	tx               giga.StoreTransaction        // non-nil during a transaction (for cleanup)
 	ReceiveBestBlock chan string                  // receive from TipChaser.
 	Commands         chan any                     // receive ReSyncChainFollowerCmd etc.
+	confirmations    int                          // required number of block confirmations.
 	stopping         bool                         // set to exit the main loop.
 	SetSync          *giga.ReSyncChainFollowerCmd // pending ReSync command.
 }
@@ -46,8 +47,9 @@ func newChainFollower(conf giga.Config, l1 giga.L1, store giga.Store) (*ChainFol
 	result := &ChainFollower{
 		l1:               l1,
 		store:            store,
-		ReceiveBestBlock: make(chan string, 1), // signal that tip has changed.
-		Commands:         make(chan any, 10),   // commands to the service.
+		ReceiveBestBlock: make(chan string, 1),                // signal that tip has changed.
+		Commands:         make(chan any, 10),                  // commands to the service.
+		confirmations:    conf.Gigawallet.ConfirmationsNeeded, // to confirm a txn (new UTXOs)
 	}
 	return result, nil
 }
@@ -277,8 +279,36 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 		}
 	}
 	if blockCount > 0 {
-		// Increment the chain-seq number on affected accounts.
-		tx.IncChainSeqForAccounts(mapKeys(affectedAcconts))
+		// Confirm UTXOs as a result of accepting this block.
+		// This populates the `spendable_height` field in UTXOs with the current BlockHeight,
+		// which flags the UTXOs as spendable by the owner account (we don't allow spending
+		// UTXOs in not-yet-confirmed transactions; we treat those as "incoming balance.")
+		utxoAccounts, err := tx.ConfirmUTXOs(c.confirmations, pos.BlockHeight)
+		if err != nil {
+			// Unable to complete block processing - roll back.
+			log.Println("ChainFollower: ConfirmUTXOs:", err)
+			c.sleepForRetry(err, 0)
+			tx.Rollback()
+			return startPos
+		}
+		for _, acct := range utxoAccounts {
+			affectedAcconts[acct] = nil // set-insert.
+		}
+		// Increment the chain-seq number on all affected accounts.
+		// This is used by BalanceKeeper to send balance-change events.
+		uniqueAffected := mapKeys(affectedAcconts)
+		err = tx.IncChainSeqForAccounts(uniqueAffected)
+		if err != nil {
+			// Unable to complete block processing - roll back.
+			log.Println("ChainFollower: IncChainSeqForAccounts:", err)
+			c.sleepForRetry(err, 0)
+			tx.Rollback()
+			return startPos
+		}
+		// Report affected accounts in the log (useful for now)
+		for _, acct := range uniqueAffected {
+			log.Println("ChainFollower: account was affected:", acct)
+		}
 		// We have made forward progress: commit the transaction.
 		if !c.commitChainState(tx, pos) {
 			// Unable to commit forward progress - roll back.
