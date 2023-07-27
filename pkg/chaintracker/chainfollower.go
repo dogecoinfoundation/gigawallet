@@ -21,6 +21,7 @@ type ChainFollower struct {
 	tx               giga.StoreTransaction        // non-nil during a transaction (for cleanup)
 	ReceiveBestBlock chan string                  // receive from TipChaser.
 	Commands         chan any                     // receive ReSyncChainFollowerCmd etc.
+	confirmations    int                          // required number of block confirmations.
 	stopping         bool                         // set to exit the main loop.
 	SetSync          *giga.ReSyncChainFollowerCmd // pending ReSync command.
 }
@@ -46,8 +47,9 @@ func newChainFollower(conf giga.Config, l1 giga.L1, store giga.Store) (*ChainFol
 	result := &ChainFollower{
 		l1:               l1,
 		store:            store,
-		ReceiveBestBlock: make(chan string, 1), // signal that tip has changed.
-		Commands:         make(chan any, 10),   // commands to the service.
+		ReceiveBestBlock: make(chan string, 1),                // signal that tip has changed.
+		Commands:         make(chan any, 10),                  // commands to the service.
+		confirmations:    conf.Gigawallet.ConfirmationsNeeded, // to confirm a txn (new UTXOs)
 	}
 	return result, nil
 }
@@ -174,13 +176,13 @@ func (c *ChainFollower) fetchStartingPos() ChainPos {
 			}, true)
 			if err != nil {
 				tx.Rollback()
-				log.Println("ChainFollower: fetchStartingPos: cannot UpdateChainState:", err)
+				log.Println("ChainFollower: fetchStartingPos: UpdateChainState:", err)
 				c.sleepForRetry(err, 0)
 				continue // retry.
 			}
 			err = tx.Commit()
 			if err != nil {
-				log.Println("ChainFollower: fetchStartingPos: cannot commit DB transaction:", err)
+				log.Println("ChainFollower: fetchStartingPos: cannot commit:", err)
 				c.sleepForRetry(err, 0)
 				continue // retry.
 			}
@@ -257,7 +259,7 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
 			if !c.processBlock(tx, block, affectedAcconts) {
-				// Unable to process the block - roll back.
+				// Unable to process the block (error already logged) - roll back.
 				tx.Rollback()
 				return startPos
 			}
@@ -277,8 +279,36 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 		}
 	}
 	if blockCount > 0 {
-		// Increment the chain-seq number on affected accounts.
-		tx.IncChainSeqForAccounts(mapKeys(affectedAcconts))
+		// Confirm UTXOs as a result of accepting this block.
+		// This populates the `spendable_height` field in UTXOs with the current BlockHeight,
+		// which flags the UTXOs as spendable by the owner account (we don't allow spending
+		// UTXOs in not-yet-confirmed transactions; we treat those as "incoming balance.")
+		utxoAccounts, err := tx.ConfirmUTXOs(c.confirmations, pos.BlockHeight)
+		if err != nil {
+			// Unable to complete block processing - roll back.
+			log.Println("ChainFollower: ConfirmUTXOs:", err)
+			c.sleepForRetry(err, 0)
+			tx.Rollback()
+			return startPos
+		}
+		for _, acct := range utxoAccounts {
+			affectedAcconts[acct] = nil // set-insert.
+		}
+		// Increment the chain-seq number on all affected accounts.
+		// This is used by BalanceKeeper to send balance-change events.
+		uniqueAffected := mapKeys(affectedAcconts)
+		err = tx.IncChainSeqForAccounts(uniqueAffected)
+		if err != nil {
+			// Unable to complete block processing - roll back.
+			log.Println("ChainFollower: IncChainSeqForAccounts:", err)
+			c.sleepForRetry(err, 0)
+			tx.Rollback()
+			return startPos
+		}
+		// Report affected accounts in the log (useful for now)
+		for _, acct := range uniqueAffected {
+			log.Println("ChainFollower: account was affected:", acct)
+		}
 		// We have made forward progress: commit the transaction.
 		if !c.commitChainState(tx, pos) {
 			// Unable to commit forward progress - roll back.
@@ -336,7 +366,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 		_, err := tx.IncAccountsAffectedByRollback(maxValidHeight)
 		if err != nil {
 			tx.Rollback()
-			log.Println("ChainFollower: rollBackChainStateToPos: cannot IncAccountsAffectedByRollback:", err)
+			log.Println("ChainFollower: IncAccountsAffectedByRollback:", err)
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
@@ -344,14 +374,14 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 		err = tx.RevertUTXOsAboveHeight(maxValidHeight)
 		if err != nil {
 			tx.Rollback()
-			log.Println("ChainFollower: rollBackChainStateToPos: cannot RevertUTXOsAboveHeight:", err)
+			log.Println("ChainFollower: RevertUTXOsAboveHeight:", err)
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		err = tx.RevertTxnsAboveHeight(maxValidHeight)
 		if err != nil {
 			tx.Rollback()
-			log.Println("ChainFollower: rollBackChainStateToPos: cannot RevertTxnsAboveHeight:", err)
+			log.Println("ChainFollower: RevertTxnsAboveHeight:", err)
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
@@ -362,13 +392,13 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 		}, false)
 		if err != nil {
 			tx.Rollback()
-			log.Println("ChainFollower: rollBackChainStateToPos: cannot UpdateChainState:", err)
+			log.Println("ChainFollower: UpdateChainState:", err)
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
 		err = tx.Commit()
 		if err != nil {
-			log.Println("ChainFollower: rollBackChainStateToPos: cannot commit DB transaction:", err)
+			log.Println("ChainFollower: cannot commit DB transaction:", err)
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
@@ -385,14 +415,14 @@ func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, pos ChainPos)
 	}, false)
 	if err != nil {
 		tx.Rollback()
-		log.Println("ChainFollower: commitChainState: cannot UpdateChainState:", err)
+		log.Println("ChainFollower: UpdateChainState:", err)
 		c.sleepForRetry(err, 0)
 		return false // retry.
 	}
 	// Commit the entire transaction with all changes in the batch.
 	err = tx.Commit()
 	if err != nil {
-		log.Println("ChainFollower: commitChainState: cannot commit DB transaction:", err)
+		log.Println("ChainFollower: cannot commit DB transaction:", err)
 		c.sleepForRetry(err, 0)
 		return false // retry.
 	}
@@ -409,70 +439,68 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 			if vin.TxID != "" && vin.VOut >= 0 {
 				// Mark this UTXO as spent (at this block height)
 				// • Note: a Txn cannot spend its own outputs (but it can spend outputs from previous Txns in the same block)
-				// • We only care about UTXOs that are spendable (i.e. have a positive value and an address/PKH)
 				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
-				// log.Println("ChainFollower: marking UTXO spent", vin.TxID, vin.VOut, block.Height)
 				accountID, _, err := tx.MarkUTXOSpent(vin.TxID, vin.VOut, block.Height)
 				if err != nil {
-					log.Println("ChainFollower: processBlock: cannot mark UTXO in DB:", err, vin.TxID, vin.VOut)
+					log.Println("ChainFollower: MarkUTXOSpent:", err, vin.TxID, vin.VOut)
 					c.sleepForRetry(err, 0)
 					return false // retry.
 				}
 				if accountID != "" {
+					log.Println("ChainFollower: marking UTXO spent:", vin.TxID, vin.VOut, block.Height)
 					affectedAcconts[accountID] = nil // insert in affectedAcconts.
 				}
 			}
 		}
 		for _, vout := range txn.VOut {
 			// Ignore outputs that are not spendable.
-			if vout.Value.IsPositive() && len(vout.ScriptPubKey.Addresses) > 0 {
+			if !vout.Value.IsPositive() {
+				log.Println("ChainFollower: skipping zero-value vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
+				continue
+			}
+			if len(vout.ScriptPubKey.Addresses) == 1 {
 				// Create a UTXO associated with the wallet that owns the address.
-				scriptType := typeOfScript(vout.ScriptPubKey.Type)
-				if scriptType == "p2pkh" || scriptType == "p2sh" || scriptType == "p2pk" {
-					// These script-types always contain a single address.
-					// FIXME: re-encode p2pk [and p2sh] as Addresses in a consistent format.
-					pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
-					// Use an address-to-account index (utxo_account_i) to find the account.
-					accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(pkhAddress)
-					if err != nil {
-						if giga.IsNotFoundError(err) {
-							//log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
-						} else {
-							log.Println("ChainFollower: processBlock: cannot query FindAccountForAddress in DB:", err, pkhAddress)
-							c.sleepForRetry(err, 0)
-							return false // retry.
-						}
+				scriptType := giga.DecodeCoreRPCScriptType(vout.ScriptPubKey.Type)
+				// These script-types always contain a single address.
+				// FIXME: re-encode p2pk [and p2sh] as Addresses in a consistent format.
+				pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
+				// Use an address-to-account index (utxo_account_i) to find the account.
+				accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(pkhAddress)
+				if err != nil {
+					if giga.IsNotFoundError(err) {
+						// log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
 					} else {
-						affectedAcconts[string(accountID)] = nil // insert in affectedAcconts.
-						err = tx.CreateUTXO(txn_id, vout.N, vout.Value, scriptType, pkhAddress, accountID, keyIndex, isInternal, block.Height)
-						if err != nil {
-							log.Println("ChainFollower: processBlock: cannot create UTXO in DB:", err, txn_id, vout.N)
-							c.sleepForRetry(err, 0)
-							return false // retry.
-						}
+						log.Println("ChainFollower: FindAccountForAddress:", err, pkhAddress)
+						c.sleepForRetry(err, 0)
+						return false // retry.
 					}
 				} else {
-					log.Println("ChainFollower: unknown script type:", txn_id, vout.N, vout.ScriptPubKey.Type)
+					tx.CreateUTXO(giga.NewUTXO{
+						TxID:        txn_id,
+						VOut:        vout.N,
+						Value:       vout.Value,
+						ScriptType:  scriptType,
+						PKHAddress:  pkhAddress,
+						AccountID:   accountID,
+						KeyIndex:    keyIndex,
+						IsInternal:  isInternal,
+						BlockHeight: block.Height,
+					})
+					affectedAcconts[string(accountID)] = nil // insert in affectedAcconts.
+					if err != nil {
+						log.Println("ChainFollower: CreateUTXO:", err, txn_id, vout.N)
+						c.sleepForRetry(err, 0)
+						return false // retry.
+					}
 				}
+			} else if len(vout.ScriptPubKey.Addresses) < 1 {
+				log.Println("ChainFollower: skipping no-address vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
 			} else {
-				log.Println("ChainFollower: no value or no address:", txn_id, vout.N, vout.ScriptPubKey.Type)
+				log.Println("ChainFollower: skipping multi-address vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
 			}
 		}
 	}
 	return true
-}
-
-func typeOfScript(name string) string {
-	if name == "pubkeyhash" {
-		return "p2pkh"
-	}
-	if name == "scripthash" {
-		return "p2sh"
-	}
-	if name == "pubkey" {
-		return "p2pk"
-	}
-	return name
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
@@ -484,7 +512,7 @@ func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
 	for {
 		tx, err := c.store.Begin()
 		if err != nil {
-			log.Println("ChainFollower: beginStoreTxn: cannot begin:", err)
+			log.Println("ChainFollower: beginStoreTxn:", err)
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}

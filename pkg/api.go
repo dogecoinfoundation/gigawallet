@@ -2,11 +2,7 @@ package giga
 
 import (
 	"fmt"
-)
-
-const (
-	scriptTypeP2PKH    = "p2pkh"
-	scriptTypeMultiSig = "multisig"
+	"log"
 )
 
 type API struct {
@@ -180,6 +176,13 @@ func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 	if err != nil {
 		return AccountPublic{}, err
 	}
+	bal, err := a.Store.CalculateBalance(acc.Address)
+	if err != nil {
+		return AccountPublic{}, err
+	}
+	log.Println("GetAccount: incoming balance:", bal.IncomingBalance)
+	log.Println("GetAccount: current balance:", bal.CurrentBalance)
+	log.Println("GetAccount: outgoing balance:", bal.OutgoingBalance)
 	return acc.GetPublicInfo(), nil
 }
 

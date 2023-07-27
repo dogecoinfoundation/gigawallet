@@ -39,6 +39,48 @@ var TxnFeePerKB = OneCoin.Div(decimal.NewFromInt(100))        // 0.01 DOGE
 var TxnFeePerByte = TxnFeePerKB.Div(decimal.NewFromInt(1000)) // since Core version 1.14.5
 var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
 
+// Dogecoin Script Types enum.
+// Inferred from ScriptPubKey scripts by pattern-matching the code (script templates)
+type ScriptType string
+
+// ScriptType constants - stored in gigawallet database!
+const (
+	scriptTypeP2PK     ScriptType = "p2pk"     // TX_PUBKEY (in Core)
+	scriptTypeP2PKH    ScriptType = "p2pkh"    // TX_PUBKEYHASH
+	scriptTypeP2PKHW   ScriptType = "p2wpkh"   // TX_WITNESS_V0_KEYHASH
+	scriptTypeP2SH     ScriptType = "p2sh"     // TX_SCRIPTHASH
+	scriptTypeP2SHW    ScriptType = "p2wsh"    // TX_WITNESS_V0_SCRIPTHASH
+	scriptTypeMultiSig ScriptType = "multisig" // TX_MULTISIG
+	scriptTypeNullData ScriptType = "nulldata" // TX_NULL_DATA
+	scriptTypeCustom   ScriptType = "custom"   // TX_NONSTANDARD
+)
+
+// Decode the 'Type' from Core RPC to our ScriptType enum.
+// Core RPC uses completely different names, just to confuse everyone.
+// See: standard.cpp line 24 `GetTxnOutputType` in Core.
+func DecodeCoreRPCScriptType(coreRpcType string) ScriptType {
+	switch coreRpcType {
+	case "nonstandard":
+		return scriptTypeCustom
+	case "pubkey":
+		return scriptTypeP2PK
+	case "pubkeyhash":
+		return scriptTypeP2PKH
+	case "scripthash":
+		return scriptTypeP2SH
+	case "multisig":
+		return scriptTypeMultiSig
+	case "nulldata":
+		return scriptTypeNullData
+	case "witness_v0_keyhash":
+		return scriptTypeP2PKHW
+	case "witness_v0_scripthash":
+		return scriptTypeP2SHW
+	default:
+		return scriptTypeCustom
+	}
+}
+
 // UTXO is an Unspent Transaction Output, i.e. a prior payment into our Account.
 type UTXO struct {
 	Account       Address    // receiving account ID (by matching ScriptAddress against account's HD child keys)
@@ -46,7 +88,7 @@ type UTXO struct {
 	VOut          int        // is an output at this index in Txn
 	Status        string     // 'p' = receive pending; 'c' = receive confirmed; 's' = spent pending; 'x' = spent confirmed
 	Value         CoinAmount // value of the txn output in dogecoin
-	ScriptType    string     // 'p2pkh', 'multisig', etc (by pattern-matching the txn output script code)
+	ScriptType    ScriptType // 'p2pkh' etc, see ScriptType constants
 	ScriptAddress Address    // the P2PKH address required to spend the txn output (extracted from the script code)
 }
 
@@ -98,7 +140,7 @@ type RawTxnScriptPubKey struct {
 	Asm       string   `json:"asm"`       // The script disassembly
 	Hex       string   `json:"hex"`       // The script hex
 	ReqSigs   int64    `json:"reqSigs"`   // Number of required signatures
-	Type      string   `json:"type"`      // Script type: 'pubkeyhash' (P2PKH)
+	Type      string   `json:"type"`      // Core RPC Script Type (see DecodeCoreRPCScriptType) NB. does NOT match our ScriptType enum!
 	Addresses []string `json:"addresses"` // Array of dogecoin addresses accepted by the script
 }
 

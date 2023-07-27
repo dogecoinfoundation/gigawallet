@@ -5,6 +5,12 @@ package giga
 type Store interface {
 	Begin() (StoreTransaction, error)
 
+	// GetAccount returns the account with the given ForeignID.
+	GetAccount(foreignID string) (Account, error)
+
+	// CalculateBalance queries across UTXOs to calculate account balances.
+	CalculateBalance(accountID Address) (AccountBalance, error)
+
 	// GetInvoice returns the invoice with the given ID.
 	GetInvoice(id Address) (Invoice, error)
 
@@ -14,16 +20,13 @@ type Store interface {
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
 
-	// GetAccount returns the account with the given ForeignID.
-	GetAccount(foreignID string) (Account, error)
+	// List all unreserved UTXOs in the account's wallet.
+	// Unreserved means not already being used in a pending transaction.
+	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
 	// GetChainState gets the last saved Best Block information (checkpoint for restart)
 	// It returns giga.NotFound if the chainstate record does not exist.
 	GetChainState() (ChainState, error)
-
-	// List all unreserved UTXOs in the account's wallet.
-	// Unreserved means not already being used in a pending transaction.
-	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
 
 	// Close the store.
 	Close()
@@ -36,10 +39,16 @@ type StoreTransaction interface {
 	// be a no-op of Commit has already succeeded
 	Rollback() error
 
-	// StoreInvoice stores an invoice.
-	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
-	// It returns an unspecified error if the invoice ID already exists (FIXME)
-	StoreInvoice(invoice Invoice) error
+	// GetAccount returns the account with the given ForeignID.
+	// It returns giga.NotFound if the account does not exist (key: ForeignID)
+	GetAccount(foreignID string) (Account, error)
+
+	// GetAccount returns the account with the given ID.
+	// It returns giga.NotFound if the account does not exist (key: ID)
+	GetAccountByID(ID string) (Account, error)
+
+	// CalculateBalance queries across UTXOs to calculate account balances.
+	CalculateBalance(accountID Address) (AccountBalance, error)
 
 	// GetInvoice returns the invoice with the given ID.
 	// It returns giga.NotFound if the invoice does not exist (key: ID/address)
@@ -50,6 +59,15 @@ type StoreTransaction interface {
 	// pagination: when next_cursor == 0, that is the final page of results.
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
+
+	// List all unreserved UTXOs in the account's wallet.
+	// Unreserved means not already being used in a pending transaction.
+	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
+
+	// StoreInvoice stores an invoice.
+	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
+	// It returns an unspecified error if the invoice ID already exists (FIXME)
+	StoreInvoice(invoice Invoice) error
 
 	// CreateAccount stores a NEW account.
 	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)
@@ -64,28 +82,9 @@ type StoreTransaction interface {
 	// StoreAddresses associates a list of addresses with an accountID
 	StoreAddresses(accountID Address, addresses []Address, firstAddress uint32, internal bool) error
 
-	// GetAccount returns the account with the given ForeignID.
-	// It returns giga.NotFound if the account does not exist (key: ForeignID)
-	GetAccount(foreignID string) (Account, error)
-
-	// GetAccount returns the account with the given ID.
-	// It returns giga.NotFound if the account does not exist (key: ID)
-	GetAccountByID(ID string) (Account, error)
-
 	// Find the accountID (HD root PKH) that owns the given Dogecoin address.
 	// Also find the key index of `pkhAddress` within the HD wallet.
 	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, isInternal bool, err error)
-
-	// List all unreserved UTXOs in the account's wallet.
-	// Unreserved means not already being used in a pending transaction.
-	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
-
-	// Create an Unspent Transaction Output (at the given block height)
-	CreateUTXO(txID string, vOut int64, value CoinAmount, scriptType string, pkhAddress Address, accountID Address, keyIndex uint32, isInternal bool, blockHeight int64) error
-
-	// Mark an Unspent Transaction Output as spent (at the given block height)
-	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
-	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (accountId string, scriptAddress Address, err error)
 
 	// What it says on the tin. We should consider
 	// adding this to Store as a fast-path
@@ -93,6 +92,19 @@ type StoreTransaction interface {
 
 	// UpdateChainState updates the Best Block information (checkpoint for restart)
 	UpdateChainState(state ChainState, writeRoot bool) error
+
+	// Create a new Unspent Transaction Output in the database.
+	CreateUTXO(utxo NewUTXO) error
+
+	// Mark an Unspent Transaction Output as spent (at the given block height)
+	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
+	MarkUTXOSpent(txID string, vOut int64, spentHeight int64) (accountId string, scriptAddress Address, err error)
+
+	// Mark all UTXOs as confirmed (available to spend) after `confirmations` blocks,
+	// at the current block height passed in blockHeight. This should be called each
+	// time a new block is processed, i.e. blockHeight increases, but it is safe to
+	// call less often (e.g. after a batch of blocks)
+	ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAcconts []string, err error)
 
 	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
 	// This serves to roll back the effects of adding or spending those UTXOs.
@@ -108,13 +120,8 @@ type StoreTransaction interface {
 
 	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
 	// and increment those accounts' chain-sequence-number.
+	// MUST be done before rolling back chainstate, i.e. RevertUTXOsAboveHeight, RevertTxnsAboveHeight.
 	IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error)
-
-	// Mark all UTXOs as confirmed (available to spend) after `confirmations` blocks,
-	// at the current block height passed in blockHeight. This should be called each
-	// time a new block is processed, i.e. blockHeight increases, but it is safe to
-	// call less often (e.g. after a batch of blocks)
-	ConfirmUTXOs(confirmations int, blockHeight int64) error
 }
 
 // Current chainstate in the database.
@@ -125,4 +132,17 @@ type ChainState struct {
 	FirstHeight     int64  // block height when gigawallet first started to sync this blockchain.
 	BestBlockHash   string // last block processed by gigawallet (effects included in DB)
 	BestBlockHeight int64  // last block height processed by gigawallet (effects included in DB)
+}
+
+// Used when inserting UTXOs into the database in a batch.
+type NewUTXO struct {
+	TxID        string     // UTXO key: Transaction ID (TxnID)
+	VOut        int64      // UTXO key: Transaction Output number.
+	Value       CoinAmount // Output Amount.
+	ScriptType  ScriptType // 'p2pkh' etc, see ScriptType constants.
+	PKHAddress  Address    // Pay-To address embedded in the script.
+	AccountID   Address    // Account ID that owns the Pay-To address.
+	KeyIndex    uint32     // Pay-To address index in the Account's HD Wallet.
+	IsInternal  bool       // Pay-To address is Internal or External in HD Wallet.
+	BlockHeight int64      // Block Height of the Block that contains this Txn.
 }

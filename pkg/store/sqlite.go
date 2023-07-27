@@ -68,14 +68,14 @@ CREATE TABLE IF NOT EXISTS utxo (
 	script_address TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
 	is_internal BOOLEAN NOT NULL,
-	adding_height INTEGER,
-	available_height INTEGER,
+	added_height INTEGER,
+	spendable_height INTEGER,
 	spending_height INTEGER,
 	spent_height INTEGER,
 	PRIMARY KEY (txn_id, vout)
 );
 CREATE INDEX IF NOT EXISTS utxo_account_i ON utxo (account_address);
-CREATE INDEX IF NOT EXISTS utxo_added_i ON utxo (adding_height, available_height);
+CREATE INDEX IF NOT EXISTS utxo_added_i ON utxo (added_height, spendable_height);
 CREATE INDEX IF NOT EXISTS utxo_spent_i ON utxo (spending_height, spent_height);
 
 CREATE TABLE IF NOT EXISTS chainstate (
@@ -91,6 +91,14 @@ var _ giga.Store = SQLiteStore{}
 
 type SQLiteStore struct {
 	db *sql.DB
+}
+
+// The common read-only parts of sql.DB and sql.Tx interfaces, so we can pass either
+// one to some helper functions (for methods that appear on both SQLiteStore and
+// SQLiteStoreTransaction)
+type Queryable interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
 }
 
 // NewSQLiteStore returns a giga.PaymentsStore implementor that uses sqlite
@@ -126,8 +134,78 @@ func (s SQLiteStore) Begin() (giga.StoreTransaction, error) {
 	return NewStoreTransaction(tx), nil
 }
 
+func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
+	return getAccountCommon(s.db, foreignID, true /*isForeignKey*/)
+}
+
+func (s SQLiteStore) CalculateBalance(accountID giga.Address) (giga.AccountBalance, error) {
+	return calculateBalanceCommon(s.db, accountID)
+}
+
 func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
-	row := s.db.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
+	return getInvoiceCommon(s.db, addr)
+}
+
+func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return listInvoicesCommon(s.db, account, cursor, limit)
+}
+
+func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+	return getAllUnreservedUTXOsCommon(s.db, account)
+}
+
+func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
+	row := s.db.QueryRow("SELECT best_hash, best_height, root_hash, first_height FROM chainstate")
+	var state giga.ChainState
+	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight, &state.RootHash, &state.FirstHeight)
+	if err == sql.ErrNoRows {
+		// MUST detect this error to fulfil the API contract.
+		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
+	}
+	if err != nil {
+		return giga.ChainState{}, dbErr(err, "GetChainState: row.Scan")
+	}
+	return state, nil
+}
+
+func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool) (giga.Account, error) {
+	// Used to fetch an Account by ID (Address) or by ForeignID.
+	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE "
+	if isForeignKey {
+		query += "foreign_id = $1"
+	} else {
+		query += "address = $1"
+	}
+	row := tx.QueryRow(query, accountKey)
+	var acc giga.Account
+	err := row.Scan(
+		&acc.ForeignID, &acc.Address, &acc.Privkey,
+		&acc.NextInternalKey, &acc.NextExternalKey,
+		&acc.NextPoolInternal, &acc.NextPoolExternal,
+		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
+	if err == sql.ErrNoRows {
+		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", accountKey)
+	}
+	if err != nil {
+		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
+	}
+	return acc, nil
+}
+
+func calculateBalanceCommon(tx Queryable, accountID giga.Address) (bal giga.AccountBalance, err error) {
+	row := tx.QueryRow(`
+SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0)`, accountID)
+	err = row.Scan(&bal.IncomingBalance, &bal.CurrentBalance, &bal.OutgoingBalance)
+	if err != nil {
+		return giga.AccountBalance{}, dbErr(err, "CalculateBalance: row.Scan")
+	}
+	return
+}
+
+func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
+	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
 	var id giga.Address
 	var account giga.Address
 	var tx_id string
@@ -160,13 +238,13 @@ func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 	}, nil
 }
 
-func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
-	// MUST order by key_index to support the cursor API:
+func listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	// MUST order by key_index (or sqlite OID) to support the cursor API:
 	// we need a way to resume the query next time from whatever next_cursor we return,
 	// and the aggregate result SHOULD be stable even as the DB is modified.
 	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
 	rows_found := 0
-	rows, err := s.db.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
+	rows, err := tx.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
 	if err != nil {
 		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
 	}
@@ -199,41 +277,9 @@ func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (
 	return
 }
 
-func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
-	row := s.db.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
-	var acc giga.Account
-	err := row.Scan(
-		&acc.ForeignID, &acc.Address, &acc.Privkey,
-		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.NextPoolInternal, &acc.NextPoolExternal,
-		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
-	if err == sql.ErrNoRows {
-		// MUST detect this error to fulfil the API contract.
-		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
-	}
-	if err != nil {
-		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
-	}
-	return acc, nil
-}
-
-func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
-	row := s.db.QueryRow("SELECT best_hash, best_height, root_hash, first_height FROM chainstate")
-	var state giga.ChainState
-	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight, &state.RootHash, &state.FirstHeight)
-	if err == sql.ErrNoRows {
-		// MUST detect this error to fulfil the API contract.
-		return giga.ChainState{}, giga.NewErr(giga.NotFound, "chainstate not found")
-	}
-	if err != nil {
-		return giga.ChainState{}, dbErr(err, "GetChainState: row.Scan")
-	}
-	return state, nil
-}
-
-func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+func getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []giga.UTXO, err error) {
 	rows_found := 0
-	rows, err := s.db.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
+	rows, err := tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
 	if err != nil {
 		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
@@ -286,6 +332,30 @@ func (t SQLiteStoreTransaction) Rollback() error {
 	return nil
 }
 
+func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, error) {
+	return getAccountCommon(t.tx, foreignID, true /*isForeignKey*/)
+}
+
+func (t SQLiteStoreTransaction) GetAccountByID(ID string) (giga.Account, error) {
+	return getAccountCommon(t.tx, ID, false /*isForeignKey*/)
+}
+
+func (t SQLiteStoreTransaction) CalculateBalance(accountID giga.Address) (giga.AccountBalance, error) {
+	return calculateBalanceCommon(t.tx, accountID)
+}
+
+func (t SQLiteStoreTransaction) GetInvoice(addr giga.Address) (giga.Invoice, error) {
+	return getInvoiceCommon(t.tx, addr)
+}
+
+func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return listInvoicesCommon(t.tx, account, cursor, limit)
+}
+
+func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
+	return getAllUnreservedUTXOsCommon(t.tx, account)
+}
+
 // Store an invoice
 func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	items_b, err := json.Marshal(inv.Items)
@@ -304,79 +374,6 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 		return dbErr(err, "createInvoice: stmt.Exec insert")
 	}
 	return nil
-}
-
-func (t SQLiteStoreTransaction) GetInvoice(addr giga.Address) (giga.Invoice, error) {
-	row := t.tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
-	var id giga.Address
-	var account giga.Address
-	var tx_id string
-	var vendor string
-	var items_json string
-	var key_index uint32
-	var block_id string
-	var confirmations int32
-	err := row.Scan(&id, &account, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations)
-	if err == sql.ErrNoRows {
-		return giga.Invoice{}, giga.NewErr(giga.NotFound, "invoice not found: %v", addr)
-	}
-	if err != nil {
-		return giga.Invoice{}, dbErr(err, "GetInvoice: row.Scan")
-	}
-	var items []giga.Item
-	err = json.Unmarshal([]byte(items_json), &items)
-	if err != nil {
-		return giga.Invoice{}, dbErr(err, "GetInvoice: json.Unmarshal")
-	}
-	return giga.Invoice{
-		ID:            id,
-		Account:       account,
-		TXID:          tx_id,
-		Vendor:        vendor,
-		Items:         items,
-		KeyIndex:      key_index,
-		BlockID:       block_id,
-		Confirmations: confirmations,
-	}, nil
-}
-
-func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
-	// MUST order by key_index (or sqlite OID) to support the cursor API:
-	// we need a way to resume the query next time from whatever next_cursor we return,
-	// and the aggregate result SHOULD be stable even as the DB is modified.
-	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
-	rows_found := 0
-	rows, err := t.tx.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
-	if err != nil {
-		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		inv := giga.Invoice{Account: account}
-		var items_json string
-		err := rows.Scan(&inv.ID, &inv.TXID, &inv.Vendor, &items_json, &inv.KeyIndex, &inv.BlockID, &inv.Confirmations)
-		if err != nil {
-			return nil, 0, dbErr(err, "ListInvoices: scanning invoice row")
-		}
-		err = json.Unmarshal([]byte(items_json), &inv.Items)
-		if err != nil {
-			return nil, 0, dbErr(err, "ListInvoices: unmarshalling json")
-		}
-		items = append(items, inv)
-		after_this := int(inv.KeyIndex) + 1 // XXX assumes non-hardened HD Key! (from uint32)
-		if after_this > next_cursor {
-			next_cursor = after_this // NB. starting cursor for next call
-		}
-		rows_found++
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
-	}
-	if rows_found < limit {
-		// in this backend, we know there are no more rows to follow.
-		next_cursor = 0 // meaning "end of query results"
-	}
-	return
 }
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
@@ -438,40 +435,6 @@ func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses
 	return nil
 }
 
-func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, error) {
-	row := t.tx.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE foreign_id = ?", foreignID)
-	var acc giga.Account
-	err := row.Scan(
-		&acc.ForeignID, &acc.Address, &acc.Privkey,
-		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.NextPoolInternal, &acc.NextPoolExternal,
-		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
-	if err == sql.ErrNoRows {
-		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", foreignID)
-	}
-	if err != nil {
-		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
-	}
-	return acc, nil
-}
-
-func (t SQLiteStoreTransaction) GetAccountByID(ID string) (giga.Account, error) {
-	row := t.tx.QueryRow("SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE address = ?", ID)
-	var acc giga.Account
-	err := row.Scan(
-		&acc.ForeignID, &acc.Address, &acc.Privkey,
-		&acc.NextInternalKey, &acc.NextExternalKey,
-		&acc.NextPoolInternal, &acc.NextPoolExternal,
-		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
-	if err == sql.ErrNoRows {
-		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", ID)
-	}
-	if err != nil {
-		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
-	}
-	return acc, nil
-}
-
 func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, bool, error) {
 	row := t.tx.QueryRow("SELECT account_address,key_index,is_internal FROM account_address WHERE address = ?", address)
 	var accountID giga.Address
@@ -485,33 +448,6 @@ func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (gig
 		return "", 0, false, dbErr(err, "FindAccountForAddress: error scanning row")
 	}
 	return accountID, keyIndex, isInternal, nil
-}
-
-func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
-	rows_found := 0
-	rows, err := t.tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
-	if err != nil {
-		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		utxo := giga.UTXO{Account: account, Status: "c"}
-		var value string
-		err := rows.Scan(&utxo.TxnID, &utxo.VOut, &value, &utxo.ScriptType, &utxo.ScriptAddress)
-		if err != nil {
-			return nil, dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
-		}
-		utxo.Value, err = decimal.NewFromString(value)
-		if err != nil {
-			return nil, dbErr(err, fmt.Sprintf("GetAllUnreservedUTXOs: invalid decimal value in UTXO database: %v", value))
-		}
-		result = append(result, utxo)
-		rows_found++
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
-	}
-	return
 }
 
 func (t SQLiteStoreTransaction) MarkInvoiceAsPaid(address giga.Address) error {
@@ -552,12 +488,16 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState, writeRoo
 	return nil
 }
 
-func (t SQLiteStoreTransaction) CreateUTXO(txID string, vOut int64, value giga.CoinAmount, scriptType string, pkhAddress giga.Address, accountID giga.Address, keyIndex uint32, isInternal bool, blockHeight int64) error {
-	// psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO"
-	_, err := t.tx.Exec("INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, adding_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO UPDATE SET account_address=$3, value=$4, script_type=$5, script_address=$6, key_index=$7, is_internal=$8, adding_height=$9 WHERE txn_id=$1 AND vout=$2",
-		txID, vOut, accountID, value, scriptType, pkhAddress, keyIndex, isInternal, blockHeight)
+func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.NewUTXO) error {
+	// Create a new Unspent Transaction Output in the database.
+	// Updates Account 'incoming' to indicate unconfirmed funds.
+	// psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE ..."
+	_, err := t.tx.Exec(
+		"INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO UPDATE SET account_address=$3, value=$4, script_type=$5, script_address=$6, key_index=$7, is_internal=$8, added_height=$9 WHERE txn_id=$1 AND vout=$2",
+		utxo.TxID, utxo.VOut, utxo.AccountID, utxo.Value, utxo.ScriptType, utxo.PKHAddress, utxo.KeyIndex, utxo.IsInternal, utxo.BlockHeight,
+	)
 	if err != nil {
-		return dbErr(err, "CreateUTXO: executing insert")
+		return dbErr(err, "CreateUTXO: preparing insert")
 	}
 	return nil
 }
@@ -580,94 +520,46 @@ func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeig
 	return
 }
 
-func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
-	if len(accountIds) > 0 {
-		// Go's SQL package doesn't implement array/slice arguments,
-		// so to do an 'IN' query we need this kind of nonsense.
-		binds := strings.Repeat(",?", len(accountIds))[1:]
-		args := []any{}
-		for _, id := range accountIds {
-			args = append(args, id)
-		}
-		_, err := t.tx.Exec("UPDATE account SET chain_seq=chain_seq+1 WHERE address IN ("+binds+")", args...)
-		if err != nil {
-			return dbErr(err, "IncAccountChainSeq: executing update")
-		}
-	}
-	return nil
-}
-
-func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error) {
+func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAcconts []string, err error) {
+	confirmedHeight := blockHeight - int64(confirmations) // from config.
+	// note: there is an index on (added_height, spendable_height) for this query.
+	// note: this uses num-confirmations from the invoice being paid, if there is one.
+	// note: this MUST be a LEFT OUTER join (script_address may not match any invoice)
 	rows, err := t.tx.Query(`
-		SELECT DISTINCT address FROM account INNER JOIN utxo ON account.address = utxo.account_address WHERE utxo.adding_height > $1 OR utxo.available_height > $1 OR utxo.spending_height > $1 OR utxo.spent_height > $1
-		UNION SELECT DISTINCT address FROM account INNER JOIN txn ON account.address = txn.account_address WHERE txn.on_chain_height > $1 OR txn.verified_height > $1`, maxValidHeight)
+		UPDATE utxo SET spendable_height=$1
+		WHERE added_height <= COALESCE((SELECT $1 - confirmations from invoice WHERE invoice_address = utxo.script_address), $2)
+		AND spendable_height IS NULL
+		RETURNING account_address
+	`, blockHeight, confirmedHeight)
 	if err != nil {
-		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: executing query")
+		return nil, dbErr(err, "ConfirmUTXOs: updating utxos")
 	}
 	defer rows.Close()
-	var ids []string
 	for rows.Next() {
 		var id string
 		err := rows.Scan(&id)
 		if err != nil {
-			return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning row")
+			return nil, dbErr(err, "ConfirmUTXOs: scanning row")
 		}
-		ids = append(ids, id)
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning rows")
-	}
-	err = t.IncChainSeqForAccounts(ids)
-	return ids, err
-}
-
-func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) error {
-	stmt, err := t.tx.Prepare("UPDATE account SET incoming=incoming-$2, balance=balance+$2 WHERE address=$1")
-	if err != nil {
-		return dbErr(err, "ConfirmUTXOs: preparing update")
-	}
-	defer stmt.Close()
-	confirmedHeight := blockHeight - int64(confirmations) // from config.
-	// note: there is an index on (adding_height, available_height) for this query.
-	// note: this uses num-confirmations from the invoice being paid, if there is one.
-	// note: this MUST be a LEFT OUTER join (script_address may not match any invoice)
-	rows, err := t.tx.Query(`
-		UPDATE utxo SET available_height=$1
-		WHERE adding_height <= COALESCE((SELECT $1 - confirmations from invoice WHERE invoice_address = utxo.script_address), $2)
-		AND available_height = NULL
-		RETURNING account_address, value
-	`, blockHeight, confirmedHeight)
-	if err != nil {
-		return dbErr(err, "ConfirmUTXOs: updating utxos")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		var value string
-		err := rows.Scan(&id, &value)
-		if err != nil {
-			return dbErr(err, "ConfirmUTXOs: scanning row")
-		}
-		stmt.Exec(id, value)
-		if err != nil {
-			return dbErr(err, "ConfirmUTXOs: updating account "+id)
+		if id != "" {
+			affectedAcconts = append(affectedAcconts, id)
 		}
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
-		return dbErr(err, "ConfirmUTXOs: scanning rows")
+		return nil, dbErr(err, "ConfirmUTXOs: scanning rows")
 	}
-	return nil
+	return affectedAcconts, nil
 }
 
 func (t SQLiteStoreTransaction) RevertUTXOsAboveHeight(maxValidHeight int64) error {
-	// The presence of a height in adding_height, available_height, spending_height, spent_height
+	// The presence of a height in added_height, spendable_height, spending_height, spent_height
 	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
 	// reserved for spending, or has been spent (confirmed)
-	_, err := t.tx.Exec("UPDATE utxo SET adding_height=NULL,available_height=NULL,spending_height=NULL,spent_height=NULL WHERE adding_height > ?", maxValidHeight)
+	_, err := t.tx.Exec("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 1")
 	}
-	_, err = t.tx.Exec("UPDATE utxo SET available_height=NULL,spending_height=NULL,spent_height=NULL WHERE available_height > ?", maxValidHeight)
+	_, err = t.tx.Exec("UPDATE utxo SET spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE spendable_height > ?", maxValidHeight)
 	if err != nil {
 		return dbErr(err, "RevertUTXOsAboveHeight: executing update 2")
 	}
@@ -694,6 +586,52 @@ func (t SQLiteStoreTransaction) RevertTxnsAboveHeight(maxValidHeight int64) erro
 		return dbErr(err, "RevertTxnsAboveHeight: executing update 2")
 	}
 	return nil
+}
+
+func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accountIds []string) error {
+	// Increment the chain-sequence-number for multiple accounts.
+	// Use this after modifying accounts' blockchain-derived state (UTXOs, TXNs)
+	if len(accountIds) > 0 {
+		// Go's SQL package doesn't implement array/slice arguments,
+		// so to do an 'IN' query we need this kind of nonsense.
+		binds := strings.Repeat(",?", len(accountIds))[1:]
+		args := []any{}
+		for _, id := range accountIds {
+			args = append(args, id)
+		}
+		_, err := t.tx.Exec("UPDATE account SET chain_seq=chain_seq+1 WHERE address IN ("+binds+")", args...)
+		if err != nil {
+			return dbErr(err, "IncAccountChainSeq: executing update")
+		}
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error) {
+	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
+	// and increment those accounts' chain-sequence-number.
+	// MUST be done before rolling back chainstate, i.e. RevertUTXOsAboveHeight, RevertTxnsAboveHeight.
+	rows, err := t.tx.Query(`
+		SELECT DISTINCT address FROM account INNER JOIN utxo ON account.address = utxo.account_address WHERE utxo.added_height > $1 OR utxo.spendable_height > $1 OR utxo.spending_height > $1 OR utxo.spent_height > $1
+		UNION SELECT DISTINCT address FROM account INNER JOIN txn ON account.address = txn.account_address WHERE txn.on_chain_height > $1 OR txn.verified_height > $1`, maxValidHeight)
+	if err != nil {
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: executing query")
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		err := rows.Scan(&id)
+		if err != nil {
+			return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning row")
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return []string{}, dbErr(err, "IncAccountsAffectedByRollback: scanning rows")
+	}
+	err = t.IncChainSeqForAccounts(ids)
+	return ids, err
 }
 
 func dbErr(err error, where string) error {
