@@ -10,6 +10,9 @@ func SetUpReceivers(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Co
 	// Set up configured loggers
 	SetupLoggers(cond, bus, conf)
 
+	// Set up configured Callbacks
+	SetupCallbacks(cond, bus, conf)
+
 	// InvoiceUpdater marks invoices paid when transactions have fully paid them.
 	iup := NewInvoiceUpdater()
 	cond.Service("InvoiceUpdater", iup)
