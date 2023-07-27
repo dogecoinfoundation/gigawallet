@@ -6,7 +6,10 @@ type Store interface {
 	Begin() (StoreTransaction, error)
 
 	// GetAccount returns the account with the given ForeignID.
-	GetAccount(foreignID string, calculateBalance bool) (Account, error)
+	GetAccount(foreignID string) (Account, error)
+
+	// CalculateBalance queries across UTXOs to calculate account balances.
+	CalculateBalance(accountID Address) (AccountBalance, error)
 
 	// GetInvoice returns the invoice with the given ID.
 	GetInvoice(id Address) (Invoice, error)
@@ -38,11 +41,14 @@ type StoreTransaction interface {
 
 	// GetAccount returns the account with the given ForeignID.
 	// It returns giga.NotFound if the account does not exist (key: ForeignID)
-	GetAccount(foreignID string, calculateBalance bool) (Account, error)
+	GetAccount(foreignID string) (Account, error)
 
 	// GetAccount returns the account with the given ID.
 	// It returns giga.NotFound if the account does not exist (key: ID)
-	GetAccountByID(ID string, calculateBalance bool) (Account, error)
+	GetAccountByID(ID string) (Account, error)
+
+	// CalculateBalance queries across UTXOs to calculate account balances.
+	CalculateBalance(accountID Address) (AccountBalance, error)
 
 	// GetInvoice returns the invoice with the given ID.
 	// It returns giga.NotFound if the invoice does not exist (key: ID/address)

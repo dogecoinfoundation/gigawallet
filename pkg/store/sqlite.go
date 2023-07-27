@@ -134,8 +134,12 @@ func (s SQLiteStore) Begin() (giga.StoreTransaction, error) {
 	return NewStoreTransaction(tx), nil
 }
 
-func (s SQLiteStore) GetAccount(foreignID string, calculateBalance bool) (giga.Account, error) {
-	return getAccountCommon(s.db, foreignID, true /*isForeignKey*/, calculateBalance)
+func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
+	return getAccountCommon(s.db, foreignID, true /*isForeignKey*/)
+}
+
+func (s SQLiteStore) CalculateBalance(accountID giga.Address) (giga.AccountBalance, error) {
+	return calculateBalanceCommon(s.db, accountID)
 }
 
 func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
@@ -164,7 +168,7 @@ func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
 	return state, nil
 }
 
-func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool, calculateBalance bool) (giga.Account, error) {
+func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool) (giga.Account, error) {
 	// Used to fetch an Account by ID (Address) or by ForeignID.
 	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE "
 	if isForeignKey {
@@ -185,17 +189,19 @@ func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool, calcul
 	if err != nil {
 		return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
 	}
-	if calculateBalance {
-		row = tx.QueryRow(`
+	return acc, nil
+}
+
+func calculateBalanceCommon(tx Queryable, accountID giga.Address) (bal giga.AccountBalance, err error) {
+	row := tx.QueryRow(`
 SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
 COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
-COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0)`, acc.Address)
-		err := row.Scan(&acc.IncomingBalance, &acc.CurrentBalance, &acc.OutgoingBalance)
-		if err != nil {
-			return giga.Account{}, dbErr(err, "GetAccount: row.Scan")
-		}
+COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0)`, accountID)
+	err = row.Scan(&bal.IncomingBalance, &bal.CurrentBalance, &bal.OutgoingBalance)
+	if err != nil {
+		return giga.AccountBalance{}, dbErr(err, "CalculateBalance: row.Scan")
 	}
-	return acc, nil
+	return
 }
 
 func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
@@ -326,12 +332,16 @@ func (t SQLiteStoreTransaction) Rollback() error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) GetAccount(foreignID string, calculateBalance bool) (giga.Account, error) {
-	return getAccountCommon(t.tx, foreignID, true /*isForeignKey*/, calculateBalance)
+func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, error) {
+	return getAccountCommon(t.tx, foreignID, true /*isForeignKey*/)
 }
 
-func (t SQLiteStoreTransaction) GetAccountByID(ID string, calculateBalance bool) (giga.Account, error) {
-	return getAccountCommon(t.tx, ID, false /*isForeignKey*/, calculateBalance)
+func (t SQLiteStoreTransaction) GetAccountByID(ID string) (giga.Account, error) {
+	return getAccountCommon(t.tx, ID, false /*isForeignKey*/)
+}
+
+func (t SQLiteStoreTransaction) CalculateBalance(accountID giga.Address) (giga.AccountBalance, error) {
+	return calculateBalanceCommon(t.tx, accountID)
 }
 
 func (t SQLiteStoreTransaction) GetInvoice(addr giga.Address) (giga.Invoice, error) {

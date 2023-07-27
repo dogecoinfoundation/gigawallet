@@ -23,9 +23,13 @@ type Account struct {
 	PayoutAddress    string
 	PayoutThreshold  string
 	PayoutFrequency  string
-	IncomingBalance  CoinAmount // pending coins being received (waiting for Txn to be confirmed)
-	CurrentBalance   CoinAmount // current balance available to spend now
-	OutgoingBalance  CoinAmount // spent funds that are not yet confirmed (waiting for Txn to be confirmed)
+}
+
+// AccountBalance holds the current account balances for an Account.
+type AccountBalance struct {
+	IncomingBalance CoinAmount // pending coins being received (waiting for Txn to be confirmed)
+	CurrentBalance  CoinAmount // current balance available to spend now
+	OutgoingBalance CoinAmount // spent funds that are not yet confirmed (waiting for Txn to be confirmed)
 }
 
 // Generate and store HD Wallet addresses up to 20 beyond any currently-used addresses.
