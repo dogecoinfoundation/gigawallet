@@ -55,6 +55,9 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
 		adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
 
+		// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
+		mux.POST("/account/:foreignID/pay", t.payToAddress)
+
 		// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 		adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
 
@@ -312,6 +315,41 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 		return
 	}
 	sendResponse(w, invoices)
+}
+
+type PayToAddressRequest struct {
+	Amount giga.CoinAmount `json:"amount"`
+	PayTo  giga.Address    `json:"to"`
+}
+type PayToAddressResponse struct {
+	TxID string          `json:"txid"`
+	Fee  giga.CoinAmount `json:"fee"`
+}
+
+// Pays funds from an account managed by gigawallet to any Dogecoin Address.
+// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
+func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the foreignID is a 3rd-party ID for the account
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	var o PayToAddressRequest
+	err := json.NewDecoder(r.Body).Decode(&o)
+	if err != nil {
+		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
+		return
+	}
+	txn, err := t.api.SendFundsToAddress(foreignID, o.Amount, o.PayTo)
+	if err != nil {
+		sendError(w, "SendFundsToAddress", err)
+		return
+	}
+	sendResponse(w, &PayToAddressResponse{
+		TxID: txn.TxID,
+		Fee:  txn.FeeAmount,
+	})
 }
 
 // pays an invoice from another account managed by gigawallet

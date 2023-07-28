@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
 	"github.com/dogecoinfoundation/gigawallet/pkg/chaintracker"
@@ -15,12 +13,6 @@ import (
 )
 
 func Server(conf giga.Config) {
-
-	rpc, err := dogecoin.NewL1Libdogecoin(conf, nil)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(rpc.MakeAddress())
 
 	c := conductor.NewConductor(
 		conductor.HookSignals(),

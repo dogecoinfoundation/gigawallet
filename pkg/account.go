@@ -23,6 +23,7 @@ type Account struct {
 	PayoutAddress    string
 	PayoutThreshold  string
 	PayoutFrequency  string
+	utxoSource       *UTXOSource // cache: UTXOSource instance for this account.
 }
 
 // AccountBalance holds the current account balances for an Account.
@@ -99,36 +100,12 @@ func (a *Account) NextChangeAddress(lib L1) (Address, error) {
 	return address, nil
 }
 
-// UnreservedUTXOs creates an iterator over UTXOs in this Account that
-// have not already been earmarked for an outgoing payment (i.e. reserved.)
-// UTXOs are fetched incrementally from the Store, because there can be
-// a lot of them. This should iterate in desired spending order.
-// NOTE: this does not reserve the UTXOs returned; the caller must to that
-// by calling Store.CreateTransaction with the selcted UTXOs - and that may
-// fail if the UTXOs have been reserved by a concurrent request. In that case,
-// the caller should start over with a new UnreservedUTXOs() call.
-func (a *Account) UnreservedUTXOs(s Store) (iter UTXOIterator, err error) {
-	// TODO: change this to fetch UTXOs from the Store in batches
-	// using a paginated query API.
-	allUTXOs, err := s.GetAllUnreservedUTXOs(a.Address)
-	if err != nil {
-		return &AccountUnspentUTXOs{}, err
+func (a *Account) GetUTXOSource(store Store) *UTXOSource {
+	if a.utxoSource != nil {
+		return a.utxoSource
 	}
-	return &AccountUnspentUTXOs{utxos: allUTXOs, next: 0}, nil
-}
-
-type AccountUnspentUTXOs struct {
-	utxos []UTXO
-	next  int
-}
-
-func (it *AccountUnspentUTXOs) hasNext() bool {
-	return it.next < len(it.utxos)
-}
-func (it *AccountUnspentUTXOs) getNext() UTXO {
-	utxo := it.utxos[it.next]
-	it.next++
-	return utxo
+	a.utxoSource = NewUTXOSource(store, a.Address)
+	return a.utxoSource
 }
 
 // GetPublicInfo gets those parts of the Account that are safe
@@ -143,4 +120,84 @@ type AccountPublic struct {
 	PayoutAddress   string  `json:"payout_address"`
 	PayoutThreshold string  `json:"payout_threshold"`
 	PayoutFrequency string  `json:"payout_frequency"`
+}
+
+// Account UTXO Source used to find UTXOs to spend.
+type UTXOSource struct {
+	store   Store
+	account Address
+	unspent []UTXO
+	noMore  bool
+}
+
+type UTXOSet interface {
+	Includes(txID string, vOut int) bool
+}
+
+func NewUTXOSource(store Store, account Address) *UTXOSource {
+	return &UTXOSource{
+		store:   store,
+		account: account,
+	}
+}
+
+func (s *UTXOSource) fetchMoreUTXOs() error {
+	utxos, err := s.store.GetAllUnreservedUTXOs(s.account)
+	if err != nil {
+		return err
+	}
+	// FIXME: currently GetAllUnreservedUTXOs gets everything at once,
+	// but UTXOSource is designed to fetch a few UTXOs at a time.
+	s.noMore = true
+	s.unspent = append(s.unspent, utxos...)
+	if len(utxos) < 1 {
+		s.noMore = true // no more UTXOs in account.
+	}
+	return nil
+}
+
+func (s *UTXOSource) NextUnspentUTXO(taken UTXOSet) (UTXO, error) {
+	for {
+		for _, utxo := range s.unspent {
+			if utxo.ScriptType == scriptTypeP2PKH {
+				// Exclude UTXOs that have already been taken from the source.
+				if !taken.Includes(utxo.TxID, utxo.VOut) {
+					return utxo, nil // found matching UTXO.
+				}
+			}
+		}
+		if !s.noMore {
+			err := s.fetchMoreUTXOs()
+			if err != nil {
+				return UTXO{}, err // error fetching UTXOs.
+			}
+			continue
+		}
+		return UTXO{}, NewErr(InsufficientFunds, "not enough funds in account")
+	}
+}
+
+func (s *UTXOSource) FindUTXOLargerThan(amount CoinAmount, taken UTXOSet) (UTXO, error) {
+	for {
+		for _, utxo := range s.unspent {
+			if utxo.ScriptType == scriptTypeP2PKH {
+				// We can (presumably) spend this UTXO with one of our private keys,
+				// otherwise it wouldn't be in our account.
+				if utxo.Value.GreaterThanOrEqual(amount) {
+					// Exclude UTXOs that have already been taken from the source.
+					if !taken.Includes(utxo.TxID, utxo.VOut) {
+						return utxo, nil // found matching UTXO.
+					}
+				}
+			}
+		}
+		if !s.noMore {
+			err := s.fetchMoreUTXOs()
+			if err != nil {
+				return UTXO{}, err // error fetching UTXOs.
+			}
+			continue
+		}
+		return UTXO{}, NewErr(InsufficientFunds, "not enough funds in account")
+	}
 }

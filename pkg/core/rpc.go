@@ -93,7 +93,7 @@ func (l L1CoreRPC) request(method string, params []any, result any) error {
 	return nil
 }
 
-func (l L1CoreRPC) MakeAddress() (giga.Address, giga.Privkey, error) {
+func (l L1CoreRPC) MakeAddress(isTestNet bool) (giga.Address, giga.Privkey, error) {
 	return "", "", fmt.Errorf("not implemented")
 }
 
@@ -101,7 +101,7 @@ func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, i
 	return "", fmt.Errorf("not implemented")
 }
 
-func (l L1CoreRPC) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.NewTxn, error) {
+func (l L1CoreRPC) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.NewTxn, error) {
 	return giga.NewTxn{}, fmt.Errorf("not implemented")
 }
 
@@ -143,6 +143,6 @@ func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	return
 }
 
-func (l L1CoreRPC) Send(txn giga.NewTxn) error {
+func (l L1CoreRPC) Send(txnHex string) error {
 	return fmt.Errorf("not implemented")
 }

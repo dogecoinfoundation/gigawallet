@@ -7,12 +7,15 @@ import (
 type ErrorCode string
 
 const (
-	BadRequest    ErrorCode = "bad-request"
-	NotAvailable  ErrorCode = "not-available"
-	NotFound      ErrorCode = "not-found"
-	AlreadyExists ErrorCode = "already-exists"
-	DBConflict    ErrorCode = "db-conflict"
-	UnknownError  ErrorCode = "unknown-error"
+	BadRequest        ErrorCode = "bad-request"
+	NotAvailable      ErrorCode = "not-available"
+	NotFound          ErrorCode = "not-found"
+	AlreadyExists     ErrorCode = "already-exists"
+	L1Error           ErrorCode = "libdoge-error"
+	InvalidTxn        ErrorCode = "invalid-txn"
+	InsufficientFunds ErrorCode = "insufficient-funds"
+	DBConflict        ErrorCode = "db-conflict"
+	UnknownError      ErrorCode = "unknown-error"
 )
 
 type ErrorInfo struct {
