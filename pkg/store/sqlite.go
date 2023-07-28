@@ -107,6 +107,9 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 	if err != nil {
 		return SQLiteStore{}, dbErr(err, "opening database")
 	}
+	// limit concurrent access until we figure out a way to start transactions
+	// with the BEGIN CONCURRENT statement in Go.
+	db.SetMaxOpenConns(1)
 	// WAL mode provides more concurrency
 	_, err = db.Exec("PRAGMA journal_mode=WAL")
 	if err != nil {

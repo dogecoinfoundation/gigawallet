@@ -246,23 +246,20 @@ func (c *ChainFollower) followChainToTip(pos ChainPos) ChainPos {
 }
 
 func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
-	// Within a transaction, follow the chain forwards up to BATCH_SIZE blocks.
-	// If we encounter a fork, commit progress then roll back to the fork-point.
+	// 1. Follow the chain forwards up to BATCH_SIZE blocks.
+	// If we encounter a fork, stop and take note of the fork-point as well.
+	// Do all this before we start a database transaction, because we need to keep
+	// transactions as short-running as possible to avoid commit conflicts.
 	var startPos ChainPos = pos
 	var rollbackFrom string = ""
 	var blockCount int = 0
-	affectedAcconts := make(map[string]any)
-	tx := c.beginStoreTxn()
+	var changes []UTXOChange
 	for pos.NextBlockHash != "" {
 		//log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
 		block := c.fetchBlock(pos.NextBlockHash)
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
-			if !c.processBlock(tx, block, affectedAcconts) {
-				// Unable to process the block (error already logged) - roll back.
-				tx.Rollback()
-				return startPos
-			}
+			changes = c.processBlock(block, changes)
 			// Progress has been made.
 			pos = ChainPos{block.Hash, block.Height, block.NextBlockHash}
 			blockCount++
@@ -278,51 +275,91 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 			break
 		}
 	}
+	// 2. Inside a database transaction,
+	// Apply each of the UTXO changes we found in the set of blocks above.
 	if blockCount > 0 {
-		// Confirm UTXOs as a result of accepting this block.
-		// This populates the `spendable_height` field in UTXOs with the current BlockHeight,
-		// which flags the UTXOs as spendable by the owner account (we don't allow spending
-		// UTXOs in not-yet-confirmed transactions; we treat those as "incoming balance.")
-		utxoAccounts, err := tx.ConfirmUTXOs(c.confirmations, pos.BlockHeight)
-		if err != nil {
-			// Unable to complete block processing - roll back.
-			log.Println("ChainFollower: ConfirmUTXOs:", err)
-			c.sleepForRetry(err, 0)
-			tx.Rollback()
-			return startPos
+		// Transaction retry loop.
+		// This is here to save re-fetching all the blocks in the batch.
+		// However, eventually we bail and retry the whole process (in case something else is wrong)
+		attempts := 10
+		for {
+			err := c.attemptToApplyChanges(changes, pos)
+			if err == nil {
+				break // success.
+			} else {
+				c.sleepForRetry(err, 0) // always delay.
+				attempts -= 1
+				if attempts > 0 {
+					continue // retry now.
+				} else {
+					return startPos // give up.
+				}
+			}
 		}
-		for _, acct := range utxoAccounts {
-			affectedAcconts[acct] = nil // set-insert.
-		}
-		// Increment the chain-seq number on all affected accounts.
-		// This is used by BalanceKeeper to send balance-change events.
-		uniqueAffected := mapKeys(affectedAcconts)
-		err = tx.IncChainSeqForAccounts(uniqueAffected)
-		if err != nil {
-			// Unable to complete block processing - roll back.
-			log.Println("ChainFollower: IncChainSeqForAccounts:", err)
-			c.sleepForRetry(err, 0)
-			tx.Rollback()
-			return startPos
-		}
-		// Report affected accounts in the log (useful for now)
-		for _, acct := range uniqueAffected {
-			log.Println("ChainFollower: account was affected:", acct)
-		}
-		// We have made forward progress: commit the transaction.
-		if !c.commitChainState(tx, pos) {
-			// Unable to commit forward progress - roll back.
-			return startPos
-		}
-	} else {
-		// No progress made: no need to commit the transaction.
-		tx.Rollback()
 	}
+	// 3. If a fork-point was found above, roll back chainstate to that point.
 	if rollbackFrom != "" {
-		// We found an off-chain block, so also need to roll back.
 		pos = c.rollBackChainState(rollbackFrom)
 	}
 	return pos
+}
+
+func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, pos ChainPos) error {
+	affectedAcconts := make(map[string]any)
+	tx := c.beginStoreTxn()
+	err := c.applyUTXOChanges(tx, changes, affectedAcconts)
+	if err != nil {
+		// Unable to complete block processing (already logged) - roll back.
+		tx.Rollback()
+		return err // retry.
+	}
+	// Confirm UTXOs as a result of accepting this block.
+	// This populates the `spendable_height` field in UTXOs with the current BlockHeight,
+	// which flags the UTXOs as spendable by the owner account (we don't allow spending
+	// UTXOs in not-yet-confirmed transactions; we treat those as "incoming balance.")
+	utxoAccounts, err := tx.ConfirmUTXOs(c.confirmations, pos.BlockHeight)
+	if err != nil {
+		// Unable to complete block processing - roll back.
+		log.Println("ChainFollower: ConfirmUTXOs:", err)
+		tx.Rollback()
+		return err // retry.
+	}
+	for _, acct := range utxoAccounts {
+		affectedAcconts[acct] = nil // set-insert.
+	}
+	// Increment the chain-seq number on all affected accounts.
+	// This is used by BalanceKeeper to send balance-change events.
+	uniqueAffected := mapKeys(affectedAcconts)
+	err = tx.IncChainSeqForAccounts(uniqueAffected)
+	if err != nil {
+		// Unable to complete block processing - roll back.
+		log.Println("ChainFollower: IncChainSeqForAccounts:", err)
+		tx.Rollback()
+		return err // retry.
+	}
+	// Report affected accounts in the log (useful for now)
+	for _, acct := range uniqueAffected {
+		log.Println("ChainFollower: account was affected:", acct)
+	}
+	// We have made forward progress:
+	// Update the Best Block in the database (checkpoint for restart)
+	log.Println("ChainFollower: commiting chain state:", pos.BlockHash, pos.BlockHeight)
+	err = tx.UpdateChainState(giga.ChainState{
+		BestBlockHash:   pos.BlockHash,
+		BestBlockHeight: pos.BlockHeight,
+	}, false)
+	if err != nil {
+		log.Println("ChainFollower: UpdateChainState:", err)
+		tx.Rollback()
+		return err // retry.
+	}
+	// Commit the entire transaction with all changes in the batch.
+	err = tx.Commit()
+	if err != nil {
+		log.Println("ChainFollower: cannot commit DB transaction:", err)
+		return err // retry.
+	}
+	return nil
 }
 
 func mapKeys(m map[string]any) []string {
@@ -396,6 +433,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
+		// Commit the entire set of changes transactionally.
 		err = tx.Commit()
 		if err != nil {
 			log.Println("ChainFollower: cannot commit DB transaction:", err)
@@ -406,30 +444,71 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 	}
 }
 
-func (c *ChainFollower) commitChainState(tx giga.StoreTransaction, pos ChainPos) (committed bool) {
-	// Update Best Block in the database (checkpoint for restart)
-	log.Println("ChainFollower: commiting chain state:", pos.BlockHash, pos.BlockHeight)
-	err := tx.UpdateChainState(giga.ChainState{
-		BestBlockHash:   pos.BlockHash,
-		BestBlockHeight: pos.BlockHeight,
-	}, false)
-	if err != nil {
-		tx.Rollback()
-		log.Println("ChainFollower: UpdateChainState:", err)
-		c.sleepForRetry(err, 0)
-		return false // retry.
-	}
-	// Commit the entire transaction with all changes in the batch.
-	err = tx.Commit()
-	if err != nil {
-		log.Println("ChainFollower: cannot commit DB transaction:", err)
-		c.sleepForRetry(err, 0)
-		return false // retry.
-	}
-	return true // committed.
+// Record UTXO changes found in blocks for transactional commit.
+type UTXOTag int
+
+const (
+	utxoTagNew = iota
+	utxoTagSpent
+)
+
+type UTXOChange struct {
+	Tag        UTXOTag         // all
+	TxID       string          // new, spent
+	VOut       int64           // new, spent
+	Height     int64           // new, spent
+	Value      giga.CoinAmount // new
+	ScriptType giga.ScriptType // new
+	PKHAddress giga.Address    // new
 }
 
-func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlock, affectedAcconts map[string]any) bool {
+func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTXOChange, affectedAcconts map[string]any) error {
+	for _, utxo := range changes {
+		switch utxo.Tag {
+		case utxoTagNew:
+			// Use an address-to-account index (utxo_account_i) to find the account.
+			accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(utxo.PKHAddress)
+			if err == nil {
+				err = tx.CreateUTXO(giga.NewUTXO{
+					TxID:        utxo.TxID,
+					VOut:        utxo.VOut,
+					Value:       utxo.Value,
+					ScriptType:  utxo.ScriptType,
+					PKHAddress:  utxo.PKHAddress,
+					AccountID:   accountID,
+					KeyIndex:    keyIndex,
+					IsInternal:  isInternal,
+					BlockHeight: utxo.Height,
+				})
+				if err != nil {
+					log.Println("ChainFollower: CreateUTXO:", err, utxo.TxID, utxo.VOut)
+					return err // retry.
+				}
+				affectedAcconts[string(accountID)] = nil // add to set.
+			} else {
+				if giga.IsNotFoundError(err) {
+					// log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
+				} else {
+					log.Println("ChainFollower: FindAccountForAddress:", err, utxo.PKHAddress)
+					return err // retry.
+				}
+			}
+		case utxoTagSpent:
+			accountID, _, err := tx.MarkUTXOSpent(utxo.TxID, utxo.VOut, utxo.Height)
+			if err != nil {
+				log.Println("ChainFollower: MarkUTXOSpent:", err, utxo.TxID, utxo.VOut)
+				return err // retry.
+			}
+			if accountID != "" {
+				log.Println("ChainFollower: marking UTXO spent:", utxo.TxID, utxo.VOut, utxo.Height)
+				affectedAcconts[accountID] = nil // add to set.
+			}
+		}
+	}
+	return nil // success.
+}
+
+func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange) []UTXOChange {
 	log.Println("ChainFollower: processing block", block.Hash, block.Height)
 	// Insert entirely-new UTXOs that don't exist in the database.
 	for _, txn_id := range block.Tx {
@@ -440,16 +519,12 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 				// Mark this UTXO as spent (at this block height)
 				// • Note: a Txn cannot spend its own outputs (but it can spend outputs from previous Txns in the same block)
 				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
-				accountID, _, err := tx.MarkUTXOSpent(vin.TxID, vin.VOut, block.Height)
-				if err != nil {
-					log.Println("ChainFollower: MarkUTXOSpent:", err, vin.TxID, vin.VOut)
-					c.sleepForRetry(err, 0)
-					return false // retry.
-				}
-				if accountID != "" {
-					log.Println("ChainFollower: marking UTXO spent:", vin.TxID, vin.VOut, block.Height)
-					affectedAcconts[accountID] = nil // insert in affectedAcconts.
-				}
+				changes = append(changes, UTXOChange{
+					Tag:    utxoTagSpent,
+					TxID:   vin.TxID,
+					VOut:   vin.VOut,
+					Height: block.Height,
+				})
 			}
 		}
 		for _, vout := range txn.VOut {
@@ -464,35 +539,15 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 				// These script-types always contain a single address.
 				// FIXME: re-encode p2pk [and p2sh] as Addresses in a consistent format.
 				pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
-				// Use an address-to-account index (utxo_account_i) to find the account.
-				accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(pkhAddress)
-				if err != nil {
-					if giga.IsNotFoundError(err) {
-						// log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
-					} else {
-						log.Println("ChainFollower: FindAccountForAddress:", err, pkhAddress)
-						c.sleepForRetry(err, 0)
-						return false // retry.
-					}
-				} else {
-					tx.CreateUTXO(giga.NewUTXO{
-						TxID:        txn_id,
-						VOut:        vout.N,
-						Value:       vout.Value,
-						ScriptType:  scriptType,
-						PKHAddress:  pkhAddress,
-						AccountID:   accountID,
-						KeyIndex:    keyIndex,
-						IsInternal:  isInternal,
-						BlockHeight: block.Height,
-					})
-					affectedAcconts[string(accountID)] = nil // insert in affectedAcconts.
-					if err != nil {
-						log.Println("ChainFollower: CreateUTXO:", err, txn_id, vout.N)
-						c.sleepForRetry(err, 0)
-						return false // retry.
-					}
-				}
+				changes = append(changes, UTXOChange{
+					Tag:        utxoTagNew,
+					TxID:       txn_id,
+					VOut:       vout.N,
+					Value:      vout.Value,
+					ScriptType: scriptType,
+					PKHAddress: pkhAddress,
+					Height:     block.Height,
+				})
 			} else if len(vout.ScriptPubKey.Addresses) < 1 {
 				log.Println("ChainFollower: skipping no-address vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
 			} else {
@@ -500,7 +555,7 @@ func (c *ChainFollower) processBlock(tx giga.StoreTransaction, block giga.RpcBlo
 			}
 		}
 	}
-	return true
+	return changes
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
