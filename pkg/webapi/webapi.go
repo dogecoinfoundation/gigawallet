@@ -43,6 +43,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 
 		// GET /account/:foreignID -> { account } return an account
 		mux.GET("/account/:foreignID", t.getAccount)
+		mux.GET("/account/:foreignID/balance", t.getAccountBalance)
 
 		// POST {invoice} /account/:foreignID/invoice/ -> { invoice } create new invoice
 		mux.POST("/account/:foreignID/invoice/", t.createInvoice)
@@ -379,6 +380,21 @@ func (t WebAPI) getAccount(w http.ResponseWriter, r *http.Request, p httprouter.
 		return
 	}
 	sendResponse(w, acc)
+}
+
+func (t WebAPI) getAccountBalance(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the foreignID is a 3rd-party ID for the account
+	id := p.ByName("foreignID")
+	if id == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	bal, err := t.api.CalculateBalance(id)
+	if err != nil {
+		sendError(w, "CalculateBalance", err)
+		return
+	}
+	sendResponse(w, bal)
 }
 
 type DecodeTxnRequest struct {
