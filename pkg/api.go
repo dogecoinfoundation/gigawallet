@@ -2,7 +2,6 @@ package giga
 
 import (
 	"fmt"
-	"log"
 )
 
 type API struct {
@@ -176,14 +175,19 @@ func (a API) GetAccount(foreignID string) (AccountPublic, error) {
 	if err != nil {
 		return AccountPublic{}, err
 	}
+	return acc.GetPublicInfo(), nil
+}
+
+func (a API) CalculateBalance(foreignID string) (AccountBalance, error) {
+	acc, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return AccountBalance{}, err
+	}
 	bal, err := a.Store.CalculateBalance(acc.Address)
 	if err != nil {
-		return AccountPublic{}, err
+		return AccountBalance{}, err
 	}
-	log.Println("GetAccount: incoming balance:", bal.IncomingBalance)
-	log.Println("GetAccount: current balance:", bal.CurrentBalance)
-	log.Println("GetAccount: outgoing balance:", bal.OutgoingBalance)
-	return acc.GetPublicInfo(), nil
+	return bal, nil
 }
 
 // Update any of the 'settings' fields on an Account
