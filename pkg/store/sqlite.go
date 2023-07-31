@@ -197,9 +197,9 @@ func getAccountCommon(tx Queryable, accountKey string, isForeignKey bool) (giga.
 
 func calculateBalanceCommon(tx Queryable, accountID giga.Address) (bal giga.AccountBalance, err error) {
 	row := tx.QueryRow(`
-SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
-COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0),
-COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address="D7fHSKszFCwkmSTB8ioUguXkdqKMY9v9Py"),0)`, accountID)
+SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address = ?),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address = ?),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address = ?),0)`, accountID, accountID, accountID)
 	err = row.Scan(&bal.IncomingBalance, &bal.CurrentBalance, &bal.OutgoingBalance)
 	if err != nil {
 		return giga.AccountBalance{}, dbErr(err, "CalculateBalance: row.Scan")
