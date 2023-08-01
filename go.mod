@@ -10,11 +10,13 @@ require (
 	github.com/pebbe/zmq4 v1.2.9
 	github.com/shopspring/decimal v1.3.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	github.com/tjstebbing/conductor v1.0.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
 require (
+	github.com/btcsuite/golangcrypto v0.0.0-20150304025918-53f62d9b43e8 // indirect
+	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	golang.org/x/crypto v0.11.0 // indirect
 	gopkg.in/yaml.v2 v2.2.2 // indirect
 )
