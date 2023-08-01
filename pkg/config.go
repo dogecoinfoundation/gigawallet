@@ -58,8 +58,14 @@ type NodeConfig struct {
 }
 
 type WebAPIConfig struct {
-	Port string
-	Bind string // optional interface IP address
+	// Admin API
+	AdminPort string
+	AdminBind string // optional interface IP address
+
+	// Public API
+	PubPort       string
+	PubBind       string // optional interface IP address
+	PubAPIRootURL string // ie: https://example.com/gigawallet
 }
 
 type StoreConfig struct {

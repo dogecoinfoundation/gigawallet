@@ -16,9 +16,6 @@ import (
 
 // WebAPI implements conductor.Service
 type WebAPI struct {
-	srv    *http.Server
-	bind   string
-	port   string
 	api    giga.API
 	config giga.Config
 }
@@ -27,51 +24,55 @@ type WebAPI struct {
 var _ conductor.Service = WebAPI{}
 
 func NewWebAPI(config giga.Config, api giga.API) (WebAPI, error) {
-	return WebAPI{bind: config.WebAPI.Bind, port: config.WebAPI.Port, api: api, config: config}, nil
+	return WebAPI{api: api, config: config}, nil
 }
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
-		mux := httprouter.New()
 
-		// Internal APIs
+		adminMux := httprouter.New() // Admin APIs
+		pubMux := httprouter.New()   // Public APIs
 
-		mux.POST("/admin/setsyncheight/:blockheight", t.setSyncHeight)
+		// Admin APIs
+
+		adminMux.POST("/admin/setsyncheight/:blockheight", t.setSyncHeight)
 
 		// POST { account } /account/:foreignID -> { account } upsert account
-		mux.POST("/account/:foreignID", t.upsertAccount)
+		adminMux.POST("/account/:foreignID", t.upsertAccount)
 
 		// GET /account/:foreignID -> { account } return an account
-		mux.GET("/account/:foreignID", t.getAccount)
-		mux.GET("/account/:foreignID/balance", t.getAccountBalance)
+		adminMux.GET("/account/:foreignID", t.getAccount)
+
+		// GET /account:foreignID/Balance -> { AccountBalance    Get the account balance
+		adminMux.GET("/account/:foreignID/balance", t.getAccountBalance)
 
 		// POST {invoice} /account/:foreignID/invoice/ -> { invoice } create new invoice
-		mux.POST("/account/:foreignID/invoice/", t.createInvoice)
-
-		// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
-		mux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
-
-		mux.GET("/account/:foreignID/invoice/:invoiceID/qr.png", t.getAccountInvoiceQR)
-
-		mux.GET("/account/:foreignID/invoice/:invoiceID/connect", t.getAccountInvoiceConnect)
-
-		// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
-		mux.GET("/invoice/:invoiceID", t.getInvoice)
+		adminMux.POST("/account/:foreignID/invoice/", t.createInvoice)
 
 		// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
-		mux.GET("/account/:foreignID/invoices", t.listInvoices)
+		adminMux.GET("/account/:foreignID/invoices", t.listInvoices)
+
+		// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
+		adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
 
 		// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
-		mux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
+		adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
 
 		// POST /decode-txn -> test decoding
-		mux.POST("/decode-txn", t.decodeTxn)
+		adminMux.POST("/decode-txn", t.decodeTxn)
 
 		// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
 
 		// POST { amount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
 
 		// External APIs
+
+		// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
+		pubMux.GET("/invoice/:invoiceID", t.getInvoice)
+
+		pubMux.GET("/invoice/:invoiceID/qr.png", t.getInvoiceQR)
+
+		pubMux.GET("/invoice/:invoiceID/connect", t.getInvoiceConnect)
 
 		// GET /invoice/:invoiceID/connect -> { dogeConnect json } get the dogeConnect JSON for an invoice
 
@@ -83,16 +84,28 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 
 		// POST { dogeConnect payment } /invoice/:invoiceID/pay -> { status } pay an invoice with a dogeConnect response
 
-		t.srv = &http.Server{Addr: t.bind + ":" + t.port, Handler: mux}
-		fmt.Printf("listening on %s:%s", t.bind, t.port)
+		// Start the admin server
+		adminServer := &http.Server{Addr: t.config.WebAPI.AdminBind + ":" + t.config.WebAPI.AdminPort, Handler: adminMux}
+		fmt.Printf("\nAdmin API listening on %s:%s", t.config.WebAPI.AdminBind, t.config.WebAPI.AdminPort)
 		go func() {
-			if err := t.srv.ListenAndServe(); err != http.ErrServerClosed {
-				log.Fatalf("HTTP server ListenAndServe: %v", err)
+			if err := adminServer.ListenAndServe(); err != http.ErrServerClosed {
+				log.Fatalf("HTTP server admin ListenAndServe: %v", err)
 			}
 		}()
+
+		// Start the public server
+		pubServer := &http.Server{Addr: t.config.WebAPI.PubBind + ":" + t.config.WebAPI.PubPort, Handler: pubMux}
+		fmt.Printf("\nPublic API listening on %s:%s", t.config.WebAPI.PubBind, t.config.WebAPI.PubPort)
+		go func() {
+			if err := pubServer.ListenAndServe(); err != http.ErrServerClosed {
+				log.Fatalf("HTTP server public ListenAndServe: %v", err)
+			}
+		}()
+
 		started <- true
 		ctx := <-stop
-		t.srv.Shutdown(ctx)
+		adminServer.Shutdown(ctx)
+		pubServer.Shutdown(ctx)
 		stopped <- true
 	}()
 	return nil
@@ -175,9 +188,9 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		sendError(w, "GetAccount", err)
 		return
 	}
-	invoice, err := t.api.GetInvoice(giga.Address(id)) // TODO: need a "not found" error-code
+	invoice, err := t.api.GetInvoice(giga.Address(id))
 	if err != nil {
-		sendError(w, "GetInvoice", err)
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
 		return
 	}
 	if invoice.Account != acc.Address {
@@ -187,31 +200,16 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 	sendResponse(w, invoice)
 }
 
-func (t WebAPI) getAccountInvoiceConnect(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	// the foreignID is a 3rd-party ID for the account
-	foreignID := p.ByName("foreignID")
-	if foreignID == "" {
-		sendBadRequest(w, "missing account ID in URL")
-		return
-	}
+func (t WebAPI) getInvoiceConnect(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the invoiceID is the address of the invoice
 	id := p.ByName("invoiceID")
 	if id == "" {
 		sendBadRequest(w, "missing invoice ID")
 		return
 	}
-	acc, err := t.api.GetAccount(foreignID)
+	invoice, err := t.api.GetInvoice(giga.Address(id))
 	if err != nil {
-		sendError(w, "GetAccount", err)
-		return
-	}
-	invoice, err := t.api.GetInvoice(giga.Address(id)) // TODO: need a "not found" error-code
-	if err != nil {
-		sendError(w, "GetInvoice", err)
-		return
-	}
-	if invoice.Account != acc.Address {
-		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice")
 		return
 	}
 
@@ -231,35 +229,22 @@ func (t WebAPI) getAccountInvoiceConnect(w http.ResponseWriter, r *http.Request,
 	sendResponse(w, envelope)
 }
 
-func (t WebAPI) getAccountInvoiceQR(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+func (t WebAPI) getInvoiceQR(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the foreignID is a 3rd-party ID for the account
-	foreignID := p.ByName("foreignID")
-	if foreignID == "" {
-		sendBadRequest(w, "missing account ID in URL")
-		return
-	}
 	// the invoiceID is the address of the invoice
 	id := p.ByName("invoiceID")
 	if id == "" {
 		sendBadRequest(w, "missing invoice ID")
 		return
 	}
-	acc, err := t.api.GetAccount(foreignID)
+	invoice, err := t.api.GetInvoice(giga.Address(id))
 	if err != nil {
-		sendError(w, "GetAccount", err)
-		return
-	}
-	invoice, err := t.api.GetInvoice(giga.Address(id)) // TODO: need a "not found" error-code
-	if err != nil {
-		sendError(w, "GetInvoice", err)
-		return
-	}
-	if invoice.Account != acc.Address {
-		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice")
 		return
 	}
 
-	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=0&cxt=%s", string(invoice.ID), url.QueryEscape("https://example.com/")), 256)
+	connectURL := fmt.Sprintf("%s/invoice/%s/connect", t.config.WebAPI.PubAPIRootURL, id)
+	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=0&cxt=%s", string(invoice.ID), url.QueryEscape(connectURL)), 256)
 	w.Header().Set("Content-Type", "image/png")
 	//  Maxage 900 (15 minutes) is because this image should not
 	//  change at all for a given invoice and we expect most invoices
