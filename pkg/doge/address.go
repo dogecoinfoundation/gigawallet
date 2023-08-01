@@ -4,8 +4,8 @@ func Hash160(bytes []byte) []byte {
 	return RIPEMD160(Sha256(bytes))
 }
 
-func PubKeyToP2PKH(key PubKeyCompressed, chain *ChainParams) string {
-	if len(key) != PubKeyCompressedLen {
+func PubKeyToP2PKH(key ECPubKeyCompressed, chain *ChainParams) string {
+	if len(key) != ECPubKeyCompressedLen {
 		panic("PubKeyToP2PKH: wrong pubkey length")
 	}
 	payload := Hash160(key[:])
