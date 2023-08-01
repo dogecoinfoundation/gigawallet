@@ -24,7 +24,7 @@ type Invoice struct {
 func (i *Invoice) CalcTotal() CoinAmount {
 	total := ZeroCoins
 	for _, item := range i.Items {
-		total = total.Add(decimal.NewFromInt(int64(item.Quantity)).Mul(item.Price))
+		total = total.Add(decimal.NewFromInt(int64(item.Quantity)).Mul(item.Value))
 	}
 	return total
 }
@@ -44,7 +44,7 @@ type Item struct {
 	Name        string          `json:"name"`
 	SKU         string          `json:"sku"`
 	Description string          `json:"description"`
-	Price       decimal.Decimal `json:"price"`
+	Value       decimal.Decimal `json:"value"`
 	Quantity    int             `json:"quantity"`
 	ImageLink   string          `json:"image_link"`
 }
@@ -62,9 +62,20 @@ func (i *Invoice) Validate() error {
 			return errors.New("Item quantity should be greater than zero")
 		}
 
-		// Price should be greater than zero
-		if item.Price.LessThanOrEqual(decimal.Zero) {
-			return errors.New("Item price should be greater than zero")
+		// Value should be greater than zero, unless type is discount
+		if item.Type == "discount" {
+			if item.Value.GreaterThanOrEqual(decimal.Zero) {
+				return errors.New("Discount price should be less than zero")
+			}
+		} else {
+			if item.Value.LessThanOrEqual(decimal.Zero) {
+				return errors.New("Item price should be greater than zero")
+			}
+		}
+
+		// validate that the total is more than zero
+		if i.CalcTotal().LessThanOrEqual(decimal.Zero) {
+			return errors.New("The total must be greater than zero")
 		}
 
 		// Validate item type

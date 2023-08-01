@@ -65,7 +65,7 @@ func InvoiceToConnectRequestEnvelope(i Invoice, conf Config) (ConnectEnvelope, e
 			Name:        item.Name,
 			Description: "Description",
 			UnitCount:   item.Quantity,
-			UnitCost:    item.Price,
+			UnitCost:    item.Value,
 		})
 	}
 	// serialise to JSON then base64 the request
