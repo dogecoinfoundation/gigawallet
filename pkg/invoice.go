@@ -65,11 +65,11 @@ func (i *Invoice) Validate() error {
 		// Value should be greater than zero, unless type is discount
 		if item.Type == "discount" {
 			if item.Value.GreaterThanOrEqual(decimal.Zero) {
-				return errors.New("Discount price should be less than zero")
+				return errors.New("Discount value should be less than zero")
 			}
 		} else {
 			if item.Value.LessThanOrEqual(decimal.Zero) {
-				return errors.New("Item price should be greater than zero")
+				return errors.New("Item value should be greater than zero")
 			}
 		}
 

@@ -46,11 +46,11 @@ func adminAPIURL(c giga.Config, s SubCommandArgs, path string) (string, error) {
 	if s.RemoteAdminServer != "" {
 		base = s.RemoteAdminServer
 	} else {
-		host := c.WebAPI.Bind
+		host := c.WebAPI.AdminBind
 		if host == "" {
 			host = "localhost"
 		}
-		base = fmt.Sprintf("http://%s:%s/", host, c.WebAPI.Port)
+		base = fmt.Sprintf("http://%s:%s/", host, c.WebAPI.AdminPort)
 	}
 	u, err := url.Parse(base)
 	if err != nil {

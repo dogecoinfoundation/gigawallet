@@ -1,8 +1,11 @@
 # This config is meant for local development only
 
 [WebAPI]
-  bind = "localhost"  # avoids macOS firewall confirmation!
-  port = "8081"
+  adminbind = "localhost"  # avoids macOS firewall confirmation!
+  adminport = "8081"
+  pubbind = "localhost"  # avoids macOS firewall confirmation!
+  pubport = "8082"
+  pubapirooturl = "http://localhost:8082"
 
 [gigawallet]
   network = "mainnet"  # which dogecoind to connect to

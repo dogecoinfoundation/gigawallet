@@ -29,8 +29,11 @@ func main() {
 			RejectionsNeeded:    12,
 		},
 		WebAPI: giga.WebAPIConfig{
-			Port: "8080",
-			Bind: "localhost",
+			AdminPort:     "8081",
+			AdminBind:     "localhost",
+			PubPort:       "8082",
+			PubBind:       "localhost",
+			PubAPIRootURL: "http://localhost:8082",
 		},
 		Store: giga.StoreConfig{
 			DBFile: "gigawallet.db",
@@ -126,8 +129,10 @@ func applyFlags(config *giga.Config, subs *SubCommandArgs) {
 	flag.StringVar(&config.Gigawallet.ServiceKeyHash, "service-key-hash", config.Gigawallet.ServiceKeyHash, "Service key hash")
 	flag.StringVar(&config.Gigawallet.Network, "network", config.Gigawallet.Network, "Network")
 	flag.IntVar(&config.Gigawallet.ConfirmationsNeeded, "confirmations-needed", config.Gigawallet.ConfirmationsNeeded, "Confirmations needed")
-	flag.StringVar(&config.WebAPI.Port, "webapi-port", config.WebAPI.Port, "Web API port")
-	flag.StringVar(&config.WebAPI.Bind, "webapi-bind", config.WebAPI.Bind, "Web API bind")
+	flag.StringVar(&config.WebAPI.AdminPort, "admin-port", config.WebAPI.AdminPort, "Admin API port")
+	flag.StringVar(&config.WebAPI.AdminBind, "admin-bind", config.WebAPI.AdminBind, "Admin API bind")
+	flag.StringVar(&config.WebAPI.PubPort, "pub-port", config.WebAPI.PubPort, "Pub API port")
+	flag.StringVar(&config.WebAPI.PubBind, "pub-bind", config.WebAPI.PubBind, "Pub API bind")
 	flag.StringVar(&config.Store.DBFile, "store-db-file", config.Store.DBFile, "Store DB file")
 	// Extra arguments for various subcommands
 	flag.StringVar(&subs.RemoteAdminServer, "remote-admin-server", "", "http/s base URL for a remote GigaWallet server to command")
