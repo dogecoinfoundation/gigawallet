@@ -48,10 +48,10 @@ func ChainFromTestNetFlag(isTestNet bool) *ChainParams {
 }
 
 func ChainFromKeyBits(keyType KeyBits) *ChainParams {
-	if keyType&mainNetDoge != 0 {
+	if (keyType & mainNetDoge) != 0 {
 		return &DogeMainNetChain
 	}
-	if keyType&mainNetBtc != 0 {
+	if (keyType & mainNetBtc) != 0 {
 		return &BitcoinMainChain
 	}
 	return &DogeTestNetChain // fallback

@@ -16,7 +16,7 @@ type Bip32Key struct {
 }
 
 func (key *Bip32Key) GetECPrivKey() ([]byte, error) {
-	if key.keyType&keyBip32Priv != 0 {
+	if (key.keyType & keyBip32Priv) == 0 {
 		return nil, fmt.Errorf("Bip32Key is not a private key")
 	}
 	pk := [ECPrivKeyLen]byte{}
@@ -27,7 +27,7 @@ func (key *Bip32Key) GetECPrivKey() ([]byte, error) {
 }
 
 func (key *Bip32Key) GetECPubKey() []byte {
-	if key.keyType&keyBip32Priv != 0 {
+	if (key.keyType & keyBip32Priv) != 0 {
 		// contains a private key.
 		return ECPubKeyFromECPrivKey(key.pub_priv_key[1:33])
 	} else {
@@ -71,10 +71,13 @@ func DecodeBip32WIF(extendedKey string, chain *ChainParams) (*Bip32Key, error) {
 		panic("DecodeBip32WIF: wrong key length")
 	}
 	key.keyType = KeyBitsForChain(chain)
-	if key.pub_priv_key[0] == 0x00 {
+	key_pre := key.pub_priv_key[0]
+	if key_pre == 0x00 {
 		key.keyType |= keyBip32Priv
-	} else {
+	} else if key_pre == 0x02 || key_pre == 0x03 {
 		key.keyType |= keyBip32Pub
+	} else {
+		return nil, fmt.Errorf("DecodeBip32WIF: invalid key prefix byte")
 	}
 	return &key, nil
 }
