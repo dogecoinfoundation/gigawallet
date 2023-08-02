@@ -56,7 +56,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
 
 		// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
-		mux.POST("/account/:foreignID/pay", t.payToAddress)
+		adminMux.POST("/account/:foreignID/pay", t.payToAddress)
 
 		// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 		adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
