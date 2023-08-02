@@ -69,6 +69,10 @@ func KeyBitsForChain(chain *ChainParams) KeyBits {
 	return bits
 }
 
+// CAUTION: the result is a best-guess based on the 'version byte' in
+// the decoded WIF data. Do not rely on the returned ChainParams alone
+// for validation: it will fall back on DogeTestNetChain for unknown
+// version bytes (so verify your version byte or bip32-prefix as well)
 func ChainFromWIFPrefix(bytes []byte, allowNonDoge bool) *ChainParams {
 	if len(bytes) == 0 {
 		return &DogeTestNetChain // fallback
