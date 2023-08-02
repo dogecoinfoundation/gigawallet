@@ -15,9 +15,9 @@ import (
 // Go binding for the libdogecoin project, however to begin with
 // will be implemented via RPC/ZMQ comms to the Dogecoin Core APIs.
 type L1 interface {
-	MakeAddress() (Address, Privkey, error)
+	MakeAddress(isTestNet bool) (Address, Privkey, error)
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
-	MakeTransaction(amount CoinAmount, UTXOs []UTXO, payTo Address, fee CoinAmount, change Address, private_key Privkey) (NewTxn, error)
+	MakeTransaction(inputs []UTXO, outputs []NewTxOut, fee CoinAmount, change Address, private_key_wif Privkey) (NewTxn, error)
 	DecodeTransaction(txnHex string) (RawTxn, error)
 	GetBlock(blockHash string) (RpcBlock, error)
 	GetBlockHeader(blockHash string) (RpcBlockHeader, error)
@@ -25,7 +25,7 @@ type L1 interface {
 	GetBestBlockHash() (string, error)
 	GetBlockCount() (int64, error)
 	GetTransaction(txnHash string) (RawTxn, error)
-	Send(NewTxn) error
+	Send(txnHex string) error
 	//SignMessage([]byte, Privkey) (string, error)
 }
 
@@ -38,6 +38,16 @@ var OneCoin = decimal.NewFromInt(1)                           // 1.0 DOGE
 var TxnFeePerKB = OneCoin.Div(decimal.NewFromInt(100))        // 0.01 DOGE
 var TxnFeePerByte = TxnFeePerKB.Div(decimal.NewFromInt(1000)) // since Core version 1.14.5
 var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
+
+// A new transaction (hex) from libdogecoin.
+type NewTxn struct {
+	TxnHex       string // Encoded Transaction in Hexadecimal format.
+	TxID         string // Transaction ID of the new transaction (tx hash)
+	TotalIn      CoinAmount
+	TotalOut     CoinAmount
+	FeeAmount    CoinAmount
+	ChangeAmount CoinAmount
+}
 
 // Dogecoin Script Types enum.
 // Inferred from ScriptPubKey scripts by pattern-matching the code (script templates)
@@ -79,32 +89,6 @@ func DecodeCoreRPCScriptType(coreRpcType string) ScriptType {
 	default:
 		return scriptTypeCustom
 	}
-}
-
-// UTXO is an Unspent Transaction Output, i.e. a prior payment into our Account.
-type UTXO struct {
-	Account       Address    // receiving account ID (by matching ScriptAddress against account's HD child keys)
-	TxnID         string     // is an output from this Txn ID
-	VOut          int        // is an output at this index in Txn
-	Status        string     // 'p' = receive pending; 'c' = receive confirmed; 's' = spent pending; 'x' = spent confirmed
-	Value         CoinAmount // value of the txn output in dogecoin
-	ScriptType    ScriptType // 'p2pkh' etc, see ScriptType constants
-	ScriptAddress Address    // the P2PKH address required to spend the txn output (extracted from the script code)
-}
-
-// UTXOIterator is used to iterate over UTXOs in the Account.
-type UTXOIterator interface {
-	hasNext() bool
-	getNext() UTXO
-}
-
-// NewTxn is a new Dogecoin Transaction being created by Gigawallet.
-type NewTxn struct {
-	TxnHex       string
-	TotalIn      CoinAmount
-	PayAmount    CoinAmount
-	FeeAmount    CoinAmount
-	ChangeAmount CoinAmount
 }
 
 // RawTxn is decoded from transaction hex data by L1/Core.

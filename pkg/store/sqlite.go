@@ -281,16 +281,18 @@ func listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit in
 }
 
 func getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []giga.UTXO, err error) {
+	// • spendable_height > 0    –– the UTXO Txn has been "confirmed" (included in CurrentBalance)
+	// • spending_height IS NULL –– the UTXO has not already been spent (not yet in OutgoingBalance)
 	rows_found := 0
-	rows, err := tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND status = 'c'", account)
+	rows, err := tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND spendable_height > 0 AND spending_height IS NULL", account)
 	if err != nil {
 		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
 	defer rows.Close()
 	for rows.Next() {
-		utxo := giga.UTXO{Account: account, Status: "c"}
+		utxo := giga.UTXO{Account: account}
 		var value string
-		err := rows.Scan(&utxo.TxnID, &utxo.VOut, &value, &utxo.ScriptType, &utxo.ScriptAddress)
+		err := rows.Scan(&utxo.TxID, &utxo.VOut, &value, &utxo.ScriptType, &utxo.ScriptAddress)
 		if err != nil {
 			return nil, dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
 		}

@@ -16,7 +16,7 @@ func NewL1Mock(config giga.Config) (L1Mock, error) {
 
 type L1Mock struct{}
 
-func (l L1Mock) MakeAddress() (giga.Address, giga.Privkey, error) {
+func (l L1Mock) MakeAddress(isTestNet bool) (giga.Address, giga.Privkey, error) {
 	return "mockAddress", "mockPrivkey", nil
 }
 
@@ -24,7 +24,7 @@ func (l L1Mock) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isIn
 	return "mockChildAddress", nil
 }
 
-func (l L1Mock) MakeTransaction(amount giga.CoinAmount, UTXOs []giga.UTXO, payTo giga.Address, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.NewTxn, error) {
+func (l L1Mock) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.NewTxn, error) {
 	return giga.NewTxn{}, fmt.Errorf("not implemented")
 }
 
@@ -56,6 +56,6 @@ func (l L1Mock) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1Mock) Send(txn giga.NewTxn) error {
+func (l L1Mock) Send(txnHex string) error {
 	return fmt.Errorf("not implemented")
 }

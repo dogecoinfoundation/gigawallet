@@ -130,7 +130,7 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 		}
 
 		// Account does not exist yet.
-		addr, priv, err := a.L1.MakeAddress()
+		addr, priv, err := a.L1.MakeAddress(false)
 		if err != nil {
 			return AccountPublic{}, NewErr(NotAvailable, "cannot create address: %v", err)
 		}
@@ -231,52 +231,86 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 	return pub, nil
 }
 
+func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Address) (NewTxn, error) {
+	account, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return NewTxn{}, err
+	}
+	if amount.LessThan(TxnDustLimit) {
+		return NewTxn{}, NewErr(BadRequest, "amount is too small - transaction will be rejected: %s", amount.String())
+	}
+	builder, err := NewTxnBuilder(&account, a.Store, a.L1)
+	if err != nil {
+		return NewTxn{}, err
+	}
+	err = builder.AddUTXOsUpToAmount(amount)
+	if err != nil {
+		return NewTxn{}, err
+	}
+	err = builder.AddOutput(payTo, amount)
+	if err != nil {
+		return NewTxn{}, err
+	}
+	err = builder.CalculateFee(ZeroCoins)
+	if err != nil {
+		return NewTxn{}, err
+	}
+	txn, err := builder.GetFinalTxn()
+	if err != nil {
+		return NewTxn{}, err
+	}
+
+	// TODO: submit the transaction to Core.
+	// TODO: store back the account (to save NextInternalKey; also call UpdatePoolAddresses)
+	// TODO: somehow reserve the UTXOs in the interim (prevent accidental double-spend)
+	//       until ChainTracker sees the Txn in a Block and calls MarkUTXOSpent.
+
+	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": amount})
+	return txn, nil
+}
+
 func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string, error) {
 	invoice, err := a.Store.GetInvoice(invoiceID)
 	if err != nil {
 		return "", err
 	}
-	payFrom, err := a.Store.GetAccount(accountID)
+	account, err := a.Store.GetAccount(accountID)
 	if err != nil {
 		return "", err
 	}
-	// chicken and egg problem: fee calculation requires transaction size,
-	// and transaction size depends on the number of UTXOs included...
-	// start with enough UTXOs to pay for at least 1 KB (1000 bytes) and,
-	// if the txn turns out bigger than the selected UTXOs can pay for,
-	// we'll add another UTXO and try again (note that we select enough
-	// UTXOs to pay for _at_least_ 1000 bytes, but may cover a lot more)
 	invoiceAmount := invoice.CalcTotal()
 	if invoiceAmount.LessThan(TxnDustLimit) {
 		return "", fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
 	}
-	feeGuess := TxnFeePerKB // TODO: use transaction size.
-	amountPlusFee := invoiceAmount.Add(feeGuess)
-	unspentUTXOs, err := payFrom.UnreservedUTXOs(a.Store)
-	if err != nil {
-		return "", err
-	}
-	txnInputs := chooseUTXOsToSpend(amountPlusFee, unspentUTXOs)
-	if txnInputs == nil {
-		return "", fmt.Errorf("insufficient funds in account: %s", accountID)
-	}
 	payTo := invoice.ID // pay-to Address is the ID
-	changeAddress, err := payFrom.NextChangeAddress(a.L1)
+
+	// Make a Txn to pay `invoiceAmount` from `account` to `payTo`
+	builder, err := NewTxnBuilder(&account, a.Store, a.L1)
 	if err != nil {
 		return "", err
 	}
-	// create a transaction to pay the invoice amount (plus fee)
-	// from the `payFrom` account, paying any change back to the `payFrom` account
-	txn, err := a.L1.MakeTransaction(invoiceAmount, txnInputs, payTo, feeGuess, changeAddress, payFrom.Privkey)
+	err = builder.AddUTXOsUpToAmount(invoiceAmount)
 	if err != nil {
 		return "", err
 	}
-	// TODO: adjust the fee based on txn size and make the Txn again?
-	// TODO: mark the chosen UTXOs as being spent by this Txn (which we must also track in the pay-from account)
-	// TODO: mark the change address as being used by this Txn (in the 'from' account)
-	// TODO: mark the pay-to address as being used by this Txn (in the 'to' account)
-	// TODO: submit the transaction to the mempool
-	// TODO: mark the transaction as 'in progress' in the DB (must affect both accounts)
+	err = builder.AddOutput(payTo, invoiceAmount)
+	if err != nil {
+		return "", err
+	}
+	err = builder.CalculateFee(ZeroCoins)
+	if err != nil {
+		return "", err
+	}
+	txn, err := builder.GetFinalTxn()
+	if err != nil {
+		return "", err
+	}
+
+	// TODO: submit the transaction to Core.
+	// TODO: store back the account (to save NextInternalKey; also call UpdatePoolAddresses)
+	// TODO: somehow reserve the UTXOs in the interim (prevent accidental double-spend)
+	//       until ChainTracker sees the Txn in a Block and calls MarkUTXOSpent.
+
 	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": invoiceAmount})
 	return txn.TxnHex, nil
 }
@@ -289,30 +323,4 @@ func (a API) SetSyncHeight(height int64) error {
 	}
 	a.follower.SendCommand(ReSyncChainFollowerCmd{BlockHash: hash})
 	return nil
-}
-
-// chooseUTXOsToSpend selects unspent UTXOs from the Account (Wallet)
-// that add up to some specified amount, [TODO: plus the transaction fees
-// for the UTXO inputs added by this function, which change the size of
-// the transaction as we add them.]
-// The UTXOIterator is assumed to be sorted in the order we want to
-// spend them by the Account/Wallet itself.
-func chooseUTXOsToSpend(minimumTotal CoinAmount, unspentUTXOs UTXOIterator) (selected []UTXO) {
-	remaining := minimumTotal
-	for unspentUTXOs.hasNext() {
-		utxo := unspentUTXOs.getNext()
-		if utxo.ScriptType == scriptTypeP2PKH {
-			// we can (presumably) spend this UTXO with one of our private keys,
-			// otherwise it wouldn't be in our wallet.
-			// XXX: should grow the minimumTotal by the post-signed UTXO "input" size
-			// each time we add a UTXO to the transaction here.
-			if utxo.Value.GreaterThanOrEqual(remaining) {
-				selected = append(selected, utxo)
-				return // up to and including this UTXO
-			} else {
-				remaining = remaining.Sub(utxo.Value)
-			}
-		}
-	}
-	return
 }
