@@ -15,6 +15,10 @@ type Bip32Key struct {
 	pub_priv_key [33]byte // public key or private key data (serP(K) for public keys, 0x00 || ser256(k) for private keys)
 }
 
+const (
+	SerializedBip32KeyLength = 4 + 1 + 4 + 4 + 32 + 33
+)
+
 func (key *Bip32Key) GetECPrivKey() ([]byte, error) {
 	if (key.keyType & keyBip32Priv) == 0 {
 		return nil, fmt.Errorf("Bip32Key is not a private key")
@@ -40,9 +44,15 @@ func (key *Bip32Key) GetECPubKey() []byte {
 	}
 }
 
-const (
-	SerializedBip32KeyLength = 4 + 1 + 4 + 4 + 32 + 33
-)
+func (key *Bip32Key) Clear() {
+	key.keyType = 0
+	key.version = 0
+	key.depth = 0
+	key.fingerprint = 0
+	key.child_number = 0
+	clear(key.chain_code[:])
+	clear(key.pub_priv_key[:])
+}
 
 // chain is optional, will auto-detect if nil.
 func DecodeBip32WIF(extendedKey string, chain *ChainParams) (*Bip32Key, error) {
@@ -51,6 +61,7 @@ func DecodeBip32WIF(extendedKey string, chain *ChainParams) (*Bip32Key, error) {
 		return nil, err
 	}
 	if len(data) != SerializedBip32KeyLength {
+		clear(data) // clear key for security.
 		return nil, fmt.Errorf("DecodeBip32WIF: not a bip32 extended key (wrong length)")
 	}
 	if chain == nil {
@@ -59,6 +70,7 @@ func DecodeBip32WIF(extendedKey string, chain *ChainParams) (*Bip32Key, error) {
 	var key Bip32Key
 	key.version = deser32(data[0:])
 	if key.version != chain.bip32_privkey_prefix && key.version != chain.bip32_pubkey_prefix {
+		clear(data) // clear key for security.
 		return nil, fmt.Errorf("DecodeBip32WIF: not a bip32 extended key (wrong prefix)")
 	}
 	key.depth = data[4]
@@ -77,8 +89,10 @@ func DecodeBip32WIF(extendedKey string, chain *ChainParams) (*Bip32Key, error) {
 	} else if key_pre == 0x02 || key_pre == 0x03 {
 		key.keyType |= keyBip32Pub
 	} else {
+		clear(data) // clear key for security.
 		return nil, fmt.Errorf("DecodeBip32WIF: invalid key prefix byte")
 	}
+	clear(data) // clear key for security.
 	return &key, nil
 }
 
