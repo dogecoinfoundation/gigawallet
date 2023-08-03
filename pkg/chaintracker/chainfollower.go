@@ -453,13 +453,14 @@ const (
 )
 
 type UTXOChange struct {
-	Tag        UTXOTag         // all
-	TxID       string          // new, spent
-	VOut       int64           // new, spent
-	Height     int64           // new, spent
-	Value      giga.CoinAmount // new
-	ScriptType giga.ScriptType // new
-	PKHAddress giga.Address    // new
+	Tag           UTXOTag         // all
+	TxID          string          // new, spent
+	VOut          int             // new, spent
+	Value         giga.CoinAmount // new
+	ScriptHex     string          // new
+	ScriptType    giga.ScriptType // new
+	ScriptAddress giga.Address    // new
+	Height        int64           // new, spent
 }
 
 func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTXOChange, affectedAcconts map[string]any) error {
@@ -467,18 +468,19 @@ func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTX
 		switch utxo.Tag {
 		case utxoTagNew:
 			// Use an address-to-account index (utxo_account_i) to find the account.
-			accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(utxo.PKHAddress)
+			accountID, keyIndex, isInternal, err := tx.FindAccountForAddress(utxo.ScriptAddress)
 			if err == nil {
-				err = tx.CreateUTXO(giga.NewUTXO{
-					TxID:        utxo.TxID,
-					VOut:        utxo.VOut,
-					Value:       utxo.Value,
-					ScriptType:  utxo.ScriptType,
-					PKHAddress:  utxo.PKHAddress,
-					AccountID:   accountID,
-					KeyIndex:    keyIndex,
-					IsInternal:  isInternal,
-					BlockHeight: utxo.Height,
+				err = tx.CreateUTXO(giga.UTXO{
+					TxID:          utxo.TxID,
+					VOut:          utxo.VOut,
+					Value:         utxo.Value,
+					ScriptHex:     utxo.ScriptHex,
+					ScriptType:    utxo.ScriptType,
+					ScriptAddress: utxo.ScriptAddress,
+					AccountID:     accountID,
+					KeyIndex:      keyIndex,
+					IsInternal:    isInternal,
+					BlockHeight:   utxo.Height,
 				})
 				if err != nil {
 					log.Println("ChainFollower: CreateUTXO:", err, utxo.TxID, utxo.VOut)
@@ -489,7 +491,7 @@ func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTX
 				if giga.IsNotFoundError(err) {
 					// log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
 				} else {
-					log.Println("ChainFollower: FindAccountForAddress:", err, utxo.PKHAddress)
+					log.Println("ChainFollower: FindAccountForAddress:", err, utxo.ScriptAddress)
 					return err // retry.
 				}
 			}
@@ -540,13 +542,14 @@ func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange) 
 				// FIXME: re-encode p2pk [and p2sh] as Addresses in a consistent format.
 				pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
 				changes = append(changes, UTXOChange{
-					Tag:        utxoTagNew,
-					TxID:       txn_id,
-					VOut:       vout.N,
-					Value:      vout.Value,
-					ScriptType: scriptType,
-					PKHAddress: pkhAddress,
-					Height:     block.Height,
+					Tag:           utxoTagNew,
+					TxID:          txn_id,
+					VOut:          vout.N,
+					Value:         vout.Value,
+					ScriptHex:     vout.ScriptPubKey.Hex,
+					ScriptType:    scriptType,
+					ScriptAddress: pkhAddress,
+					Height:        block.Height,
 				})
 			} else if len(vout.ScriptPubKey.Addresses) < 1 {
 				log.Println("ChainFollower: skipping no-address vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
@@ -575,21 +578,6 @@ func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
 		return tx // store on 'c' for rollback on shutdown?
 	}
 }
-
-// func uniqueStrings(source []string) (result []string) {
-// 	if len(source) == 1 { // common.
-// 		result = source // alias to avoid allocation.
-// 		return
-// 	}
-// 	unique := make(map[string]bool)
-// 	for _, addr := range source {
-// 		if !unique[addr] {
-// 			unique[addr] = true
-// 			result = append(result, addr)
-// 		}
-// 	}
-// 	return
-// }
 
 func (c *ChainFollower) fetchChainState() giga.ChainState {
 	for {
