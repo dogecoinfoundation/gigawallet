@@ -10,7 +10,9 @@ func EncodeECPrivKeyWIF(key ECPrivKey, chain *ChainParams) string {
 		panic("EncodeECPrivKeyWIF: wrong key length")
 	}
 	data[33] = 0x01 // pubkey will be compressed.
-	return Base58EncodeCheck(data[0:34])
+	ret := Base58EncodeCheck(data[0:34])
+	clear(data[:]) // clear key for security.
+	return ret
 }
 
 func EncodeECPrivKeyUncompressedWIF(key ECPrivKey, chain *ChainParams) string {
@@ -20,11 +22,13 @@ func EncodeECPrivKeyUncompressedWIF(key ECPrivKey, chain *ChainParams) string {
 		panic("EncodeECPrivKeyUncompressedWIF: wrong key length")
 	}
 	// pubkey will be uncompressed (no 0x01 byte)
-	return Base58EncodeCheck(data[0:33])
+	ret := Base58EncodeCheck(data[0:33])
+	clear(data[:]) // clear key for security.
+	return ret
 }
 
 // chain is optional, will auto-detect if nil.
-func DecodeECPrivKeyWIF(str string, chain *ChainParams) (ECPrivKey, *ChainParams, error) {
+func DecodeECPrivKeyWIF(str string, chain *ChainParams) (ec_priv_key ECPrivKey, out_chain *ChainParams, err error) {
 	data, err := Base58DecodeCheck(str)
 	if err != nil {
 		return nil, nil, err
@@ -40,5 +44,10 @@ func DecodeECPrivKeyWIF(str string, chain *ChainParams) (ECPrivKey, *ChainParams
 	if copy(pk[:], data[1:33]) != ECPrivKeyLen {
 		panic("DecodeECPrivKeyWIF: wrong copy length")
 	}
+	if !ECKeyIsValid(pk[:]) {
+		err = fmt.Errorf("DecodeECPrivKeyWIF: invalid EC key (zero or >= N)")
+		return nil, nil, err
+	}
+	clear(data[:]) // clear key for security.
 	return pk[:], chain, nil
 }

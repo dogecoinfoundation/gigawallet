@@ -1,6 +1,7 @@
 package doge
 
 import (
+	"bytes"
 	"crypto/rand"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -28,15 +29,49 @@ type ECPrivKey = []byte            // 32 bytes.
 type ECPubKeyCompressed = []byte   // 33 bytes with 0x02 or 0x03 prefix.
 type ECPubKeyUncompressed = []byte // 65 bytes with 0x04 prefix.
 
+var zeroBytes [80]byte // 80 zero-bytes (used in other files)
+
+func clear(slice []byte) {
+	if len(slice) > 80 {
+		panic("clear: slice too big")
+	}
+	copy(slice, zeroBytes[0:len(slice)])
+}
+
 func GenerateECPrivKey() (ECPrivKey, error) {
 	// can return an error if entropy is not available
 	pk, err := secp256k1.GeneratePrivateKeyFromRand(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	return pk.Serialize(), err
+	ret := pk.Serialize()
+	pk.Zero() // clear key for security.
+	return ret, nil
 }
 
 func ECPubKeyFromECPrivKey(pk ECPrivKey) ECPubKeyCompressed {
-	return secp256k1.PrivKeyFromBytes(pk).PubKey().SerializeCompressed()
+	key := secp256k1.PrivKeyFromBytes(pk)
+	pub := key.PubKey().SerializeCompressed()
+	key.Zero() // clear key for security.
+	return pub
+}
+
+func ECKeyIsValid(pk ECPrivKey) bool {
+	if len(pk) != ECPrivKeyLen {
+		return false
+	}
+	// From secp256k1.PrivKeyFromBytes:
+	// "Further, 0 is not a valid private key. It is up to the caller
+	// to provide a value in the appropriate range of [1, N-1]."
+	if bytes.Equal(pk, zeroBytes[0:ECPrivKeyLen]) {
+		return false // zero is not a valid key.
+	}
+	// If overflow is true, it means the ECPrivKey is >= N (the order
+	// of the secp256k1 curve) which is not a strong private key.
+	// PrivKeyFromBytes will accept keys >= N, but it will reduce them
+	// modulo N, so they become equivalent to a lower key value.
+	var modN secp256k1.ModNScalar
+	overflow := modN.SetByteSlice(pk)
+	modN.Zero() // clear key for security.
+	return !overflow
 }

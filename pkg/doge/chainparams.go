@@ -1,43 +1,58 @@
 package doge
 
 type ChainParams struct {
-	p2pkh_address_prefix byte
-	p2sh_address_prefix  byte
-	pkey_prefix          byte
-	bip32_privkey_prefix uint32
-	bip32_pubkey_prefix  uint32
+	ChainName                string
+	p2pkh_address_prefix     byte
+	p2sh_address_prefix      byte
+	pkey_prefix              byte
+	bip32_privkey_prefix     uint32
+	bip32_pubkey_prefix      uint32
+	Bip32_WIF_PrivKey_Prefix string
+	Bip32_WIF_PubKey_Prefix  string
 }
 
 var DogeMainNetChain ChainParams = ChainParams{
-	p2pkh_address_prefix: 0x1e,       // D
-	p2sh_address_prefix:  0x16,       // 9 or A
-	pkey_prefix:          0x9e,       // Q or 6
-	bip32_privkey_prefix: 0x02fac398, // dgpv
-	bip32_pubkey_prefix:  0x02facafd, // dgub
+	ChainName:                "doge_main",
+	p2pkh_address_prefix:     0x1e,       // D
+	p2sh_address_prefix:      0x16,       // 9 or A
+	pkey_prefix:              0x9e,       // Q or 6
+	bip32_privkey_prefix:     0x02fac398, // dgpv
+	bip32_pubkey_prefix:      0x02facafd, // dgub
+	Bip32_WIF_PrivKey_Prefix: "dgpv",
+	Bip32_WIF_PubKey_Prefix:  "dgub",
 }
 
 var DogeTestNetChain ChainParams = ChainParams{
-	p2pkh_address_prefix: 0x71,       // n
-	p2sh_address_prefix:  0xc4,       // 2
-	pkey_prefix:          0xf1,       // 9 or c
-	bip32_privkey_prefix: 0x04358394, // tprv
-	bip32_pubkey_prefix:  0x043587cf, // tpub
+	ChainName:                "doge_test",
+	p2pkh_address_prefix:     0x71,       // n
+	p2sh_address_prefix:      0xc4,       // 2
+	pkey_prefix:              0xf1,       // 9 or c
+	bip32_privkey_prefix:     0x04358394, // tprv
+	bip32_pubkey_prefix:      0x043587cf, // tpub
+	Bip32_WIF_PrivKey_Prefix: "tprv",
+	Bip32_WIF_PubKey_Prefix:  "tpub",
 }
 
 var DogeRegTestChain ChainParams = ChainParams{
-	p2pkh_address_prefix: 0x6f,       //
-	p2sh_address_prefix:  0xc4,       // 2
-	pkey_prefix:          0xef,       //
-	bip32_privkey_prefix: 0x04358394, // tprv
-	bip32_pubkey_prefix:  0x043587cf, // tpub
+	ChainName:                "doge_regtest",
+	p2pkh_address_prefix:     0x6f,       // n
+	p2sh_address_prefix:      0xc4,       // 2
+	pkey_prefix:              0xef,       //
+	bip32_privkey_prefix:     0x04358394, // tprv
+	bip32_pubkey_prefix:      0x043587cf, // tpub
+	Bip32_WIF_PrivKey_Prefix: "tprv",
+	Bip32_WIF_PubKey_Prefix:  "tpub",
 }
 
 var BitcoinMainChain ChainParams = ChainParams{
-	p2pkh_address_prefix: 0x00,       // 1
-	p2sh_address_prefix:  0x05,       // 3
-	pkey_prefix:          0x80,       // 5H,5J,5K
-	bip32_privkey_prefix: 0x0488ADE4, //
-	bip32_pubkey_prefix:  0x0488B21E, //
+	ChainName:                "btc_main",
+	p2pkh_address_prefix:     0x00,       // 1
+	p2sh_address_prefix:      0x05,       // 3
+	pkey_prefix:              0x80,       // 5H,5J,5K
+	bip32_privkey_prefix:     0x0488ADE4, //
+	bip32_pubkey_prefix:      0x0488B21E, //
+	Bip32_WIF_PrivKey_Prefix: "xxxx",     // TODO
+	Bip32_WIF_PubKey_Prefix:  "xxxx",     // TODO
 }
 
 func ChainFromTestNetFlag(isTestNet bool) *ChainParams {
@@ -70,9 +85,27 @@ func KeyBitsForChain(chain *ChainParams) KeyBits {
 }
 
 // CAUTION: the result is a best-guess based on the 'version byte' in
+// the WIF string. Do not rely on the returned ChainParams alone
+// for validation: it will fall back on DogeTestNetChain for unknown
+// version bytes (so verify the version byte or bip32-prefix as well)
+func ChainFromWIFString(wif string) *ChainParams {
+	switch wif[0] {
+	case 'D', '9', 'A', 'Q', '6', 'd':
+		// FIXME: '9' is ambiguous, check 2nd character over the entire range.
+		return &DogeMainNetChain
+	case 'n', '2', 'c', 't': // also '9'
+		return &DogeTestNetChain
+	case '1', '3', '5':
+		return &BitcoinMainChain
+	default:
+		return &DogeTestNetChain
+	}
+}
+
+// CAUTION: the result is a best-guess based on the 'version byte' in
 // the decoded WIF data. Do not rely on the returned ChainParams alone
 // for validation: it will fall back on DogeTestNetChain for unknown
-// version bytes (so verify your version byte or bip32-prefix as well)
+// version bytes (so verify the version byte or bip32-prefix as well)
 func ChainFromWIFPrefix(bytes []byte, allowNonDoge bool) *ChainParams {
 	if len(bytes) == 0 {
 		return &DogeTestNetChain // fallback
