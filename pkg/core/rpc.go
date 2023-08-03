@@ -101,7 +101,7 @@ func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, i
 	return "", fmt.Errorf("not implemented")
 }
 
-func (l L1CoreRPC) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.NewTxn, error) {
+func (l L1CoreRPC) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.NewTxn, error) {
 	return giga.NewTxn{}, fmt.Errorf("not implemented")
 }
 

@@ -8,11 +8,13 @@ type UTXO struct {
 	TxID          string     // Dogecoin Transaction ID - part of unique key (from Txn Output)
 	VOut          int        // Transaction VOut number - part of unique key (from Txn Output)
 	Value         CoinAmount // Amount of Dogecoin available to spend (from Txn Output)
-	ScriptType    ScriptType // 'p2pkh' etc, see ScriptType constants
-	ScriptAddress Address    // P2PKH address required to spend this UTXO (extracted from the script code)
-	Account       Address    // Account ID (by searching for ScriptAddress using FindAccountForAddress)
+	ScriptHex     string     // locking script in this UTXO, hex-encoded
+	ScriptType    ScriptType // 'p2pkh' etc, see ScriptType constants (detected from ScriptHex)
+	ScriptAddress Address    // P2PKH address required to spend this UTXO (extracted from ScriptHex)
+	AccountID     Address    // Account ID (by searching for ScriptAddress using FindAccountForAddress)
 	KeyIndex      uint32     // Account HD Wallet key-index of the ScriptAddress (needed to spend)
 	IsInternal    bool       // Account HD Wallet internal/external address flag for ScriptAddress (needed to spend)
+	BlockHeight   int64      // Block Height of the Block that contains this UTXO (NB. used only when inserting!)
 }
 
 // NewTxOut is an output from a new Txn, i.e. creates a new UTXO.
@@ -55,7 +57,7 @@ func NewTxnBuilder(account *Account, store Store, lib L1) (TxnBuilder, error) {
 	}, nil
 }
 
-func (b *TxnBuilder) regenerateTxn() error {
+func (b *TxnBuilder) buildTxn() error {
 	txn, err := b.lib.MakeTransaction(b.inputs, b.outputs, b.fee, b.change, b.account.Privkey)
 	if err != nil {
 		return err
@@ -81,8 +83,8 @@ func (b *TxnBuilder) TotalOutputs() CoinAmount {
 }
 
 func (b *TxnBuilder) AddInput(utxo UTXO) error {
-	// UTXO must be associated with an Account and ScriptAddress so we can spend it.
-	if utxo.Account == "" || utxo.ScriptAddress == "" || utxo.Value.LessThanOrEqual(ZeroCoins) {
+	// UTXO must be associated with an Account and ScriptHex so we can spend it.
+	if utxo.AccountID == "" || utxo.ScriptHex == "" || utxo.Value.LessThanOrEqual(ZeroCoins) {
 		return NewErr(InvalidTxn, "invalid transaction input")
 	}
 	if !b.Includes(utxo.TxID, utxo.VOut) {
@@ -122,10 +124,6 @@ func (b *TxnBuilder) AddOutput(payTo Address, amount CoinAmount) error {
 // Calculate the minimum Fee payable to mine the transaction.
 // The fee is based on the transacion size (i.e. number of inputs and outputs)
 func (b *TxnBuilder) calculateFeeForSize() (CoinAmount, error) {
-	err := b.regenerateTxn()
-	if err != nil {
-		return ZeroCoins, err
-	}
 	numBytes := decimal.NewFromInt(int64(len(b.txn.TxnHex) / 2))
 	fee := TxnFeePerByte.Mul(numBytes)
 	return fee, nil
@@ -136,33 +134,55 @@ func (b *TxnBuilder) calculateFeeForSize() (CoinAmount, error) {
 // and add new UTXOs to cover the fee if necessary (if this happens,
 // the transaction size changes and we need to loop and go again.)
 func (b *TxnBuilder) CalculateFee(extraFee CoinAmount) error {
+	// Iterate until b.txn includes the final (stable) fee calculation.
+	numInputs := len(b.inputs)
 	for {
-		sizeFee, err := b.calculateFeeForSize()
+		// Build the transaction with the current b.inputs and b.fee.
+		err := b.buildTxn()
 		if err != nil {
 			return err
 		}
-		newTotal := b.TotalOutputs().Add(sizeFee).Add(extraFee)
-		numInputs := len(b.inputs)
+		// Calculate the fee required for the [new] transaction size.
+		newFee, err := b.calculateFeeForSize()
+		if err != nil {
+			return err
+		}
+		// Calculate the total required to cover that fee.
+		newTotal := b.TotalOutputs().Add(newFee).Add(extraFee)
+		// Add new transaction inputs if necessary to cover the fee.
 		err = b.AddUTXOsUpToAmount(newTotal)
 		if err != nil {
 			return err
 		}
-		if len(b.inputs) > numInputs {
-			// Number of inputs changed in order to pay the fee amount.
-			// This changes the size of the transaction, so go back and calculate again.
+		// If we added an input, it changes the size of the transaction.
+		// If the fee changed, it changes the "change" output in the transaction.
+		if len(b.inputs) != numInputs || !newFee.Equals(b.fee) {
+			// Number of inputs changed (will change the txn size)
+			// or fee changed (will change the "change" output)
+			// so go back and build the transaction again.
+			b.fee = newFee
+			numInputs = len(b.inputs)
 			continue
 		}
 		// Done: current set of inputs covers the current fee.
-		b.fee = sizeFee
 		return nil
 	}
 }
 
 func (b *TxnBuilder) GetFinalTxn() (NewTxn, error) {
-	if len(b.txn.TxnHex) > 0 && b.fee.GreaterThan(ZeroCoins) {
-		return b.txn, nil
+	if b.fee.LessThanOrEqual(ZeroCoins) {
+		return NewTxn{}, NewErr(InvalidTxn, "fee has not been calculated yet")
 	}
-	return NewTxn{}, NewErr(InvalidTxn, "fee has not been calculated yet")
+	old_hex := b.txn.TxnHex
+	err := b.buildTxn()
+	if err != nil {
+		return NewTxn{}, err
+	}
+	new_hex := b.txn.TxnHex
+	if new_hex != old_hex {
+		return NewTxn{}, NewErr(InvalidTxn, "txn hex was not updated: "+new_hex+" "+old_hex)
+	}
+	return b.txn, nil
 }
 
 // Implement UTXOSet interface.

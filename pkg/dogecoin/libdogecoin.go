@@ -2,8 +2,10 @@ package dogecoin
 
 import (
 	"fmt"
+	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 
 	"github.com/dogeorg/go-libdogecoin"
 )
@@ -56,7 +58,7 @@ func (l L1Libdogecoin) MakeChildAddress(privkey giga.Privkey, keyIndex uint32, i
 	return giga.Address(pkh), nil
 }
 
-func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key_wif giga.Privkey) (giga.NewTxn, error) {
+func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.NewTxn, error) {
 	libdogecoin.W_context_start()
 	defer libdogecoin.W_context_stop()
 
@@ -75,9 +77,6 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 	outPlusFee := totalOut.Add(fee)
 	if totalIn.LessThan(outPlusFee) {
 		return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "inputs do not hold enough value to pay outputs plus fee: %s vs %s", totalIn.String(), outPlusFee.String())
-	}
-	if totalIn.GreaterThan(outPlusFee) {
-		return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "total inputs exceed total outputs plus fee: %s vs %s", totalIn.String(), outPlusFee.String())
 	}
 
 	// create the transaction
@@ -113,42 +112,50 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 
 	// Sign the transaction: we need to sign each input UTXO separately,
 	// because each one is generated from our HD Wallet with a different P2PKH Address.
+	chain := doge.ChainFromWIFString(string(private_key))
 	for n, utxo := range inputs {
-		// Locate the HD Node in the HD Wallet for the Private Key at KeyIndex.
+		// Locate the HD Child Node in the HD Wallet for the Private Key at KeyIndex.
 		// The PK should be the key for the ScriptAddress we extracted from the UTXO.
-		hd_node_pk := libdogecoin.W_get_derived_hd_address(string(private_key_wif), 0, utxo.IsInternal, utxo.KeyIndex, true)
-		if hd_node_pk == "" {
-			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot get_derived_hd_address priv: %v", utxo)
+		hd_node_pk := libdogecoin.W_get_derived_hd_address(string(private_key), 0, utxo.IsInternal, utxo.KeyIndex, true)
+		if !strings.HasPrefix(hd_node_pk, chain.Bip32_WIF_PrivKey_Prefix) {
+			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot get_derived_hd_address priv: %s %v", hd_node_pk, utxo)
 		}
-		hd_node_pub := libdogecoin.W_get_derived_hd_address(string(private_key_wif), 0, utxo.IsInternal, utxo.KeyIndex, false)
-		if hd_node_pub == "" {
-			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot get_derived_hd_address pub: %v", utxo)
+		hd_node_pub := libdogecoin.W_get_derived_hd_address(string(private_key), 0, utxo.IsInternal, utxo.KeyIndex, false)
+		if !strings.HasPrefix(hd_node_pub, chain.Bip32_WIF_PubKey_Prefix) {
+			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot get_derived_hd_address pub: %s %v", hd_node_pub, utxo)
 		}
 
-		// Problem 1:
-		// Given HD PK: dgpv5Brh8HrjmwCZVn2c4d89qvaSRbtXVhncGKzFdkxevBD48jyZ2QFPBDC5kqyGcPDFeMAZyjMxFmFEnj4PM1LQZ7GicpjqKkFWMmY7jYYkMZo
-		// How to get "privkey_wif" eg. ci5prbqz7jXyFPVWKkHhPq4a9N8Dag3TpeRfuqqC2Nfr7gSqx1fy
-
-		// Problem 2:
-		// Given HD Pub: dgub8vjpTyndL5rtnpgm6rk8xn82uAJAKppKYknTokMuiJG7go5FSAo8qWbjL88sShdBQLHn1xkAzEuqRRXPzwDJ7KNkune83STCYkXF4WqtdAc
-		// How to get "utxo_scriptpubkey" eg. 76a914d8c43e6f68ca4ea1e9b93da2d1e3a95118fa4a7c88ac
-
-		// Both of the above are required to call W_sign_raw_transaction !!
-
-		// Generate the corresponding P2PKH Address for this PK.
-		hd_p2pkh := libdogecoin.W_generate_derived_hd_pub_key(hd_node_pk)
-		if hd_p2pkh == "" {
-			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot generate_derived_hd_pub_key: %v", utxo)
+		// Verify we have the right PrivKey for the UTXO ScriptAddress.
+		hd_p2pkh_priv := libdogecoin.W_generate_derived_hd_pub_key(hd_node_pk)
+		if hd_p2pkh_priv != string(utxo.ScriptAddress) {
+			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "HD Private Key doesn't match UTXO ScriptAddress: %v", utxo)
 		}
-		// Verify we have the right PK for the UTXO ScriptAddress.
-		if hd_p2pkh != string(utxo.ScriptAddress) {
+
+		// Verify we have the right PubKey for the UTXO ScriptAddress.
+		hd_p2pkh_pub := libdogecoin.W_generate_derived_hd_pub_key(hd_node_pub)
+		if hd_p2pkh_pub != string(utxo.ScriptAddress) {
+			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "HD Pub Key doesn't match UTXO ScriptAddress: %v", utxo)
+		}
+
+		// Extract the WIF-encoded EC Key from the HD Child PrivKey.
+		ec_privkey_wif, err := doge.ExtractECPrivKeyFromBip32(hd_node_pk)
+		if err != nil {
+			return giga.NewTxn{}, err
+		}
+		// Generate the corresponding P2PKH Address for the HD Child PrivKey.
+		p2pkh_address, err := doge.GenerateP2PKHFromECPrivKeyWIF(ec_privkey_wif)
+		if err != nil {
+			return giga.NewTxn{}, err
+		}
+		if p2pkh_address != string(utxo.ScriptAddress) {
 			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "HD Private Key doesn't match UTXO ScriptAddress: %v", utxo)
 		}
 
 		// sign the Nth transaction input (i.e. generate the unlocking script)
 		// [input_index, incoming_raw_tx string, script_hex string, sig_hash_type int, privkey string]
 		// "the pubkey script in hexadecimal format (scripthex)"
-		tx_hex = libdogecoin.W_sign_raw_transaction(n, tx_hex, hd_p2pkh, SIGHASH_ALL, hd_node_pk)
+		// e.g. ""
+		tx_hex = libdogecoin.W_sign_raw_transaction(n, tx_hex, utxo.ScriptHex, SIGHASH_ALL, ec_privkey_wif)
 		if tx_hex == "" {
 			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot sign_raw_transaction: %v", utxo)
 		}

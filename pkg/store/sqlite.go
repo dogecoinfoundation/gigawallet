@@ -3,11 +3,9 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
-	"github.com/shopspring/decimal"
 
 	sqlite3 "github.com/mattn/go-sqlite3"
 )
@@ -62,10 +60,11 @@ CREATE INDEX IF NOT EXISTS txn_account_i ON txn (account_address);
 CREATE TABLE IF NOT EXISTS utxo (
 	txn_id TEXT NOT NULL,
 	vout INTEGER NOT NULL,
-	account_address TEXT NOT NULL,
 	value TEXT NOT NULL,
+	script TEXT NOT NULL,
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
+	account_address TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
 	is_internal BOOLEAN NOT NULL,
 	added_height INTEGER,
@@ -284,22 +283,22 @@ func getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []g
 	// • spendable_height > 0    –– the UTXO Txn has been "confirmed" (included in CurrentBalance)
 	// • spending_height IS NULL –– the UTXO has not already been spent (not yet in OutgoingBalance)
 	rows_found := 0
-	rows, err := tx.Query("SELECT txn_id, vout, value, script_type, script_address FROM utxo WHERE account_address = ? AND spendable_height > 0 AND spending_height IS NULL", account)
+	rows, err := tx.Query("SELECT txn_id, vout, value, script, script_type, script_address, key_index, is_internal FROM utxo WHERE account_address = ? AND spendable_height > 0 AND spending_height IS NULL", account)
 	if err != nil {
 		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
 	defer rows.Close()
 	for rows.Next() {
-		utxo := giga.UTXO{Account: account}
-		var value string
-		err := rows.Scan(&utxo.TxID, &utxo.VOut, &value, &utxo.ScriptType, &utxo.ScriptAddress)
+		utxo := giga.UTXO{AccountID: account}
+		// var value string
+		err := rows.Scan(&utxo.TxID, &utxo.VOut, &utxo.Value, &utxo.ScriptHex, &utxo.ScriptType, &utxo.ScriptAddress, &utxo.KeyIndex, &utxo.IsInternal)
 		if err != nil {
 			return nil, dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
 		}
-		utxo.Value, err = decimal.NewFromString(value)
-		if err != nil {
-			return nil, dbErr(err, fmt.Sprintf("GetAllUnreservedUTXOs: invalid decimal value in UTXO database: %v", value))
-		}
+		// utxo.Value, err = decimal.NewFromString(value)
+		// if err != nil {
+		// 	return nil, dbErr(err, fmt.Sprintf("GetAllUnreservedUTXOs: invalid decimal value in UTXO database: %v", value))
+		// }
 		result = append(result, utxo)
 		rows_found++
 	}
@@ -493,13 +492,13 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState, writeRoo
 	return nil
 }
 
-func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.NewUTXO) error {
+func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 	// Create a new Unspent Transaction Output in the database.
 	// Updates Account 'incoming' to indicate unconfirmed funds.
 	// psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE ..."
 	_, err := t.tx.Exec(
-		"INSERT INTO utxo (txn_id, vout, account_address, value, script_type, script_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO UPDATE SET account_address=$3, value=$4, script_type=$5, script_address=$6, key_index=$7, is_internal=$8, added_height=$9 WHERE txn_id=$1 AND vout=$2",
-		utxo.TxID, utxo.VOut, utxo.AccountID, utxo.Value, utxo.ScriptType, utxo.PKHAddress, utxo.KeyIndex, utxo.IsInternal, utxo.BlockHeight,
+		"INSERT INTO utxo (txn_id, vout, value, script, script_type, script_address, account_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO UPDATE SET value=$3, script=$4, script_type=$5, script_address=$6, account_address=$7, key_index=$8, is_internal=$9, added_height=$10 WHERE txn_id=$1 AND vout=$2",
+		utxo.TxID, utxo.VOut, utxo.Value, utxo.ScriptHex, utxo.ScriptType, utxo.ScriptAddress, utxo.AccountID, utxo.KeyIndex, utxo.IsInternal, utxo.BlockHeight,
 	)
 	if err != nil {
 		return dbErr(err, "CreateUTXO: preparing insert")
@@ -507,7 +506,7 @@ func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.NewUTXO) error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int64, blockHeight int64) (id string, scriptAddress giga.Address, err error) {
+func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight int64) (id string, scriptAddress giga.Address, err error) {
 	rows, err := t.tx.Query("UPDATE utxo SET spending_height=$1 WHERE txn_id=$2 AND vout=$3 RETURNING account_address, script_address", blockHeight, txID, vOut)
 	if err != nil {
 		return "", "", dbErr(err, "MarkUTXOSpent: executing update")

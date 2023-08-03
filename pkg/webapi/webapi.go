@@ -322,8 +322,8 @@ type PayToAddressRequest struct {
 	PayTo  giga.Address    `json:"to"`
 }
 type PayToAddressResponse struct {
-	TxID string          `json:"txid"`
-	Fee  giga.CoinAmount `json:"fee"`
+	TxHex string          `json:"hex"`
+	Fee   giga.CoinAmount `json:"fee"`
 }
 
 // Pays funds from an account managed by gigawallet to any Dogecoin Address.
@@ -347,8 +347,8 @@ func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httproute
 		return
 	}
 	sendResponse(w, &PayToAddressResponse{
-		TxID: txn.TxID,
-		Fee:  txn.FeeAmount,
+		TxHex: txn.TxnHex,
+		Fee:   txn.FeeAmount,
 	})
 }
 

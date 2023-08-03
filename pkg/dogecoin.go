@@ -17,7 +17,7 @@ import (
 type L1 interface {
 	MakeAddress(isTestNet bool) (Address, Privkey, error)
 	MakeChildAddress(privkey Privkey, addressIndex uint32, isInternal bool) (Address, error)
-	MakeTransaction(inputs []UTXO, outputs []NewTxOut, fee CoinAmount, change Address, private_key_wif Privkey) (NewTxn, error)
+	MakeTransaction(inputs []UTXO, outputs []NewTxOut, fee CoinAmount, change Address, private_key Privkey) (NewTxn, error)
 	DecodeTransaction(txnHex string) (RawTxn, error)
 	GetBlock(blockHash string) (RpcBlock, error)
 	GetBlockHeader(blockHash string) (RpcBlockHeader, error)
@@ -106,7 +106,7 @@ type RawTxn struct {
 }
 type RawTxnVIn struct {
 	TxID        string          `json:"txid"`        // The transaction id (UTXO)
-	VOut        int64           `json:"vout"`        // The output number (UTXO)
+	VOut        int             `json:"vout"`        // The output number (UTXO)
 	ScriptSig   RawTxnScriptSig `json:"scriptSig"`   // The "signature script" (solution to the UTXO "pubkey script")
 	TxInWitness []string        `json:"txinwitness"` // Array of hex-encoded witness data (if any)
 	Sequence    int64           `json:"sequence"`    // The script sequence number
@@ -117,7 +117,7 @@ type RawTxnScriptSig struct {
 }
 type RawTxnVOut struct {
 	Value        decimal.Decimal    `json:"value"`        // The value in DOGE (an exact decimal number)
-	N            int64              `json:"n"`            // The output number (VOut when spending)
+	N            int                `json:"n"`            // The output number (VOut when spending)
 	ScriptPubKey RawTxnScriptPubKey `json:"scriptPubKey"` // The "pubkey script" (conditions for spending this output)
 }
 type RawTxnScriptPubKey struct {
