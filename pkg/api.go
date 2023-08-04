@@ -231,79 +231,129 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 	return pub, nil
 }
 
-func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Address) (NewTxn, error) {
+func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Address) (txid string, fee CoinAmount, err error) {
 	account, err := a.Store.GetAccount(foreignID)
 	if err != nil {
-		return NewTxn{}, err
+		return
 	}
 	if amount.LessThan(TxnDustLimit) {
-		return NewTxn{}, NewErr(BadRequest, "amount is too small - transaction will be rejected: %s", amount.String())
+		return "", ZeroCoins, NewErr(BadRequest, "amount is too small - transaction will be rejected: %s", amount.String())
 	}
 	builder, err := NewTxnBuilder(&account, a.Store, a.L1)
 	if err != nil {
-		return NewTxn{}, err
+		return
 	}
 	err = builder.AddUTXOsUpToAmount(amount)
 	if err != nil {
-		return NewTxn{}, err
+		return
 	}
 	err = builder.AddOutput(payTo, amount)
 	if err != nil {
-		return NewTxn{}, err
+		return
 	}
 	err = builder.CalculateFee(ZeroCoins)
 	if err != nil {
-		return NewTxn{}, err
+		return
 	}
-	txn, err := builder.GetFinalTxn()
+	txn, fee, err := builder.GetFinalTxn()
 	if err != nil {
-		return NewTxn{}, err
+		return
 	}
 
-	// TODO: submit the transaction to Core.
-	// TODO: store back the account (to save NextInternalKey; also call UpdatePoolAddresses)
-	// TODO: somehow reserve the UTXOs in the interim (prevent accidental double-spend)
-	//       until ChainTracker sees the Txn in a Block and calls MarkUTXOSpent.
+	// Create the Payment record up-front.
+	// Save changes to the Account (NextInternalKey) and address pool.
+	// Reserve the UTXOs for the payment.
+	tx, err := a.Store.Begin()
+	if err != nil {
+		return
+	}
+	err = account.UpdatePoolAddresses(tx, a.L1) // we have used an address.
+	if err != nil {
+		tx.Rollback()
+		return
+	}
+	err = tx.UpdateAccount(account) // for NextInternalKey (change address)
+	if err != nil {
+		tx.Rollback()
+		return
+	}
+	// TODO: create the `payment` row with NULL block_height & confirm_height & txid
+	// payId, err = tx.CreatePayment(account.Address, amount, payTo) // TODO
+	// if err != nil {
+	//	tx.Rollback()
+	// 	return
+	// }
+	// err = tx.ReserveUTXOsForPayment(payId, builder.GetUTXOs()) // TODO
+	// if err != nil {
+	//  tx.Rollback()
+	// 	return
+	// }
+	err = tx.Commit()
+	if err != nil {
+		return
+	}
 
-	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": amount})
-	return txn, nil
+	// Submit the transaction to core.
+	txid, err = a.L1.Send(txn.TxnHex)
+	if err != nil {
+		return
+	}
+
+	// Update the Payment with the txid,
+	// which changes it to "accepted" status (accepted by the network)
+	tx, err = a.Store.Begin()
+	if err != nil {
+		return
+	}
+	// err = tx.UpdatePaymentWithTxid(paymentId, txid) // TODO
+	// if err != nil {
+	//	tx.Rollback()
+	// 	return
+	// }
+	err = tx.Commit()
+	if err != nil {
+		return
+	}
+
+	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": amount, "txid": txid})
+	return
 }
 
-func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string, error) {
+func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (txid string, fee CoinAmount, err error) {
 	invoice, err := a.Store.GetInvoice(invoiceID)
 	if err != nil {
-		return "", err
+		return
 	}
 	account, err := a.Store.GetAccount(accountID)
 	if err != nil {
-		return "", err
+		return
 	}
 	invoiceAmount := invoice.CalcTotal()
 	if invoiceAmount.LessThan(TxnDustLimit) {
-		return "", fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
+		return "", ZeroCoins, fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
 	}
 	payTo := invoice.ID // pay-to Address is the ID
 
 	// Make a Txn to pay `invoiceAmount` from `account` to `payTo`
 	builder, err := NewTxnBuilder(&account, a.Store, a.L1)
 	if err != nil {
-		return "", err
+		return
 	}
 	err = builder.AddUTXOsUpToAmount(invoiceAmount)
 	if err != nil {
-		return "", err
+		return
 	}
 	err = builder.AddOutput(payTo, invoiceAmount)
 	if err != nil {
-		return "", err
+		return
 	}
 	err = builder.CalculateFee(ZeroCoins)
 	if err != nil {
-		return "", err
+		return
 	}
-	txn, err := builder.GetFinalTxn()
+	txn, fee, err := builder.GetFinalTxn()
 	if err != nil {
-		return "", err
+		return
 	}
 
 	// TODO: submit the transaction to Core.
@@ -312,7 +362,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (string,
 	//       until ChainTracker sees the Txn in a Block and calls MarkUTXOSpent.
 
 	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": invoiceAmount})
-	return txn.TxnHex, nil
+	return txn.TxnHex, fee, nil
 }
 
 // Re-sync from a specific block height, or skip ahead (for now)

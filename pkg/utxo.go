@@ -136,6 +136,8 @@ func (b *TxnBuilder) calculateFeeForSize() (CoinAmount, error) {
 func (b *TxnBuilder) CalculateFee(extraFee CoinAmount) error {
 	// Iterate until b.txn includes the final (stable) fee calculation.
 	numInputs := len(b.inputs)
+	attempt := 0
+	var fees []string
 	for {
 		// Build the transaction with the current b.inputs and b.fee.
 		err := b.buildTxn()
@@ -160,8 +162,17 @@ func (b *TxnBuilder) CalculateFee(extraFee CoinAmount) error {
 			// Number of inputs changed (will change the txn size)
 			// or fee changed (will change the "change" output)
 			// so go back and build the transaction again.
+			if newFee.LessThan(b.fee) && len(b.inputs) == numInputs {
+				// Fee will oscillate, go with the txn we have.
+				return nil
+			}
+			fees = append(fees, newFee.String())
 			b.fee = newFee
 			numInputs = len(b.inputs)
+			attempt += 1
+			if attempt > 10 {
+				return NewErr(InvalidTxn, "cannot create txn with a stable fee: %v", fees)
+			}
 			continue
 		}
 		// Done: current set of inputs covers the current fee.
@@ -169,20 +180,20 @@ func (b *TxnBuilder) CalculateFee(extraFee CoinAmount) error {
 	}
 }
 
-func (b *TxnBuilder) GetFinalTxn() (NewTxn, error) {
+func (b *TxnBuilder) GetFinalTxn() (NewTxn, CoinAmount, error) {
 	if b.fee.LessThanOrEqual(ZeroCoins) {
-		return NewTxn{}, NewErr(InvalidTxn, "fee has not been calculated yet")
+		return NewTxn{}, ZeroCoins, NewErr(InvalidTxn, "fee has not been calculated yet")
 	}
 	old_hex := b.txn.TxnHex
 	err := b.buildTxn()
 	if err != nil {
-		return NewTxn{}, err
+		return NewTxn{}, ZeroCoins, err
 	}
 	new_hex := b.txn.TxnHex
 	if new_hex != old_hex {
-		return NewTxn{}, NewErr(InvalidTxn, "txn hex was not updated: "+new_hex+" "+old_hex)
+		return NewTxn{}, ZeroCoins, NewErr(InvalidTxn, "txn hex was not updated: "+new_hex+" "+old_hex)
 	}
-	return b.txn, nil
+	return b.txn, b.fee, nil
 }
 
 // Implement UTXOSet interface.

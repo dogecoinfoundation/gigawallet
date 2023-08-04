@@ -11,3 +11,9 @@ func HexEncode(bytes []byte) string {
 func HexDecode(str string) ([]byte, error) {
 	return hex.DecodeString(str)
 }
+
+func IsValidHex(hex string) bool {
+	// eh, this will do.
+	_, err := HexDecode(hex)
+	return err == nil
+}

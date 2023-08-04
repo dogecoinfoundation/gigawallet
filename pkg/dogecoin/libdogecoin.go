@@ -213,9 +213,9 @@ func (l L1Libdogecoin) GetTransaction(txnHash string) (txn giga.RawTxn, err erro
 	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1Libdogecoin) Send(txnHex string) error {
+func (l L1Libdogecoin) Send(txnHex string) (txid string, err error) {
 	if l.fallback != nil {
 		return l.fallback.Send(txnHex)
 	}
-	return fmt.Errorf("not implemented")
+	return "", fmt.Errorf("not implemented")
 }

@@ -56,6 +56,6 @@ func (l L1Mock) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	return giga.RawTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1Mock) Send(txnHex string) error {
-	return fmt.Errorf("not implemented")
+func (l L1Mock) Send(txnHex string) (txid string, err error) {
+	return "", fmt.Errorf("not implemented")
 }

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 )
 
 // interface guard ensures L1CoreRPC implements giga.L1
@@ -143,6 +145,18 @@ func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	return
 }
 
-func (l L1CoreRPC) Send(txnHex string) error {
-	return fmt.Errorf("not implemented")
+func (l L1CoreRPC) Send(txnHex string) (txid string, err error) {
+	txn, err := doge.HexDecode(txnHex)
+	if err != nil {
+		return "", fmt.Errorf("sendrawtransaction: could not decode txnHex")
+	}
+	err = l.request("sendrawtransaction", []any{txnHex}, &txid)
+	if len(txid) != 64 || !doge.IsValidHex(txid) {
+		return "", fmt.Errorf("sendrawtransaction: did not return txid")
+	}
+	hash := doge.HexEncode(doge.DoubleSha256(txn))
+	if txid != hash {
+		log.Printf("[!] sendrawtransaction: did not return the expected txid: %s vs %s", txid, hash)
+	}
+	return
 }
