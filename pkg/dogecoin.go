@@ -25,7 +25,7 @@ type L1 interface {
 	GetBestBlockHash() (string, error)
 	GetBlockCount() (int64, error)
 	GetTransaction(txnHash string) (RawTxn, error)
-	Send(txnHex string) error
+	Send(txnHex string) (txid string, err error)
 	//SignMessage([]byte, Privkey) (string, error)
 }
 
@@ -41,8 +41,7 @@ var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
 
 // A new transaction (hex) from libdogecoin.
 type NewTxn struct {
-	TxnHex       string // Encoded Transaction in Hexadecimal format.
-	TxID         string // Transaction ID of the new transaction (tx hash)
+	TxnHex       string // Transaction in Hexadecimal format.
 	TotalIn      CoinAmount
 	TotalOut     CoinAmount
 	FeeAmount    CoinAmount

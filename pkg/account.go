@@ -97,6 +97,7 @@ func (a *Account) NextChangeAddress(lib L1) (Address, error) {
 	if err != nil {
 		return "", err
 	}
+	a.NextInternalKey += 1 // "use" the key index.
 	return address, nil
 }
 
