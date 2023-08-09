@@ -2,6 +2,7 @@ package giga
 
 import (
 	"errors"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -16,8 +17,9 @@ type Invoice struct {
 	Items         []Item  `json:"items"`
 	Confirmations int32   `json:"confirmations"` // number of confirmed blocks (since block_id)
 	// These are used internally to track invoice status.
-	KeyIndex uint32 `json:"-"` // which HD Wallet child-key was generated
-	BlockID  string `json:"-"` // transaction seen in this mined block
+	KeyIndex uint32    `json:"-"` // which HD Wallet child-key was generated
+	BlockID  string    `json:"-"` // transaction seen in this mined block
+	Created  time.Time `json:"created"`
 }
 
 // CalcTotal sums up the Items listed on the Invoice.

@@ -2,6 +2,7 @@ package giga
 
 import (
 	"fmt"
+	"time"
 )
 
 type API struct {
@@ -50,7 +51,7 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 		confirmations = request.Confirmations
 	}
 
-	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex, Confirmations: confirmations}
+	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex, Confirmations: confirmations, Created: time.Now()}
 
 	//validate invoice
 	err = i.Validate()
