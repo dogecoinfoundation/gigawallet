@@ -95,9 +95,7 @@ type StoreTransaction interface {
 	// GetPayment returns the Payment for the given ID
 	GetPayment(account Address, id int64) (Payment, error)
 
-	// Update payment status: txid, paidHeight, notifyHeight.
-	// NOTE: always use GetPayment in the same transaction, otherwise this might
-	// stomp over changes coming from another thread.
+	// Update txid on a payment.
 	UpdatePaymentWithTxID(paymentID int64, txID string) error
 
 	// ListPayments returns a list of payments for an account.
