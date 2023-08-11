@@ -285,7 +285,7 @@ func listAccountsModifiedCommon(tx Queryable, cursor int64, limit int) (ids []st
 }
 
 func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
-	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE invoice_address = ?", addr)
+	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations, created FROM invoice WHERE invoice_address = ?", addr)
 	var id giga.Address
 	var account giga.Address
 	var tx_id string
@@ -294,7 +294,8 @@ func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
 	var key_index uint32
 	var block_id string
 	var confirmations int32
-	err := row.Scan(&id, &account, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations)
+	var created time.Time
+	err := row.Scan(&id, &account, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations, &created)
 	if err == sql.ErrNoRows {
 		return giga.Invoice{}, giga.NewErr(giga.NotFound, "invoice not found: %v", addr)
 	}
@@ -315,6 +316,7 @@ func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
 		KeyIndex:      key_index,
 		BlockID:       block_id,
 		Confirmations: confirmations,
+		Created:       created,
 	}, nil
 }
 
@@ -499,8 +501,8 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	}
 	total := inv.CalcTotal()
 	_, err = t.tx.Exec(
-		"insert into invoice(invoice_address, account_address, txn_id, vendor, items, total, key_index, block_id, confirmations) values(?,?,?,?,?,?,?,?,?)",
-		inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), total, inv.KeyIndex, inv.BlockID, inv.Confirmations,
+		"insert into invoice(invoice_address, account_address, txn_id, vendor, items, total, key_index, block_id, confirmations, created) values(?,?,?,?,?,?,?,?,?,?)",
+		inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), total, inv.KeyIndex, inv.BlockID, inv.Confirmations, inv.Created,
 	)
 	if err != nil {
 		return dbErr(err, "createInvoice: insert")

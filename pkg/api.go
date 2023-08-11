@@ -111,7 +111,13 @@ func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoices
 	return r, nil
 }
 
-func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error) {
+type AccountCreateRequest struct {
+	PayoutAddress   string `json:"payout_address"`
+	PayoutThreshold string `json:"payout_threshold"`
+	PayoutFrequency string `json:"payout_frequency"`
+}
+
+func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upsert bool) (AccountPublic, error) {
 	// Transaction retry loop.
 	for {
 		txn, err := a.Store.Begin()
@@ -136,9 +142,12 @@ func (a API) CreateAccount(foreignID string, upsert bool) (AccountPublic, error)
 			return AccountPublic{}, NewErr(NotAvailable, "cannot create address: %v", err)
 		}
 		account := Account{
-			Address:   addr,
-			ForeignID: foreignID,
-			Privkey:   priv,
+			Address:         addr,
+			ForeignID:       foreignID,
+			PayoutAddress:   request.PayoutAddress,
+			PayoutThreshold: request.PayoutThreshold,
+			PayoutFrequency: request.PayoutFrequency,
+			Privkey:         priv,
 		}
 
 		// Generate and store addresses for transaction discovery on blockchain.

@@ -112,7 +112,7 @@ func (a *Account) GetUTXOSource(store Store) *UTXOSource {
 // GetPublicInfo gets those parts of the Account that are safe
 // to expose to the outside world (i.e. NOT private keys)
 func (a Account) GetPublicInfo() AccountPublic {
-	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID}
+	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID, PayoutAddress: a.PayoutAddress, PayoutThreshold: a.PayoutThreshold, PayoutFrequency: a.PayoutFrequency}
 }
 
 type AccountPublic struct {
