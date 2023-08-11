@@ -2,12 +2,12 @@ package main
 
 import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
-	"github.com/dogecoinfoundation/gigawallet/pkg/broker"
 	"github.com/dogecoinfoundation/gigawallet/pkg/chaintracker"
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 	"github.com/dogecoinfoundation/gigawallet/pkg/core"
 	"github.com/dogecoinfoundation/gigawallet/pkg/dogecoin"
 	"github.com/dogecoinfoundation/gigawallet/pkg/receivers"
+	"github.com/dogecoinfoundation/gigawallet/pkg/services"
 	"github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"github.com/dogecoinfoundation/gigawallet/pkg/webapi"
 )
@@ -44,17 +44,13 @@ func Server(conf giga.Config) {
 	defer store.Close()
 
 	// Start internal services
-	receivers.StartServices(c, bus, conf, store)
+	services.StartServices(c, bus, conf, store)
 
 	// Start the Chain Tracker
 	chaser, follower, err := chaintracker.StartChainTracker(c, conf, l1, store)
 	if err != nil {
 		panic(err)
 	}
-
-	// Start the PaymentBroker service (deprecated)
-	pb := broker.NewPaymentBroker(conf, store)
-	c.Service("Payment Broker", pb)
 
 	// Start the Core listener service (ZMQ)
 	corez, err := core.NewCoreZMQReceiver(bus, conf)
