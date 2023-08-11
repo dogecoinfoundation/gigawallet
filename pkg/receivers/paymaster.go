@@ -6,26 +6,25 @@ import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 )
 
-type BalanceTracker struct {
-	// BalanceTracker receives giga.Message via Rec
+type PayMaster struct {
+	// PayMaster receives giga.Message via Rec
 	Rec chan giga.Message
 }
 
-func NewBalanceTracker() BalanceTracker {
-	// create an BalanceTracker
-	btr := BalanceTracker{
+func NewPayMaster() PayMaster {
+	master := PayMaster{
 		make(chan giga.Message, 100),
 	}
-	return btr
+	return master
 }
 
 // Implements giga.MessageSubscriber
-func (l BalanceTracker) GetChan() chan giga.Message {
+func (l PayMaster) GetChan() chan giga.Message {
 	return l.Rec
 }
 
 // Implements conductor.Service
-func (l BalanceTracker) Run(started, stopped chan bool, stop chan context.Context) error {
+func (l PayMaster) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
 		started <- true
 		for {

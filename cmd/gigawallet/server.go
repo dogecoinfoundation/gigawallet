@@ -43,6 +43,9 @@ func Server(conf giga.Config) {
 	}
 	defer store.Close()
 
+	// Start internal services
+	receivers.StartServices(c, bus, conf, store)
+
 	// Start the Chain Tracker
 	chaser, follower, err := chaintracker.StartChainTracker(c, conf, l1, store)
 	if err != nil {

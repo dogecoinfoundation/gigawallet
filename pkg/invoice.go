@@ -42,13 +42,13 @@ var ItemTypes []string = []string{
 }
 
 type Item struct {
-	Type        string          `json:"type"` //ItemTypes
-	Name        string          `json:"name"`
-	SKU         string          `json:"sku"`
-	Description string          `json:"description"`
-	Value       decimal.Decimal `json:"value"`
-	Quantity    int             `json:"quantity"`
-	ImageLink   string          `json:"image_link"`
+	Type        string     `json:"type"` //ItemTypes
+	Name        string     `json:"name"`
+	SKU         string     `json:"sku"`
+	Description string     `json:"description"`
+	Value       CoinAmount `json:"value"`
+	Quantity    int        `json:"quantity"`
+	ImageLink   string     `json:"image_link"`
 }
 
 func (i *Invoice) Validate() error {

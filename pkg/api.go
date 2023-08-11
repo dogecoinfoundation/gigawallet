@@ -278,12 +278,12 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 		tx.Rollback()
 		return
 	}
-	// TODO: create the `payment` row with NULL block_height & confirm_height & txid
-	// payId, err = tx.CreatePayment(account.Address, amount, payTo) // TODO
-	// if err != nil {
-	//	tx.Rollback()
-	// 	return
-	// }
+	// Create the `payment` row with no txid or paid_height.
+	newPayment, err := tx.CreatePayment(account.Address, amount, payTo)
+	if err != nil {
+		tx.Rollback()
+		return
+	}
 	// err = tx.ReserveUTXOsForPayment(payId, builder.GetUTXOs()) // TODO
 	// if err != nil {
 	//  tx.Rollback()
@@ -306,11 +306,16 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 	if err != nil {
 		return
 	}
-	// err = tx.UpdatePaymentWithTxid(paymentId, txid) // TODO
-	// if err != nil {
-	//	tx.Rollback()
-	// 	return
-	// }
+	updPayment, err := tx.GetPayment(account.Address, newPayment.ID) // always re-fetch!
+	if err != nil {
+		return
+	}
+	updPayment.PaidTxID = txid
+	err = tx.UpdatePayment(updPayment)
+	if err != nil {
+		tx.Rollback()
+		return
+	}
 	err = tx.Commit()
 	if err != nil {
 		return

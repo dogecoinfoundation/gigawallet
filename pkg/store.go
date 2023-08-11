@@ -21,13 +21,13 @@ type Store interface {
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
 
 	// GetPayment returns the Payment for the given ID
-	GetPayment(id int) (Payment, error)
+	GetPayment(account Address, id int64) (Payment, error)
 
 	// ListPayments returns a list of payments for an account.
 	// pagination: next_cursor should be passed as 'cursor' on the next call (initial cursor = 0)
 	// pagination: when next_cursor == 0, that is the final page of results.
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
-	ListPayments(account Address, cursor int, limit int) (items []Payment, next_cursor int, err error)
+	ListPayments(account Address, cursor int64, limit int) (items []Payment, next_cursor int64, err error)
 
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
@@ -36,6 +36,11 @@ type Store interface {
 	// GetChainState gets the last saved Best Block information (checkpoint for restart)
 	// It returns giga.NotFound if the chainstate record does not exist.
 	GetChainState() (ChainState, error)
+
+	// Get a Service Cursor, used to keep track of where services are "up to"
+	// in terms of account sequence numbers. This means services can always catch up
+	// even if they get a long way behind (e.g. due to a bug, or comms push-back)
+	GetServiceCursor(name string) (int64, error)
 
 	// Close the store.
 	Close()
@@ -59,6 +64,11 @@ type StoreTransaction interface {
 	// CalculateBalance queries across UTXOs to calculate account balances.
 	CalculateBalance(accountID Address) (AccountBalance, error)
 
+	// Find accounts that have been modified since `cursor` in terms of
+	// account sequence numbers. Returns IDs of the accounts and the cursor
+	// for the next call (maximum cursor covered by ids, plus one)
+	ListAccountsModifiedSince(cursor int64, limit int) (ids []string, nextCursor int64, err error)
+
 	// GetInvoice returns the invoice with the given ID.
 	// It returns giga.NotFound if the invoice does not exist (key: ID/address)
 	GetInvoice(id Address) (Invoice, error)
@@ -80,16 +90,21 @@ type StoreTransaction interface {
 
 	// Store a 'payment' which represents a pay-out to another address from a gigawallet
 	// managed account.
-	CreatePayment(Address, CoinAmount, Address) (Payment, error)
+	CreatePayment(account Address, amount CoinAmount, payTo Address) (Payment, error)
 
 	// GetPayment returns the Payment for the given ID
-	GetPayment(id int) (Payment, error)
+	GetPayment(account Address, id int64) (Payment, error)
+
+	// Update payment status: txid, paidHeight, notifyHeight.
+	// NOTE: always use GetPayment in the same transaction, otherwise this might
+	// stomp over changes coming from another thread.
+	UpdatePayment(payment Payment) error
 
 	// ListPayments returns a list of payments for an account.
 	// pagination: next_cursor should be passed as 'cursor' on the next call (initial cursor = 0)
 	// pagination: when next_cursor == 0, that is the final page of results.
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
-	ListPayments(account Address, cursor int, limit int) (items []Payment, next_cursor int, err error)
+	ListPayments(account Address, cursor int64, limit int) (items []Payment, next_cursor int64, err error)
 
 	// CreateAccount stores a NEW account.
 	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)
@@ -108,19 +123,25 @@ type StoreTransaction interface {
 	// Also find the key index of `pkhAddress` within the HD wallet.
 	FindAccountForAddress(pkhAddress Address) (accountID Address, keyIndex uint32, isInternal bool, err error)
 
-	// What it says on the tin. We should consider
-	// adding this to Store as a fast-path
-	MarkInvoiceAsPaid(address Address) error
-
 	// UpdateChainState updates the Best Block information (checkpoint for restart)
 	UpdateChainState(state ChainState, writeRoot bool) error
 
 	// Create a new Unspent Transaction Output in the database.
 	CreateUTXO(utxo UTXO) error
 
-	// Mark an Unspent Transaction Output as spent (at the given block height)
-	// Returns the ID of the Account that can spend this UTXO, if known to Gigawallet.
-	MarkUTXOSpent(txID string, vOut int, spentHeight int64) (accountId string, scriptAddress Address, err error)
+	// Mark an Unspent Transaction Output as spent (storing the given block-height and txid)
+	// Returns the ID of the Account that owns this UTXO, if known to Gigawallet.
+	MarkUTXOSpent(txID string, vOut int, spentHeight int64, spendTxID string) (accountId string, scriptAddress Address, err error)
+
+	// Mark payments as on-chain that match any of the txIDs, storing the given block-height.
+	// Returns the IDs of the Accounts that own any affected payments (can have duplicates)
+	MarkPaymentsOnChain(txIDs []string, blockHeight int64) (affectedAcconts []string, err error)
+
+	// Mark all payments as paid after `confirmations` blocks,
+	// at the current block height passed in blockHeight. This should be called each
+	// time a new block is processed, i.e. blockHeight increases, but it is safe to
+	// call less often (e.g. after a batch of blocks)
+	ConfirmPayments(confirmations int, blockHeight int64) (affectedAcconts []string, err error)
 
 	// Mark all UTXOs as confirmed (available to spend) after `confirmations` blocks,
 	// at the current block height passed in blockHeight. This should be called each
@@ -128,22 +149,21 @@ type StoreTransaction interface {
 	// call less often (e.g. after a batch of blocks)
 	ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAcconts []string, err error)
 
-	// RevertUTXOsAboveHeight clears chain-heights above the given height recorded in UTXOs.
-	// This serves to roll back the effects of adding or spending those UTXOs.
-	RevertUTXOsAboveHeight(maxValidHeight int64) error
+	// Mark all invoices paid that have corresponding confirmed UTXOs [via ConfirmUTXOs]
+	// that sum up to the invoice value, storing the given block-height. Returns the IDs
+	// of the Accounts that own any affected invoices (can return duplicates)
+	MarkInvoicesPaid(blockHeight int64) (affectedAcconts []string, err error)
 
-	// RevertTxnsAboveHeight clears chain-heights above the given height recorded in Txns.
-	// This serves to roll back the effects of creating or confirming those Txns.
-	RevertTxnsAboveHeight(maxValidHeight int64) error
+	// RevertChangesAboveHeight clears chain-heights above the given height recorded in UTXOs and Payments.
+	// This serves to roll back the effects of adding or spending those UTXOs and/or Payments.
+	RevertChangesAboveHeight(maxValidHeight int64, nextSeq int64) (newSeq int64, err error)
 
 	// Increment the chain-sequence-number for multiple accounts.
 	// Use this after modifying accounts' blockchain-derived state (UTXOs, TXNs)
-	IncChainSeqForAccounts(accountIds []string) error
+	IncChainSeqForAccounts(accounts map[string]int64) error
 
-	// Find all accounts with UTXOs or TXNs created or modified above the specified block height,
-	// and increment those accounts' chain-sequence-number.
-	// MUST be done before rolling back chainstate, i.e. RevertUTXOsAboveHeight, RevertTxnsAboveHeight.
-	IncAccountsAffectedByRollback(maxValidHeight int64) ([]string, error)
+	// Update a service cursor (see GetServiceCursor)
+	SetServiceCursor(name string, cursor int64) error
 }
 
 // Current chainstate in the database.
@@ -154,4 +174,12 @@ type ChainState struct {
 	FirstHeight     int64  // block height when gigawallet first started to sync this blockchain.
 	BestBlockHash   string // last block processed by gigawallet (effects included in DB)
 	BestBlockHeight int64  // last block height processed by gigawallet (effects included in DB)
+	NextSeq         int64  // next sequence-number for services tracking account activity
+}
+
+// Get the next sequence-number for tracking account activity.
+func (c *ChainState) GetSeq() int64 {
+	seq := c.NextSeq
+	c.NextSeq += 1
+	return seq
 }

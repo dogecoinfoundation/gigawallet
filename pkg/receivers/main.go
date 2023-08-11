@@ -12,14 +12,18 @@ func SetUpReceivers(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Co
 
 	// Set up configured Callbacks
 	SetupCallbacks(cond, bus, conf)
+}
 
-	// InvoiceUpdater marks invoices paid when transactions have fully paid them.
-	iup := NewInvoiceUpdater()
-	cond.Service("InvoiceUpdater", iup)
-	bus.Register(iup, giga.ACC_CHAIN_ACTIVITY)
+func StartServices(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Config, store giga.Store) {
+	// BalanceKeeper sends "Balance Change" events.
+	keeper := NewBalanceKeeper(store)
+	cond.Service("NewBalanceKeeper", keeper)
 
-	// BalanceTracker updates wallet balances after transactions are confirmed.
-	btr := NewBalanceTracker()
-	cond.Service("BalanceTracker", btr)
-	bus.Register(iup, giga.ACC_CHAIN_ACTIVITY)
+	// InvoiceStamper sends "Invoice Paid" and "Invoice Partial Payment" events.
+	stamper := NewInvoiceStamper()
+	cond.Service("InvoiceStamper", stamper)
+
+	// PayMaster sends "Payment Accepted" and "Payment Confirmed" events.
+	master := NewPayMaster()
+	cond.Service("PayMaster", master)
 }
