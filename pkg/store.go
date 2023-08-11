@@ -98,7 +98,7 @@ type StoreTransaction interface {
 	// Update payment status: txid, paidHeight, notifyHeight.
 	// NOTE: always use GetPayment in the same transaction, otherwise this might
 	// stomp over changes coming from another thread.
-	UpdatePayment(payment Payment) error
+	UpdatePaymentWithTxID(paymentID int64, txID string) error
 
 	// ListPayments returns a list of payments for an account.
 	// pagination: next_cursor should be passed as 'cursor' on the next call (initial cursor = 0)

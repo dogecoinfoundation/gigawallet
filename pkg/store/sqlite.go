@@ -475,10 +475,8 @@ func (t SQLiteStoreTransaction) GetPayment(account giga.Address, id int64) (giga
 	return getPaymentCommon(t.tx, account, id)
 }
 
-func (t SQLiteStoreTransaction) UpdatePayment(payment giga.Payment) error {
-	_, err := t.tx.Exec(
-		"UPDATE payment SET paid_txid=$1, paid_height=$2, notify_height=$3 WHERE id=$4",
-		payment.PaidTxID, payment.PaidHeight, payment.NotifyHeight, payment.ID)
+func (t SQLiteStoreTransaction) UpdatePaymentWithTxID(paymentID int64, txID string) error {
+	_, err := t.tx.Exec("UPDATE payment SET paid_txid=$1 WHERE id=$2", txID, paymentID)
 	if err != nil {
 		return dbErr(err, "UpdatePayment: stmt.Exec update")
 	}

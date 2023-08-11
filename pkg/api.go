@@ -279,7 +279,7 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 		return
 	}
 	// Create the `payment` row with no txid or paid_height.
-	newPayment, err := tx.CreatePayment(account.Address, amount, payTo)
+	payment, err := tx.CreatePayment(account.Address, amount, payTo)
 	if err != nil {
 		tx.Rollback()
 		return
@@ -306,12 +306,7 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 	if err != nil {
 		return
 	}
-	updPayment, err := tx.GetPayment(account.Address, newPayment.ID) // always re-fetch!
-	if err != nil {
-		return
-	}
-	updPayment.PaidTxID = txid
-	err = tx.UpdatePayment(updPayment)
+	err = tx.UpdatePaymentWithTxID(payment.ID, txid)
 	if err != nil {
 		tx.Rollback()
 		return
