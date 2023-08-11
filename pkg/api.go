@@ -3,6 +3,8 @@ package giga
 import (
 	"fmt"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 type API struct {
@@ -207,9 +209,12 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 	for k, v := range update {
 		switch k {
 		case "PayoutAddress":
-			acc.PayoutAddress = v.(string)
+			acc.PayoutAddress = v.(Address)
 		case "PayoutThreshold":
-			acc.PayoutThreshold = v.(string)
+			acc.PayoutThreshold, err = decimal.NewFromString(v.(string))
+			if err != nil {
+				return AccountPublic{}, err
+			}
 		case "PayoutFrequency":
 			acc.PayoutFrequency = v.(string)
 		default:

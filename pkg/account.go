@@ -20,8 +20,8 @@ type Account struct {
 	NextExternalKey  uint32  // next external HD Wallet address to use for an invoice or pay-to address.
 	NextPoolInternal uint32  // next internal HD Wallet address to insert into account_address table.
 	NextPoolExternal uint32  // next external HD Wallet address to insert into account_address table.
-	PayoutAddress    string
-	PayoutThreshold  string
+	PayoutAddress    Address
+	PayoutThreshold  CoinAmount
 	PayoutFrequency  string
 	utxoSource       *UTXOSource // cache: UTXOSource instance for this account.
 }
