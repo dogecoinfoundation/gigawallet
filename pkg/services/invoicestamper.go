@@ -1,4 +1,4 @@
-package receivers
+package services
 
 import (
 	"context"
@@ -6,26 +6,25 @@ import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 )
 
-type InvoiceUpdater struct {
-	// InvoiceUpdater receives giga.Message via Rec
+type InvoiceStamper struct {
+	// InvoiceStamper receives giga.Message via Rec
 	Rec chan giga.Message
 }
 
-func NewInvoiceUpdater() InvoiceUpdater {
-	// create an InvoiceUpdater
-	iup := InvoiceUpdater{
+func NewInvoiceStamper() InvoiceStamper {
+	master := InvoiceStamper{
 		make(chan giga.Message, 100),
 	}
-	return iup
+	return master
 }
 
 // Implements giga.MessageSubscriber
-func (l InvoiceUpdater) GetChan() chan giga.Message {
+func (l InvoiceStamper) GetChan() chan giga.Message {
 	return l.Rec
 }
 
 // Implements conductor.Service
-func (l InvoiceUpdater) Run(started, stopped chan bool, stop chan context.Context) error {
+func (l InvoiceStamper) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
 		started <- true
 		for {

@@ -15,6 +15,8 @@ type UTXO struct {
 	KeyIndex      uint32     // Account HD Wallet key-index of the ScriptAddress (needed to spend)
 	IsInternal    bool       // Account HD Wallet internal/external address flag for ScriptAddress (needed to spend)
 	BlockHeight   int64      // Block Height of the Block that contains this UTXO (NB. used only when inserting!)
+	SpendTxID     string     // TxID of the spending transaction
+	PaymentID     int64      // ID of payment in `payment` table (if spent by us)
 }
 
 // NewTxOut is an output from a new Txn, i.e. creates a new UTXO.

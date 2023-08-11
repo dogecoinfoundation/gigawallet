@@ -30,6 +30,7 @@ type ChainPos struct {
 	BlockHash     string // last block processed ("" at genesis)
 	BlockHeight   int64  // height of last block (0 at genesis)
 	NextBlockHash string // optional: if known, else ""
+	NextSeq       int64  // next seq-no for account change tracking
 }
 
 /*
@@ -145,7 +146,7 @@ func (c *ChainFollower) fetchStartingPos() ChainPos {
 			// Make sure we're syncing the same blockchain as before.
 			if state.RootHash == rootBlock {
 				log.Println("ChainFollower: RESUME SYNC :", state.BestBlockHeight)
-				return ChainPos{state.BestBlockHash, state.BestBlockHeight, ""}
+				return ChainPos{state.BestBlockHash, state.BestBlockHeight, "", state.NextSeq}
 			} else {
 				log.Println("ChainFollower: WRONG CHAIN!")
 				log.Println("ChainFollower: Block#1 we have in DB:", state.RootHash)
@@ -173,6 +174,7 @@ func (c *ChainFollower) fetchStartingPos() ChainPos {
 				FirstHeight:     firstHeight,
 				BestBlockHash:   firstBlockHash,
 				BestBlockHeight: firstHeight,
+				NextSeq:         state.NextSeq,
 			}, true)
 			if err != nil {
 				tx.Rollback()
@@ -208,7 +210,7 @@ func (c *ChainFollower) setSyncHeight(cmd giga.ReSyncChainFollowerCmd, pos Chain
 	}
 	// This is correct in both cases: if the new block is after current,
 	// nothing will match the rollback queries, it will just update ChainState.
-	pos = c.rollBackChainState(cmd.BlockHash)
+	pos = c.rollBackChainState(cmd.BlockHash, pos)
 	return pos
 }
 
@@ -230,7 +232,7 @@ func (c *ChainFollower) followChainToTip(pos ChainPos) ChainPos {
 		} else {
 			// The last block we processed is no longer on-chain, so roll back
 			// that block and prior blocks until we find a block that is on-chain.
-			pos = c.rollBackChainState(lastBlock.PreviousBlockHash)
+			pos = c.rollBackChainState(lastBlock.PreviousBlockHash, pos)
 		}
 	}
 	// Walk forwards on the blockchain until we reach the tip.
@@ -253,15 +255,16 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 	var startPos ChainPos = pos
 	var rollbackFrom string = ""
 	var blockCount int = 0
+	var txIDs []string
 	var changes []UTXOChange
 	for pos.NextBlockHash != "" {
 		//log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
 		block := c.fetchBlock(pos.NextBlockHash)
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
-			changes = c.processBlock(block, changes)
+			changes, txIDs = c.processBlock(block, changes, txIDs)
 			// Progress has been made.
-			pos = ChainPos{block.Hash, block.Height, block.NextBlockHash}
+			pos = ChainPos{block.Hash, block.Height, block.NextBlockHash, pos.NextSeq}
 			blockCount++
 			if blockCount > BLOCKS_PER_COMMIT {
 				// Commit our progress every BATCH_SIZE blocks.
@@ -283,9 +286,10 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 		// However, eventually we bail and retry the whole process (in case something else is wrong)
 		attempts := 10
 		for {
-			err := c.attemptToApplyChanges(changes, pos)
+			newPos, err := c.attemptToApplyChanges(changes, txIDs, pos)
 			if err == nil {
-				break // success.
+				pos = newPos // update on success.
+				break        // success.
 			} else {
 				c.sleepForRetry(err, 0) // always delay.
 				attempts -= 1
@@ -299,47 +303,101 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 	}
 	// 3. If a fork-point was found above, roll back chainstate to that point.
 	if rollbackFrom != "" {
-		pos = c.rollBackChainState(rollbackFrom)
+		pos = c.rollBackChainState(rollbackFrom, pos)
 	}
 	return pos
 }
 
-func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, pos ChainPos) error {
-	affectedAcconts := make(map[string]any)
+type AccountMap struct {
+	Accounts map[string]int64
+	NextSeq  int64
+}
+
+func (m *AccountMap) AddIds(ids []string) {
+	for _, id := range ids {
+		if _, present := m.Accounts[id]; !present {
+			m.Accounts[id] = m.NextSeq
+			m.NextSeq += 1
+		}
+	}
+}
+
+func (m *AccountMap) Add(id string) {
+	if _, present := m.Accounts[id]; !present {
+		m.Accounts[id] = m.NextSeq
+		m.NextSeq += 1
+	}
+}
+
+func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, txIDs []string, pos ChainPos) (ChainPos, error) {
+	accounts := &AccountMap{NextSeq: pos.NextSeq}
 	tx := c.beginStoreTxn()
-	err := c.applyUTXOChanges(tx, changes, affectedAcconts)
+	err := c.applyUTXOChanges(tx, changes, accounts)
 	if err != nil {
 		// Unable to complete block processing (already logged) - roll back.
 		tx.Rollback()
-		return err // retry.
+		return pos, err // retry.
 	}
 	// Confirm UTXOs as a result of accepting this block.
 	// This populates the `spendable_height` field in UTXOs with the current BlockHeight,
 	// which flags the UTXOs as spendable by the owner account (we don't allow spending
 	// UTXOs in not-yet-confirmed transactions; we treat those as "incoming balance.")
+	// Also, marking Invoices paid depends on having their incoming UTXOs confirmed.
+	// This is used by InvoiceStamper to send "Partial Payment" events.
 	utxoAccounts, err := tx.ConfirmUTXOs(c.confirmations, pos.BlockHeight)
 	if err != nil {
 		// Unable to complete block processing - roll back.
 		log.Println("ChainFollower: ConfirmUTXOs:", err)
 		tx.Rollback()
-		return err // retry.
+		return pos, err // retry.
 	}
-	for _, acct := range utxoAccounts {
-		affectedAcconts[acct] = nil // set-insert.
+	accounts.AddIds(utxoAccounts)
+	// Mark Invoices as paid if the sum of their Confirmed UTXOs is at least the invoice total.
+	// This records the block-height where we decide the invoice is paid (paid_height)
+	// This is used by InvoiceStamper to send "Invoice Paid" events.
+	invoiceAccounts, err := tx.MarkInvoicesPaid(pos.BlockHeight)
+	if err != nil {
+		// Unable to complete block processing - roll back.
+		log.Println("ChainFollower: MarkInvoicesPaid:", err)
+		tx.Rollback()
+		return pos, err // retry.
 	}
-	// Increment the chain-seq number on all affected accounts.
-	// This is used by BalanceKeeper to send balance-change events.
-	uniqueAffected := mapKeys(affectedAcconts)
-	err = tx.IncChainSeqForAccounts(uniqueAffected)
+	accounts.AddIds(invoiceAccounts)
+	// Mark payments as on-chain if they match the transaction ids in this block.
+	// This records to block-height where we saw the payment happen (paid_height)
+	// Once paid_height is populated, ConfirmPayments will monitor for confirmation.
+	// This is used by PayMaster to send "Payment Accepted" events.
+	paymentAccounts, err := tx.MarkPaymentsOnChain(txIDs, pos.BlockHeight)
+	if err != nil {
+		// Unable to complete block processing - roll back.
+		log.Println("ChainFollower: MarkPaymentsOnChain:", err)
+		tx.Rollback()
+		return pos, err // retry.
+	}
+	accounts.AddIds(paymentAccounts)
+	// Confirm payments that have been on-chain for `confirmations` blocks.
+	// This records the block-height where we decided the payment was confirmed.
+	// This is used by PayMaster to send "Payment Confirmed" events.
+	confirmAccounts, err := tx.ConfirmPayments(c.confirmations, pos.BlockHeight)
+	if err != nil {
+		// Unable to complete block processing - roll back.
+		log.Println("ChainFollower: ConfirmPayments:", err)
+		tx.Rollback()
+		return pos, err // retry.
+	}
+	accounts.AddIds(confirmAccounts)
+	// Write the new sequence numbers on all affected accounts.
+	// This is used by (multiple) Services to keep track of new account changes.
+	err = tx.IncChainSeqForAccounts(accounts.Accounts)
 	if err != nil {
 		// Unable to complete block processing - roll back.
 		log.Println("ChainFollower: IncChainSeqForAccounts:", err)
 		tx.Rollback()
-		return err // retry.
+		return pos, err // retry.
 	}
 	// Report affected accounts in the log (useful for now)
-	for _, acct := range uniqueAffected {
-		log.Println("ChainFollower: account was affected:", acct)
+	for acct, seq := range accounts.Accounts {
+		log.Printf("ChainFollower: account was affected: %s (%v)", acct, seq)
 	}
 	// We have made forward progress:
 	// Update the Best Block in the database (checkpoint for restart)
@@ -347,32 +405,24 @@ func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, pos ChainPos
 	err = tx.UpdateChainState(giga.ChainState{
 		BestBlockHash:   pos.BlockHash,
 		BestBlockHeight: pos.BlockHeight,
+		NextSeq:         accounts.NextSeq,
 	}, false)
 	if err != nil {
 		log.Println("ChainFollower: UpdateChainState:", err)
 		tx.Rollback()
-		return err // retry.
+		return pos, err // retry.
 	}
 	// Commit the entire transaction with all changes in the batch.
 	err = tx.Commit()
 	if err != nil {
 		log.Println("ChainFollower: cannot commit DB transaction:", err)
-		return err // retry.
+		return pos, err // retry.
 	}
-	return nil
+	pos.NextSeq = accounts.NextSeq // after commit.
+	return pos, nil
 }
 
-func mapKeys(m map[string]any) []string {
-	keys := make([]string, len(m))
-	i := 0
-	for k := range m {
-		keys[i] = k
-		i++
-	}
-	return keys
-}
-
-func (c *ChainFollower) rollBackChainState(fromHash string) ChainPos {
+func (c *ChainFollower) rollBackChainState(fromHash string, oldPos ChainPos) ChainPos {
 	log.Println("ChainFollower: rolling back from:", fromHash)
 	// Walk backwards along the chain (in Core) to find an on-chain block.
 	for {
@@ -385,40 +435,24 @@ func (c *ChainFollower) rollBackChainState(fromHash string) ChainPos {
 			c.checkShutdown() // loops must check for shutdown.
 		} else {
 			// Found an on-chain block: roll back all chainstate above this block-height.
-			pos := ChainPos{block.Hash, block.Height, block.NextBlockHash}
-			c.rollBackChainStateToPos(pos)
+			pos := ChainPos{block.Hash, block.Height, block.NextBlockHash, oldPos.NextSeq}
+			pos.NextSeq = c.rollBackChainStateToPos(pos)
 			// Caller needs this block hash and next block hash (if any)
 			return pos
 		}
 	}
 }
 
-func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
-	maxValidHeight := pos.BlockHeight
-	log.Println("ChainFollower: rolling back chainstate to height:", maxValidHeight)
+func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) int64 {
+	log.Println("ChainFollower: rolling back chainstate to height:", pos.BlockHeight)
 	// wrap the following in a transaction with retry.
 	for {
 		tx := c.beginStoreTxn()
-		// Increment ChainSeq for all accounts that have UTXOs or Txns above maxValidHeight.
-		_, err := tx.IncAccountsAffectedByRollback(maxValidHeight)
-		if err != nil {
-			tx.Rollback()
-			log.Println("ChainFollower: IncAccountsAffectedByRollback:", err)
-			c.sleepForRetry(err, 0)
-			continue // retry.
-		}
-		// Roll back chainstate above maxValidHeight.
-		err = tx.RevertUTXOsAboveHeight(maxValidHeight)
+		// Roll back chainstate above the specified block height.
+		newSeq, err := tx.RevertChangesAboveHeight(pos.BlockHeight, pos.NextSeq)
 		if err != nil {
 			tx.Rollback()
 			log.Println("ChainFollower: RevertUTXOsAboveHeight:", err)
-			c.sleepForRetry(err, 0)
-			continue // retry.
-		}
-		err = tx.RevertTxnsAboveHeight(maxValidHeight)
-		if err != nil {
-			tx.Rollback()
-			log.Println("ChainFollower: RevertTxnsAboveHeight:", err)
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
@@ -426,6 +460,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 		err = tx.UpdateChainState(giga.ChainState{
 			BestBlockHash:   pos.BlockHash,
 			BestBlockHeight: pos.BlockHeight,
+			NextSeq:         newSeq,
 		}, false)
 		if err != nil {
 			tx.Rollback()
@@ -440,7 +475,7 @@ func (c *ChainFollower) rollBackChainStateToPos(pos ChainPos) {
 			c.sleepForRetry(err, 0)
 			continue // retry.
 		}
-		return // success.
+		return newSeq // success.
 	}
 }
 
@@ -461,9 +496,10 @@ type UTXOChange struct {
 	ScriptType    giga.ScriptType // new
 	ScriptAddress giga.Address    // new
 	Height        int64           // new, spent
+	SpendTxID     string          // spent
 }
 
-func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTXOChange, affectedAcconts map[string]any) error {
+func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTXOChange, accounts *AccountMap) error {
 	for _, utxo := range changes {
 		switch utxo.Tag {
 		case utxoTagNew:
@@ -486,7 +522,7 @@ func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTX
 					log.Println("ChainFollower: CreateUTXO:", err, utxo.TxID, utxo.VOut)
 					return err // retry.
 				}
-				affectedAcconts[string(accountID)] = nil // add to set.
+				accounts.Add(string(accountID))
 			} else {
 				if giga.IsNotFoundError(err) {
 					// log.Println("ChainFollower: no account matches new UTXO:", txn_id, vout.N)
@@ -496,24 +532,25 @@ func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTX
 				}
 			}
 		case utxoTagSpent:
-			accountID, _, err := tx.MarkUTXOSpent(utxo.TxID, utxo.VOut, utxo.Height)
+			accountID, _, err := tx.MarkUTXOSpent(utxo.TxID, utxo.VOut, utxo.Height, utxo.SpendTxID)
 			if err != nil {
 				log.Println("ChainFollower: MarkUTXOSpent:", err, utxo.TxID, utxo.VOut)
 				return err // retry.
 			}
 			if accountID != "" {
 				log.Println("ChainFollower: marking UTXO spent:", utxo.TxID, utxo.VOut, utxo.Height)
-				affectedAcconts[accountID] = nil // add to set.
+				accounts.Add(accountID)
 			}
 		}
 	}
-	return nil // success.
+	return nil
 }
 
-func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange) []UTXOChange {
+func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
 	log.Println("ChainFollower: processing block", block.Hash, block.Height)
 	// Insert entirely-new UTXOs that don't exist in the database.
 	for _, txn_id := range block.Tx {
+		txIDs = append(txIDs, txn_id)
 		txn := c.fetchTransaction(txn_id)
 		for _, vin := range txn.VIn {
 			// Ignore coinbase inputs, which don't spend UTXOs.
@@ -522,10 +559,11 @@ func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange) 
 				// • Note: a Txn cannot spend its own outputs (but it can spend outputs from previous Txns in the same block)
 				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
 				changes = append(changes, UTXOChange{
-					Tag:    utxoTagSpent,
-					TxID:   vin.TxID,
-					VOut:   vin.VOut,
-					Height: block.Height,
+					Tag:       utxoTagSpent,
+					TxID:      vin.TxID,
+					VOut:      vin.VOut,
+					Height:    block.Height,
+					SpendTxID: txn_id,
 				})
 			}
 		}
@@ -558,7 +596,7 @@ func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange) 
 			}
 		}
 	}
-	return changes
+	return changes, txIDs
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
