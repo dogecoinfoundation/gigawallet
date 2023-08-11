@@ -1,6 +1,6 @@
 default: build/gigawallet
 
-.PHONY: clean
+.PHONY: clean, test
 clean:
 	rm -rf ./build
 
@@ -11,3 +11,8 @@ build/gigawallet: clean
 
 dev:
 	GIGA_ENV=devconf go run ./cmd/gigawallet/. server 
+
+
+test:
+	go test -v ./pkg/doge
+	go test -v ./test
