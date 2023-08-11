@@ -20,6 +20,15 @@ type Store interface {
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
 
+	// GetPayment returns the Payment for the given ID
+	GetPayment(id int) (Payment, error)
+
+	// ListPayments returns a list of payments for an account.
+	// pagination: next_cursor should be passed as 'cursor' on the next call (initial cursor = 0)
+	// pagination: when next_cursor == 0, that is the final page of results.
+	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
+	ListPayments(account Address, cursor int, limit int) (items []Payment, next_cursor int, err error)
+
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
@@ -68,6 +77,19 @@ type StoreTransaction interface {
 	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
 	// It returns an unspecified error if the invoice ID already exists (FIXME)
 	StoreInvoice(invoice Invoice) error
+
+	// Store a 'payment' which represents a pay-out to another address from a gigawallet
+	// managed account.
+	CreatePayment(Address, CoinAmount, Address) (Payment, error)
+
+	// GetPayment returns the Payment for the given ID
+	GetPayment(id int) (Payment, error)
+
+	// ListPayments returns a list of payments for an account.
+	// pagination: next_cursor should be passed as 'cursor' on the next call (initial cursor = 0)
+	// pagination: when next_cursor == 0, that is the final page of results.
+	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
+	ListPayments(account Address, cursor int, limit int) (items []Payment, next_cursor int, err error)
 
 	// CreateAccount stores a NEW account.
 	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)

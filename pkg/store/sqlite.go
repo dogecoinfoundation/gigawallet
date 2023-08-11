@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"time"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 
@@ -42,9 +43,21 @@ CREATE TABLE IF NOT EXISTS invoice (
 	items TEXT NOT NULL,
 	key_index INTEGER NOT NULL,
 	block_id TEXT NOT NULL,
-	confirmations INTEGER NOT NULL
+	confirmations INTEGER NOT NULL,
+  created DATETIME NOT NULL
 );
 CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
+
+CREATE TABLE IF NOT EXISTS payment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_address TEXT NOT NULL,
+    pay_to TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    created DATETIME NOT NULL,
+    verified TEXT 
+);
+
+CREATE INDEX IF NOT EXISTS payment_account_i ON payment (account_address);
 
 CREATE TABLE IF NOT EXISTS txn (
 	txn_id TEXT NOT NULL PRIMARY KEY,
@@ -150,6 +163,14 @@ func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 
 func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
 	return listInvoicesCommon(s.db, account, cursor, limit)
+}
+
+func (s SQLiteStore) GetPayment(id int) (giga.Payment, error) {
+	return getPaymentCommon(s.db, id)
+}
+
+func (s SQLiteStore) ListPayments(account giga.Address, cursor int, limit int) (items []giga.Payment, next_cursor int, err error) {
+	return listPaymentsCommon(s.db, account, cursor, limit)
 }
 
 func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
@@ -279,6 +300,44 @@ func listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit in
 	return
 }
 
+func getPaymentCommon(tx Queryable, id int) (giga.Payment, error) {
+	row := tx.QueryRow("SELECT id, account_address, pay_to, amount, created, verified FROM payment WHERE id = ?", id)
+
+	p := giga.Payment{}
+	err := row.Scan(&p.ID, &p.AccountAddress, &p.PayTo, &p.Amount, &p.Created, &p.Verified)
+	if err == sql.ErrNoRows {
+		return p, giga.NewErr(giga.NotFound, "payment not found: %v", id)
+	}
+	if err != nil {
+		return p, dbErr(err, "GetPayment: row.Scan")
+	}
+	return p, nil
+}
+
+func listPaymentsCommon(tx Queryable, account giga.Address, cursor int, limit int) (items []giga.Payment, next_cursor int, err error) {
+	rows, err := tx.Query("SELECT id, account_address, pay_to, amount, created, verified FROM payment WHERE account_address = ? AND id >= ? ORDER BY id LIMIT ?", account, cursor, limit)
+	if err != nil {
+		return nil, 0, dbErr(err, "ListPayments: querying payments")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		p := giga.Payment{}
+		err := rows.Scan(&p.ID, &p.AccountAddress, &p.PayTo, &p.Amount, &p.Created, &p.Verified)
+		if err != nil {
+			return nil, 0, dbErr(err, "ListPayments: scanning payment row")
+		}
+		items = append(items, p)
+		next_cursor = p.ID + 1
+	}
+	if err = rows.Err(); err != nil { // docs say this check is required!
+		return nil, 0, dbErr(err, "ListPayments: querying invoices")
+	}
+	if len(items) < limit {
+		next_cursor = 0 // meaning "end of query results"
+	}
+	return
+}
+
 func getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []giga.UTXO, err error) {
 	// • spendable_height > 0    –– the UTXO Txn has been "confirmed" (included in CurrentBalance)
 	// • spending_height IS NULL –– the UTXO has not already been spent (not yet in OutgoingBalance)
@@ -356,6 +415,14 @@ func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, l
 	return listInvoicesCommon(t.tx, account, cursor, limit)
 }
 
+func (t SQLiteStoreTransaction) GetPayment(id int) (giga.Payment, error) {
+	return getPaymentCommon(t.tx, id)
+}
+
+func (t SQLiteStoreTransaction) ListPayments(account giga.Address, cursor int, limit int) (items []giga.Payment, next_cursor int, err error) {
+	return listPaymentsCommon(t.tx, account, cursor, limit)
+}
+
 func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
 	return getAllUnreservedUTXOsCommon(t.tx, account)
 }
@@ -378,6 +445,32 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 		return dbErr(err, "createInvoice: stmt.Exec insert")
 	}
 	return nil
+}
+
+func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, amount giga.CoinAmount, payTo giga.Address) (giga.Payment, error) {
+	stmt, err := t.tx.Prepare("insert into payment(account_address, pay_to, amount, created) values(?, ?, ?, ?)")
+	if err != nil {
+		return giga.Payment{}, dbErr(err, "createPayment: tx.Prepare insert")
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	result, err := stmt.Exec(accountAddr, payTo, amount, now)
+	if err != nil {
+		return giga.Payment{}, dbErr(err, "createPayment: stmt.Exec insert")
+	}
+
+	lastID, err := result.LastInsertId()
+	if err != nil {
+		return giga.Payment{}, dbErr(err, "createPayment: cannot fetch last insert id")
+	}
+	return giga.Payment{
+		ID:             int(lastID), // XXX safu???
+		AccountAddress: accountAddr,
+		PayTo:          payTo,
+		Amount:         amount,
+		Created:        now,
+	}, nil
 }
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
