@@ -126,8 +126,8 @@ func TestStore(t *testing.T) {
 			}
 
 			//Test Invoice.CalcTotal
-			if retrievedInvoice.CalcTotal() != pi {
-				t.Fatal(n("Invoice.CalcTotal"), retrievedInvoice.CalcTotal())
+			if retrievedInvoice.CalcTotal().Cmp(pi) != 0 {
+				t.Fatal(n("Invoice.CalcTotal"), retrievedInvoice.CalcTotal(), pi)
 			}
 
 			// Test ListInvoices
@@ -138,6 +138,15 @@ func TestStore(t *testing.T) {
 
 			if len(invoices) != 1 {
 				t.Fatal(n("Unexpected length of invoices"), invoices, counter)
+			}
+			// iterate using the counter. should get nothing
+			invoices2, counter2, err := tx.ListInvoices(invoice.Account, counter, 10)
+			if err != nil {
+				t.Fatal(n("ListInvoice"), err)
+			}
+
+			if len(invoices2) != 0 {
+				t.Fatal(n("Unexpected length of invoices"), invoices2, counter2)
 			}
 
 			err = tx.Commit()
