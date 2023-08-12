@@ -139,14 +139,64 @@ func TestStore(t *testing.T) {
 			if len(invoices) != 1 {
 				t.Fatal(n("Unexpected length of invoices"), invoices, counter)
 			}
-			// iterate using the counter. should get nothing
-			invoices2, counter2, err := tx.ListInvoices(invoice.Account, counter, 10)
+
+			// Create a bunch of invoices to test pagination
+			for i := 0; i < 20; i++ {
+				// Test Invoice creation
+				invoice := giga.Invoice{
+					ID:      giga.Address(fmt.Sprintf("DHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%d", i)),
+					Account: addr1,
+					Created: time.Now(),
+					Items: []giga.Item{
+						giga.Item{
+							Type:     "item",
+							Name:     "foo",
+							Value:    pi,
+							Quantity: 1,
+						},
+					},
+				}
+				err = tx.StoreInvoice(invoice)
+				if err != nil {
+					t.Fatal(n("StoreInvoice"), err)
+				}
+				fmt.Println("ISNERT", i)
+			}
+
+			// iterate using the counter, should get next 10
+			invoices2, counter2, err := tx.ListInvoices(invoice.Account, 0, 10)
 			if err != nil {
 				t.Fatal(n("ListInvoice"), err)
 			}
 
-			if len(invoices2) != 0 {
+			// should have 10 invoices
+			if len(invoices2) != 10 {
 				t.Fatal(n("Unexpected length of invoices"), invoices2, counter2)
+			}
+
+			fmt.Println("FIRST", len(invoices2), counter2)
+
+			// counter should be not 0
+			if counter2 == 0 {
+				t.Fatal(n("Counter should be non zero"), counter)
+			}
+
+			// iterate using the counter, should get next 9
+			invoices3, counter3, err := tx.ListInvoices(invoice.Account, counter2, 10)
+			if err != nil {
+				t.Fatal(n("ListInvoice"), err)
+			}
+
+			fmt.Println("SECOND", len(invoices3), counter3)
+
+			// should have 10 invoices
+			if len(invoices3) != 10 {
+				t.Fatal(n("Unexpected length of invoices"), len(invoices3))
+			}
+
+			// counter should be not 0
+			if counter3 != 0 {
+				t.Fatal(n("Counter should be non zero"), counter)
 			}
 
 			err = tx.Commit()
