@@ -392,7 +392,6 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
 		return
 	}
-	fmt.Println(o)
 	acc, err := t.api.CreateAccount(o, foreignID, true)
 	if err != nil {
 		sendError(w, "CreateAccount", err)
