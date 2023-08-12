@@ -49,8 +49,8 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		// POST {invoice} /account/:foreignID/invoice/ -> { invoice } create new invoice
 		adminMux.POST("/account/:foreignID/invoice/", t.createInvoice)
 
-		// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
-		adminMux.GET("/account/:foreignID/invoices", t.listInvoices)
+		// POST /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
+		adminMux.POST("/account/:foreignID/invoices", t.listInvoices)
 
 		// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
 		adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
@@ -276,6 +276,11 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 	sendResponse(w, invoice)
 }
 
+type InvoicesListRequest struct {
+	Cursor int `json:"cursor"`
+	Limit  int `json:"limit"`
+}
+
 // listInvoices is responsible for returning a list of invoices and their status for an account
 func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the foreignID is a 3rd-party ID for the account
@@ -284,32 +289,35 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
-	// optional pagination: cursor comes from the previous response (or zero)
-	icursor := 0
-	ilimit := 10
+	var o InvoicesListRequest
+	err := json.NewDecoder(r.Body).Decode(&o)
+	if err != nil {
+		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
+		return
+	}
 	qs := r.URL.Query()
 	cursor := qs.Get("cursor")
-	var err error
+	//var err error
 	if cursor != "" {
-		icursor, err = strconv.Atoi(cursor)
-		if err != nil || icursor < 0 {
+		o.Cursor, err = strconv.Atoi(cursor)
+		if err != nil || o.Cursor < 0 {
 			sendBadRequest(w, "invalid cursor in URL")
 			return
 		}
 	}
 	limit := qs.Get("limit")
 	if limit != "" {
-		ilimit, err = strconv.Atoi(limit)
-		if err != nil || ilimit < 1 {
+		o.Limit, err = strconv.Atoi(limit)
+		if err != nil || o.Limit < 1 {
 			sendBadRequest(w, "invalid limit in URL")
 			return
 		}
-		if ilimit > 100 {
+		if o.Limit > 100 {
 			sendBadRequest(w, "invalid limit in URL (cannot be greater than 100)")
 			return
 		}
 	}
-	invoices, err := t.api.ListInvoices(foreignID, icursor, ilimit)
+	invoices, err := t.api.ListInvoices(foreignID, o.Cursor, o.Limit)
 	if err != nil {
 		sendError(w, "ListInvoices", err)
 		return
