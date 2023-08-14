@@ -12,6 +12,7 @@ import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 	"github.com/julienschmidt/httprouter"
+	"github.com/shopspring/decimal"
 )
 
 // WebAPI implements conductor.Service
@@ -385,7 +386,7 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 		return
 	}
 	o := giga.AccountCreateRequest{
-		PayoutThreshold: "0",
+		PayoutThreshold: decimal.RequireFromString("0"),
 	}
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {

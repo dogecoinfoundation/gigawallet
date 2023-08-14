@@ -114,9 +114,9 @@ func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoices
 }
 
 type AccountCreateRequest struct {
-	PayoutAddress   string `json:"payout_address"`
-	PayoutThreshold string `json:"payout_threshold"`
-	PayoutFrequency string `json:"payout_frequency"`
+	PayoutAddress   Address    `json:"payout_address"`
+	PayoutThreshold CoinAmount `json:"payout_threshold"`
+	PayoutFrequency string     `json:"payout_frequency"`
 }
 
 func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upsert bool) (AccountPublic, error) {
