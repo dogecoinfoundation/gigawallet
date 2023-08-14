@@ -23,8 +23,11 @@ CREATE TABLE IF NOT EXISTS account (
 	next_pool_int INTEGER NOT NULL,
 	next_pool_ext INTEGER NOT NULL,
 	payout_address TEXT NOT NULL,
-	payout_threshold TEXT NOT NULL,
+	payout_threshold NUMERIC NOT NULL,
 	payout_frequency TEXT NOT NULL,
+	current_balance NUMERIC NOT NULL DEFAULT 0,
+	incoming_balance NUMERIC NOT NULL DEFAULT 0,
+	outgoing_balance NUMERIC NOT NULL DEFAULT 0,
 	chain_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS account_foreign_i ON account (foreign_id);
@@ -99,7 +102,7 @@ CREATE TABLE IF NOT EXISTS chainstate (
 );
 
 CREATE TABLE IF NOT EXISTS services (
-	name TEXT PRIMARY KEY,
+	name TEXT NOT NULL PRIMARY KEY,
 	cursor INTEGER NOT NULL
 )
 `
@@ -224,7 +227,7 @@ func (s SQLiteStore) GetServiceCursor(name string) (cursor int64, err error) {
 
 func (s SQLiteStore) getAccountCommon(tx Queryable, accountKey string, isForeignKey bool) (giga.Account, error) {
 	// Used to fetch an Account by ID (Address) or by ForeignID.
-	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency FROM account WHERE "
+	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency,current_balance,incoming_balance,outgoing_balance FROM account WHERE "
 	if isForeignKey {
 		query += "foreign_id = $1"
 	} else {
@@ -236,7 +239,8 @@ func (s SQLiteStore) getAccountCommon(tx Queryable, accountKey string, isForeign
 		&acc.ForeignID, &acc.Address, &acc.Privkey,
 		&acc.NextInternalKey, &acc.NextExternalKey,
 		&acc.NextPoolInternal, &acc.NextPoolExternal,
-		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency) // common (see updateAccount)
+		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency, // common (see updateAccount)
+		&acc.CurrentBalance, &acc.IncomingBalance, &acc.OutgoingBalance) // not in updateAccount.
 	if err == sql.ErrNoRows {
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", accountKey)
 	}
@@ -263,7 +267,7 @@ func (s SQLiteStore) listAccountsModifiedCommon(tx Queryable, cursor int64, limi
 	nextCursor = cursor // preserve cursor in case of error.
 	maxSeq := cursor
 	rows_found := 0
-	rows, err := tx.Query("SELECT address, chain_seq FROM account WHERE chain_seq>=$1 ORDER BY chain_seq LIMIT $2", cursor, limit)
+	rows, err := tx.Query("SELECT address, chain_seq FROM account WHERE chain_seq>$1 ORDER BY chain_seq LIMIT $2", cursor, limit)
 	if err != nil {
 		err = s.dbErr(err, "ListAccountsModified: querying")
 		return
@@ -287,10 +291,8 @@ func (s SQLiteStore) listAccountsModifiedCommon(tx Queryable, cursor int64, limi
 		err = s.dbErr(err, "ListAccountsModified: querying invoices")
 		return
 	}
-	// Only advance nextCursor on success.
-	// Because each chain-seq number is only used once, there can't be more
-	// than one row with the same cursor number, so we can safely add 1.
-	nextCursor = maxSeq + 1
+	// Only advance nextCursor on success, up to the last seq we found.
+	nextCursor = maxSeq
 	return
 }
 
@@ -556,16 +558,27 @@ func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
 		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
 		acc.ForeignID) // the Key (not updated)
+	return t.checkRowsAffected(res, err, "account", acc.ForeignID)
+}
+
+func (t SQLiteStoreTransaction) UpdateAccountBalance(accountID giga.Address, bal giga.AccountBalance) error {
+	res, err := t.tx.Exec(
+		"update account set current_balance=$1, incoming_balance=$2, outgoing_balance=$3 where address=$4",
+		bal.CurrentBalance, bal.IncomingBalance, bal.OutgoingBalance, accountID)
+	return t.checkRowsAffected(res, err, "account", string(accountID))
+}
+
+func (t SQLiteStoreTransaction) checkRowsAffected(res sql.Result, err error, what string, id string) error {
 	if err != nil {
-		return t.store.dbErr(err, "updateAccount: executing update")
+		return t.store.dbErr(err, fmt.Sprintf("Executing update: %s: %s", what, id))
 	}
 	num_rows, err := res.RowsAffected()
 	if err != nil {
-		return t.store.dbErr(err, "updateAccount: res.RowsAffected")
+		return t.store.dbErr(err, fmt.Sprintf("Checking RowsAffected: %s: %s", what, id))
 	}
 	if num_rows < 1 {
 		// MUST detect this error to fulfil the API contract.
-		return giga.NewErr(giga.NotFound, "account not found: %s", acc.ForeignID)
+		return giga.NewErr(giga.NotFound, fmt.Sprintf("%s not found: %s", what, id))
 	}
 	return nil
 }
@@ -835,10 +848,21 @@ func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accounts map[string]int64
 	return nil
 }
 
-func (s SQLiteStoreTransaction) SetServiceCursor(name string, cursor int64) error {
-	_, err := s.tx.Exec("UPDATE services SET cursor=$2 WHERE name=$1", name, cursor)
+func (t SQLiteStoreTransaction) SetServiceCursor(name string, cursor int64) error {
+	res, err := t.tx.Exec("UPDATE services SET cursor=$1 WHERE name=$2", cursor, name)
 	if err != nil {
-		return s.store.dbErr(err, "SetServiceCursor")
+		return t.store.dbErr(err, "SetServiceCursor: UPDATE")
+	}
+	num_rows, err := res.RowsAffected()
+	if err != nil {
+		return t.store.dbErr(err, "SetServiceCursor: RowsAffected")
+	}
+	if num_rows < 1 {
+		// this is the first call to SetServiceCursor for this service: insert the row.
+		_, err = t.tx.Exec("INSERT INTO services (name,cursor) VALUES ($1,$2)", name, cursor)
+		if err != nil {
+			return t.store.dbErr(err, "SetServiceCursor: INSERT")
+		}
 	}
 	return nil
 }

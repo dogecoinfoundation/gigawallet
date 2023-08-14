@@ -13,16 +13,19 @@ const HD_DISCOVERY_RANGE = 20
 	 - PayoutFrequency, if set, payout at this schedule
 */
 type Account struct {
-	Address          Address // HD Wallet master public key as a dogecoin address (Account ID)
-	Privkey          Privkey // HD Wallet master extended private key.
-	ForeignID        string  // unique identifier supplied by the organisation using Gigawallet.
-	NextInternalKey  uint32  // next internal HD Wallet address to use for txn change outputs.
-	NextExternalKey  uint32  // next external HD Wallet address to use for an invoice or pay-to address.
-	NextPoolInternal uint32  // next internal HD Wallet address to insert into account_address table.
-	NextPoolExternal uint32  // next external HD Wallet address to insert into account_address table.
-	PayoutAddress    Address
-	PayoutThreshold  CoinAmount
-	PayoutFrequency  string
+	Address          Address     // HD Wallet master public key as a dogecoin address (Account ID)
+	Privkey          Privkey     // HD Wallet master extended private key.
+	ForeignID        string      // unique identifier supplied by the organisation using Gigawallet.
+	NextInternalKey  uint32      // next internal HD Wallet address to use for txn change outputs.
+	NextExternalKey  uint32      // next external HD Wallet address to use for an invoice or pay-to address.
+	NextPoolInternal uint32      // next internal HD Wallet address to insert into account_address table.
+	NextPoolExternal uint32      // next external HD Wallet address to insert into account_address table.
+	PayoutAddress    Address     // Dogecoin address to receive funds periodically
+	PayoutThreshold  CoinAmount  // Minimum amount to automatically pay to PayoutAddress
+	PayoutFrequency  string      // Minimum time between automatic payments to PayoutAddress
+	CurrentBalance   CoinAmount  // current balance available to spend now (from BalanceKeeper)
+	IncomingBalance  CoinAmount  // receiving coins waiting for confirmation (from BalanceKeeper)
+	OutgoingBalance  CoinAmount  // spent coins waiting for confirmation (from BalanceKeeper)
 	utxoSource       *UTXOSource // cache: UTXOSource instance for this account.
 }
 

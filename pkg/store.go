@@ -64,6 +64,9 @@ type StoreTransaction interface {
 	// CalculateBalance queries across UTXOs to calculate account balances.
 	CalculateBalance(accountID Address) (AccountBalance, error)
 
+	// Update the stored account balance fields.
+	UpdateAccountBalance(accountID Address, bal AccountBalance) error
+
 	// Find accounts that have been modified since `cursor` in terms of
 	// account sequence numbers. Returns IDs of the accounts and the cursor
 	// for the next call (maximum cursor covered by ids, plus one)
