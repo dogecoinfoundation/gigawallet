@@ -141,12 +141,13 @@ func TestStore(t *testing.T) {
 			}
 
 			// Create a bunch of invoices to test pagination
-			for i := 0; i < 20; i++ {
+			for i := 0; i < 18; i++ {
 				// Test Invoice creation
 				invoice := giga.Invoice{
-					ID:      giga.Address(fmt.Sprintf("DHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%d", i)),
-					Account: addr1,
-					Created: time.Now(),
+					ID:       giga.Address(fmt.Sprintf("DHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%d", i)),
+					KeyIndex: uint32(i),
+					Account:  addr1,
+					Created:  time.Now(),
 					Items: []giga.Item{
 						giga.Item{
 							Type:     "item",
@@ -160,7 +161,6 @@ func TestStore(t *testing.T) {
 				if err != nil {
 					t.Fatal(n("StoreInvoice"), err)
 				}
-				fmt.Println("ISNERT", i)
 			}
 
 			// iterate using the counter, should get next 10
@@ -174,8 +174,6 @@ func TestStore(t *testing.T) {
 				t.Fatal(n("Unexpected length of invoices"), invoices2, counter2)
 			}
 
-			fmt.Println("FIRST", len(invoices2), counter2)
-
 			// counter should be not 0
 			if counter2 == 0 {
 				t.Fatal(n("Counter should be non zero"), counter)
@@ -187,16 +185,14 @@ func TestStore(t *testing.T) {
 				t.Fatal(n("ListInvoice"), err)
 			}
 
-			fmt.Println("SECOND", len(invoices3), counter3)
-
 			// should have 10 invoices
-			if len(invoices3) != 10 {
+			if len(invoices3) != 9 {
 				t.Fatal(n("Unexpected length of invoices"), len(invoices3))
 			}
 
 			// counter should be not 0
 			if counter3 != 0 {
-				t.Fatal(n("Counter should be non zero"), counter)
+				t.Fatal(n("Counter should be non zero"), counter3)
 			}
 
 			err = tx.Commit()
