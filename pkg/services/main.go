@@ -6,8 +6,8 @@ import (
 )
 
 func StartServices(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Config, store giga.Store) {
-	// BalanceKeeper sends "Balance Change" events.
-	keeper := NewBalanceKeeper(store)
+	// BalanceKeeper updates stored balances and sends ACC_BALANCE_CHANGE events.
+	keeper := NewBalanceKeeper(store, bus)
 	cond.Service("NewBalanceKeeper", keeper)
 
 	// InvoiceStamper sends "Invoice Paid" and "Invoice Partial Payment" events.

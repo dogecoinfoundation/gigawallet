@@ -56,7 +56,16 @@ const (
 	ACC_UPDATED        EVENT_ACC = "UPDATED"
 	ACC_PAYMENT        EVENT_ACC = "PAYMENT"
 	ACC_CHAIN_ACTIVITY EVENT_ACC = "CHAIN_ACTIVITY"
+	ACC_BALANCE_CHANGE EVENT_ACC = "BALANCE_CHANGE"
 )
+
+type AccountBalanceChange struct {
+	AccountID       Address    `json:"account_id"`
+	ForeignID       string     `json:"foreign_id"`
+	CurrentBalance  CoinAmount `json:"current_balance"`
+	IncomingBalance CoinAmount `json:"incoming_balance"`
+	OutgoingBalance CoinAmount `json:"outgoing_balance"`
+}
 
 // Invoice Events
 type EVENT_INV string
