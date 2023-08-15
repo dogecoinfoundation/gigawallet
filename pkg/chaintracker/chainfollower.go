@@ -551,7 +551,7 @@ func (c *ChainFollower) applyUTXOChanges(tx giga.StoreTransaction, changes []UTX
 }
 
 func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
-	log.Println("ChainFollower: processing block", block.Hash, block.Height)
+	log.Println("ChainFollower: processing block", block.Hash, len(block.Tx), block.Height)
 	// Insert entirely-new UTXOs that don't exist in the database.
 	for _, txn_id := range block.Tx {
 		txIDs = append(txIDs, txn_id)
