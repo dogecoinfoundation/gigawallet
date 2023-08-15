@@ -798,7 +798,7 @@ func (t SQLiteStoreTransaction) RevertChangesAboveHeight(maxValidHeight int64, s
 	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
 	// reserved for spending, or has been spent (confirmed)
 	// When we undo one of these, we always undo the stages that happen later as well.
-	var accounts map[string]int64
+	accounts := make(map[string]int64)
 	rows1, err := t.tx.Query("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height>? RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows1, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: utxo update 1")

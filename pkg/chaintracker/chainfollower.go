@@ -313,6 +313,10 @@ type AccountMap struct {
 	NextSeq  int64
 }
 
+func NewAccountMap(nextSeq int64) *AccountMap {
+	return &AccountMap{Accounts: make(map[string]int64), NextSeq: nextSeq}
+}
+
 func (m *AccountMap) AddIds(ids []string) {
 	for _, id := range ids {
 		if _, present := m.Accounts[id]; !present {
@@ -330,7 +334,7 @@ func (m *AccountMap) Add(id string) {
 }
 
 func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, txIDs []string, pos ChainPos) (ChainPos, error) {
-	accounts := &AccountMap{NextSeq: pos.NextSeq}
+	accounts := NewAccountMap(pos.NextSeq)
 	tx := c.beginStoreTxn()
 	err := c.applyUTXOChanges(tx, changes, accounts)
 	if err != nil {
@@ -570,7 +574,7 @@ func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange, 
 		for _, vout := range txn.VOut {
 			// Ignore outputs that are not spendable.
 			if !vout.Value.IsPositive() {
-				log.Println("ChainFollower: skipping zero-value vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
+				// log.Println("ChainFollower: skipping zero-value vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
 				continue
 			}
 			if len(vout.ScriptPubKey.Addresses) == 1 {
