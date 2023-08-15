@@ -201,7 +201,7 @@ func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
 }
 
 func (s SQLiteStore) GetServiceCursor(name string) (cursor int64, err error) {
-	row := s.db.QueryRow("SELECT cursor FROM services WHERE name=?", name)
+	row := s.db.QueryRow("SELECT cursor FROM services WHERE name=$1", name)
 	err = row.Scan(&cursor)
 	if err == sql.ErrNoRows {
 		return 0, nil // new service; start from cursor=0
@@ -285,7 +285,7 @@ func listAccountsModifiedCommon(tx Queryable, cursor int64, limit int) (ids []st
 }
 
 func getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
-	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations, created FROM invoice WHERE invoice_address = ?", addr)
+	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations, created FROM invoice WHERE invoice_address = $1", addr)
 	var id giga.Address
 	var account giga.Address
 	var tx_id string
@@ -326,7 +326,7 @@ func listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit in
 	// and the aggregate result SHOULD be stable even as the DB is modified.
 	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
 	rows_found := 0
-	rows, err := tx.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = ? AND key_index >= ? ORDER BY key_index LIMIT ?", account, cursor, limit)
+	rows, err := tx.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = $1 AND key_index >= $2 ORDER BY key_index LIMIT $3", account, cursor, limit)
 	if err != nil {
 		return nil, 0, dbErr(err, "ListInvoices: querying invoices")
 	}
@@ -360,7 +360,7 @@ func listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit in
 }
 
 func getPaymentCommon(tx Queryable, account giga.Address, id int64) (giga.Payment, error) {
-	row := tx.QueryRow("SELECT id, account_address, pay_to, amount, created, paid_txid, paid_height, notify_height FROM payment WHERE id = ? AND account_address = ?", id, account)
+	row := tx.QueryRow("SELECT id, account_address, pay_to, amount, created, paid_txid, paid_height, notify_height FROM payment WHERE id = $1 AND account_address = $2", id, account)
 	p := giga.Payment{}
 	err := row.Scan(&p.ID, &p.AccountAddress, &p.PayTo, &p.Amount, &p.Created, &p.PaidTxID, &p.PaidHeight, &p.NotifyHeight)
 	if err == sql.ErrNoRows {
@@ -373,7 +373,7 @@ func getPaymentCommon(tx Queryable, account giga.Address, id int64) (giga.Paymen
 }
 
 func listPaymentsCommon(tx Queryable, account giga.Address, cursor int64, limit int) (items []giga.Payment, next_cursor int64, err error) {
-	rows, err := tx.Query("SELECT id, account_address, pay_to, amount, created, paid_txid, paid_height, notify_height FROM payment WHERE account_address = ? AND id >= ? ORDER BY id LIMIT ?", account, cursor, limit)
+	rows, err := tx.Query("SELECT id, account_address, pay_to, amount, created, paid_txid, paid_height, notify_height FROM payment WHERE account_address = $1 AND id >= $2 ORDER BY id LIMIT $3", account, cursor, limit)
 	if err != nil {
 		return nil, 0, dbErr(err, "ListPayments: querying payments")
 	}
@@ -400,7 +400,7 @@ func getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []g
 	// • spendable_height > 0    –– the UTXO Txn has been "confirmed" (included in CurrentBalance)
 	// • spending_height IS NULL –– the UTXO has not already been spent (not yet in OutgoingBalance)
 	rows_found := 0
-	rows, err := tx.Query("SELECT txn_id, vout, value, script, script_type, script_address, key_index, is_internal FROM utxo WHERE account_address = ? AND spendable_height > 0 AND spending_height IS NULL", account)
+	rows, err := tx.Query("SELECT txn_id, vout, value, script, script_type, script_address, key_index, is_internal FROM utxo WHERE account_address = $1 AND spendable_height > 0 AND spending_height IS NULL", account)
 	if err != nil {
 		return nil, dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
@@ -501,7 +501,7 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	}
 	total := inv.CalcTotal()
 	_, err = t.tx.Exec(
-		"insert into invoice(invoice_address, account_address, txn_id, vendor, items, total, key_index, block_id, confirmations, created) values(?,?,?,?,?,?,?,?,?,?)",
+		"insert into invoice(invoice_address, account_address, txn_id, vendor, items, total, key_index, block_id, confirmations, created) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
 		inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), total, inv.KeyIndex, inv.BlockID, inv.Confirmations, inv.Created,
 	)
 	if err != nil {
@@ -511,24 +511,17 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 }
 
 func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, amount giga.CoinAmount, payTo giga.Address) (giga.Payment, error) {
-	stmt, err := t.tx.Prepare("insert into payment(account_address, pay_to, amount, created) values(?, ?, ?, ?)")
-	if err != nil {
-		return giga.Payment{}, dbErr(err, "createPayment: tx.Prepare insert")
-	}
-	defer stmt.Close()
-
 	now := time.Now()
-	result, err := stmt.Exec(accountAddr, payTo, amount, now)
+	row := t.tx.QueryRow(
+		"insert into payment(account_address, pay_to, amount, created) values($1,$2,$3,$4) returning id",
+		accountAddr, payTo, amount, now)
+	var id int64
+	err := row.Scan(&id)
 	if err != nil {
-		return giga.Payment{}, dbErr(err, "createPayment: stmt.Exec insert")
-	}
-
-	lastID, err := result.LastInsertId()
-	if err != nil {
-		return giga.Payment{}, dbErr(err, "createPayment: cannot fetch last insert id")
+		return giga.Payment{}, dbErr(err, "createPayment: insert")
 	}
 	return giga.Payment{
-		ID:             lastID,
+		ID:             id,
 		AccountAddress: accountAddr,
 		PayTo:          payTo,
 		Amount:         amount,
@@ -537,12 +530,8 @@ func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, amount g
 }
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency) values(?,?,?,?,?,?,?,?,?,?)")
-	if err != nil {
-		return dbErr(err, "createAccount: preparing insert")
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(
+	_, err := t.tx.Exec(
+		"insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
 		acc.ForeignID, acc.Address, acc.Privkey, // only in createAccount.
 		acc.NextInternalKey, acc.NextExternalKey, // common (see updateAccount) ...
 		acc.NextPoolInternal, acc.NextPoolExternal,
@@ -554,12 +543,8 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 }
 
 func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
-	stmt, err := t.tx.Prepare("update account set next_int_key=MAX(next_int_key,?), next_ext_key=MAX(next_ext_key,?), next_pool_int=MAX(next_pool_int,?), next_pool_ext=MAX(next_pool_ext,?), payout_address=?, payout_threshold=?, payout_frequency=? where foreign_id=?")
-	if err != nil {
-		return dbErr(err, "updateAccount: preparing update")
-	}
-	defer stmt.Close()
-	res, err := stmt.Exec(
+	res, err := t.tx.Exec(
+		"update account set next_int_key=MAX(next_int_key,$1), next_ext_key=MAX(next_ext_key,$2), next_pool_int=MAX(next_pool_int,$3), next_pool_ext=MAX(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 where foreign_id=$8",
 		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
 		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
@@ -580,7 +565,7 @@ func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
 
 func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses []giga.Address, firstAddress uint32, isInternal bool) error {
 	// Associate a list of addresses with an accountID in the account_address table.
-	stmt, err := t.tx.Prepare("INSERT INTO account_address (address,key_index,is_internal,account_address) VALUES (?,?,?,?)")
+	stmt, err := t.tx.Prepare("INSERT INTO account_address (address,key_index,is_internal,account_address) VALUES ($1,$2,$3,$4)")
 	if err != nil {
 		return dbErr(err, "StoreAddresses: preparing insert")
 	}
@@ -596,7 +581,7 @@ func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses
 }
 
 func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, bool, error) {
-	row := t.tx.QueryRow("SELECT account_address,key_index,is_internal FROM account_address WHERE address = ?", address)
+	row := t.tx.QueryRow("SELECT account_address,key_index,is_internal FROM account_address WHERE address = $1", address)
 	var accountID giga.Address
 	var keyIndex uint32
 	var isInternal bool
@@ -796,30 +781,30 @@ func (t SQLiteStoreTransaction) RevertChangesAboveHeight(maxValidHeight int64, s
 	// reserved for spending, or has been spent (confirmed)
 	// When we undo one of these, we always undo the stages that happen later as well.
 	accounts := make(map[string]int64)
-	rows1, err := t.tx.Query("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height>? RETURNING account_address", maxValidHeight)
+	rows1, err := t.tx.Query("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height>$1 RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows1, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: utxo update 1")
 	}
-	rows2, err := t.tx.Query("UPDATE utxo SET spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE spendable_height>? RETURNING account_address", maxValidHeight)
+	rows2, err := t.tx.Query("UPDATE utxo SET spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE spendable_height>$1 RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows2, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: utxo update 2")
 	}
-	rows3, err := t.tx.Query("UPDATE utxo SET spending_height=NULL,spent_height=NULL WHERE spending_height>? RETURNING account_address", maxValidHeight)
+	rows3, err := t.tx.Query("UPDATE utxo SET spending_height=NULL,spent_height=NULL WHERE spending_height>$1 RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows3, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: utxo update 3")
 	}
-	rows4, err := t.tx.Query("UPDATE utxo SET spent_height=NULL WHERE spent_height>? RETURNING account_address", maxValidHeight)
+	rows4, err := t.tx.Query("UPDATE utxo SET spent_height=NULL WHERE spent_height>$1 RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows4, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: utxo update 4")
 	}
 	// Presence of paid_height means MarkPaymentsOnChain has seen the payment on-chain.
 	// If we undo this, we also undo confirmed_height (which happens later)
-	rows5, err := t.tx.Query("UPDATE payment SET paid_height=NULL,confirmed_height=NULL WHERE paid_height>? RETURNING account_address", maxValidHeight)
+	rows5, err := t.tx.Query("UPDATE payment SET paid_height=NULL,confirmed_height=NULL WHERE paid_height>$1 RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows5, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: executing update 5")
 	}
 	// Presence of confirmed_height means ConfirmPayments has marked the payment confirmed.
-	rows6, err := t.tx.Query("UPDATE payment SET confirmed_height=NULL WHERE confirmed_height>? RETURNING account_address", maxValidHeight)
+	rows6, err := t.tx.Query("UPDATE payment SET confirmed_height=NULL WHERE confirmed_height>$1 RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows6, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: executing update 6")
 	}
