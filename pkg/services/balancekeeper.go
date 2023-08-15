@@ -29,24 +29,26 @@ func NewBalanceKeeper(store giga.Store) BalanceKeeper {
 }
 
 func (b BalanceKeeper) runBatch(cursor int64) (int64, error) {
-	tx := b.beginStoreTxn()
-	ids, newCursor, err := tx.ListAccountsModifiedSince(cursor, BATCH_SIZE)
-	if err != nil {
-		log.Println("BalanceKeeper: GetServiceCursor:", err)
-		return cursor, err
-	}
-	for _, id := range ids {
-		log.Printf("BalanceKeeper: account was modified: %s @ %v\n", id, newCursor)
-	}
-	err = b.tx.Commit()
-	if err != nil {
-		return cursor, err
-	}
-	return newCursor, nil
+	// tx := b.beginStoreTxn()
+	// ids, newCursor, err := tx.ListAccountsModifiedSince(cursor, BATCH_SIZE)
+	// if err != nil {
+	// 	log.Println("BalanceKeeper: GetServiceCursor:", err)
+	// 	return cursor, err
+	// }
+	// for _, id := range ids {
+	// 	log.Printf("BalanceKeeper: account was modified: %s @ %v\n", id, newCursor)
+	// }
+	// err = b.tx.Commit()
+	// if err != nil {
+	// 	return cursor, err
+	// }
+	// return newCursor, nil
+	return cursor, nil
 }
 
 func (b *BalanceKeeper) beginStoreTxn() (tx giga.StoreTransaction) {
 	for {
+		log.Println("BalanceKeeper: store.Begin")
 		tx, err := b.store.Begin()
 		if err != nil {
 			log.Println("BalanceKeeper: store.Begin:", err)
@@ -113,6 +115,7 @@ func (b BalanceKeeper) Run(started, stopped chan bool, stop chan context.Context
 					b.sleepForRetry(err, 0)
 					continue // retry.
 				}
+				b.sleepForRetry(nil, 1*time.Second)
 				cursor = newCursor // advance the cursor.
 			}
 		}
