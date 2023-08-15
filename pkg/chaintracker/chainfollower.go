@@ -604,11 +604,7 @@ func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange, 
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
-	if c.tx != nil {
-		// can be left after a panic.
-		c.tx.Rollback()
-		c.tx = nil
-	}
+	c.tx = nil
 	for {
 		tx, err := c.store.Begin()
 		if err != nil {

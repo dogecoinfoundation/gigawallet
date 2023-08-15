@@ -656,7 +656,7 @@ func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight
 	}
 	err = row.Scan(&id, &scriptAddress)
 	if err == sql.ErrNoRows {
-		return "", "", dbErr(err, "MarkUTXOSpent: not found")
+		return "", "", nil // commonly called for UTXOs we don't have in the DB.
 	}
 	if err != nil {
 		return "", "", dbErr(err, "MarkUTXOSpent: scanning row")
