@@ -12,7 +12,6 @@ import (
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 	"github.com/julienschmidt/httprouter"
-	"github.com/shopspring/decimal"
 )
 
 // WebAPI implements conductor.Service
@@ -385,9 +384,7 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
-	o := giga.AccountCreateRequest{
-		PayoutThreshold: decimal.RequireFromString("0"),
-	}
+	o := giga.AccountCreateRequest{}
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
