@@ -384,9 +384,7 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
-	o := giga.AccountCreateRequest{
-		PayoutThreshold: "0",
-	}
+	o := giga.AccountCreateRequest{}
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
