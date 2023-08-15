@@ -75,7 +75,7 @@ CREATE INDEX IF NOT EXISTS payment_paid_height_i ON payment (paid_height);
 CREATE TABLE IF NOT EXISTS utxo (
 	txn_id TEXT NOT NULL,
 	vout INTEGER NOT NULL,
-	value TEXT NOT NULL,
+	value NUMERIC NOT NULL,
 	script TEXT NOT NULL,
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
@@ -140,6 +140,7 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "opening database")
 	}
+	setup_sql := SETUP_SQL
 	if backend == "sqlite3" {
 		// limit concurrent access until we figure out a way to start transactions
 		// with the BEGIN CONCURRENT statement in Go.
@@ -149,9 +150,12 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 		// if err != nil {
 		// 	return SQLiteStore{}, store.dbErr(err, "creating database schema")
 		// }
+	} else {
+		setup_sql = strings.ReplaceAll(setup_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
+		setup_sql = strings.ReplaceAll(setup_sql, "DATETIME", "TIMESTAMP")
 	}
 	// init tables / indexes
-	_, err = db.Exec(SETUP_SQL)
+	_, err = db.Exec(setup_sql)
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "creating database schema")
 	}
