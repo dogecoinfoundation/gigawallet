@@ -650,19 +650,16 @@ func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 }
 
 func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight int64, spendTxID string) (id string, scriptAddress giga.Address, err error) {
-	rows, err := t.tx.Query("UPDATE utxo SET spending_height=$3, spend_txid=$4 WHERE txn_id=$1 AND vout=$2 RETURNING account_address, script_address", txID, vOut, blockHeight, spendTxID)
+	row := t.tx.QueryRow("UPDATE utxo SET spending_height=$3, spend_txid=$4 WHERE txn_id=$1 AND vout=$2 RETURNING account_address, script_address", txID, vOut, blockHeight, spendTxID)
 	if err != nil {
 		return "", "", dbErr(err, "MarkUTXOSpent: executing update")
 	}
-	defer rows.Close()
-	if rows.Next() {
-		err := rows.Scan(&id, &scriptAddress)
-		if err != nil {
-			return "", "", dbErr(err, "MarkUTXOSpent: scanning row")
-		}
+	err = row.Scan(&id, &scriptAddress)
+	if err == sql.ErrNoRows {
+		return "", "", dbErr(err, "MarkUTXOSpent: not found")
 	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return "", "", dbErr(err, "MarkUTXOSpent: scanning rows")
+	if err != nil {
+		return "", "", dbErr(err, "MarkUTXOSpent: scanning row")
 	}
 	return
 }
