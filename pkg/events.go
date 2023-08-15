@@ -73,3 +73,10 @@ const (
 	INV_PAYMENT_VERIFIED EVENT_INV = "PAYMENT_VERIFIED"
 	INV_PAYMENT_REFUNDED EVENT_INV = "PAYMENT_REFUNDED"
 )
+
+type InvPaymentSentEvent struct {
+	From   string     `json:"from"`
+	PayTo  Address    `json:"pay_to"`
+	Amount CoinAmount `json:"amount"`
+	TxID   string     `json:"txid"`
+}

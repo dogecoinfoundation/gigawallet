@@ -330,7 +330,13 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 		return
 	}
 
-	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": amount, "txid": txid})
+	msg := InvPaymentSentEvent{
+		From:   account.ForeignID,
+		PayTo:  payTo,
+		Amount: amount,
+		TxID:   txid,
+	}
+	a.bus.Send(INV_PAYMENT_SENT, msg)
 	return
 }
 
@@ -376,7 +382,68 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (txid st
 	// TODO: somehow reserve the UTXOs in the interim (prevent accidental double-spend)
 	//       until ChainTracker sees the Txn in a Block and calls MarkUTXOSpent.
 
-	a.bus.Send(INV_PAYMENT_SENT, map[string]interface{}{"payTo": payTo, "amount": invoiceAmount})
+	// Create the Payment record up-front.
+	// Save changes to the Account (NextInternalKey) and address pool.
+	// Reserve the UTXOs for the payment.
+	tx, err := a.Store.Begin()
+	if err != nil {
+		return
+	}
+	err = account.UpdatePoolAddresses(tx, a.L1) // we have used an address.
+	if err != nil {
+		tx.Rollback()
+		return
+	}
+	err = tx.UpdateAccount(account) // for NextInternalKey (change address)
+	if err != nil {
+		tx.Rollback()
+		return
+	}
+	// Create the `payment` row with no txid or paid_height.
+	payment, err := tx.CreatePayment(account.Address, invoiceAmount, payTo)
+	if err != nil {
+		tx.Rollback()
+		return
+	}
+	// err = tx.ReserveUTXOsForPayment(payId, builder.GetUTXOs()) // TODO
+	// if err != nil {
+	//  tx.Rollback()
+	// 	return
+	// }
+	err = tx.Commit()
+	if err != nil {
+		return
+	}
+
+	// Submit the transaction to core.
+	txid, err = a.L1.Send(txn.TxnHex)
+	if err != nil {
+		return
+	}
+
+	// Update the Payment with the txid,
+	// which changes it to "accepted" status (accepted by the network)
+	tx, err = a.Store.Begin()
+	if err != nil {
+		return
+	}
+	err = tx.UpdatePaymentWithTxID(payment.ID, txid)
+	if err != nil {
+		tx.Rollback()
+		return
+	}
+	err = tx.Commit()
+	if err != nil {
+		return
+	}
+
+	msg := InvPaymentSentEvent{
+		From:   account.ForeignID,
+		PayTo:  payTo,
+		Amount: invoiceAmount,
+		TxID:   txid,
+	}
+	a.bus.Send(INV_PAYMENT_SENT, msg)
 	return txn.TxnHex, fee, nil
 }
 

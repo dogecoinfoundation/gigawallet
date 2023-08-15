@@ -650,19 +650,16 @@ func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 }
 
 func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight int64, spendTxID string) (id string, scriptAddress giga.Address, err error) {
-	rows, err := t.tx.Query("UPDATE utxo SET spending_height=$3, spend_txid=$4 WHERE txn_id=$1 AND vout=$2 RETURNING account_address, script_address", txID, vOut, blockHeight, spendTxID)
+	row := t.tx.QueryRow("UPDATE utxo SET spending_height=$3, spend_txid=$4 WHERE txn_id=$1 AND vout=$2 RETURNING account_address, script_address", txID, vOut, blockHeight, spendTxID)
 	if err != nil {
 		return "", "", dbErr(err, "MarkUTXOSpent: executing update")
 	}
-	defer rows.Close()
-	if rows.Next() {
-		err := rows.Scan(&id, &scriptAddress)
-		if err != nil {
-			return "", "", dbErr(err, "MarkUTXOSpent: scanning row")
-		}
+	err = row.Scan(&id, &scriptAddress)
+	if err == sql.ErrNoRows {
+		return "", "", nil // commonly called for UTXOs we don't have in the DB.
 	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return "", "", dbErr(err, "MarkUTXOSpent: scanning rows")
+	if err != nil {
+		return "", "", dbErr(err, "MarkUTXOSpent: scanning row")
 	}
 	return
 }
@@ -798,7 +795,7 @@ func (t SQLiteStoreTransaction) RevertChangesAboveHeight(maxValidHeight int64, s
 	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
 	// reserved for spending, or has been spent (confirmed)
 	// When we undo one of these, we always undo the stages that happen later as well.
-	var accounts map[string]int64
+	accounts := make(map[string]int64)
 	rows1, err := t.tx.Query("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height>? RETURNING account_address", maxValidHeight)
 	if seq, err = collectIDs(rows1, err, accounts, seq); err != nil {
 		return seq, dbErr(err, "RevertUTXOsAboveHeight: utxo update 1")
