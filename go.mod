@@ -8,6 +8,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
 	github.com/dogeorg/go-libdogecoin v0.0.45
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.14
 	github.com/mr-tron/base58 v1.2.0
 	github.com/pebbe/zmq4 v1.2.9

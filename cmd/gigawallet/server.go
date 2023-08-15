@@ -36,7 +36,7 @@ func Server(conf giga.Config) {
 		panic(err)
 	}
 
-	// Setup a Store, SQLite for now
+	// Setup a Store
 	store, err := store.NewSQLiteStore(conf.Store.DBFile)
 	if err != nil {
 		panic(err)

@@ -147,12 +147,11 @@ type RpcBlock struct {
 	Bits              string          `json:"bits"`              // (string) The bits
 	Difficulty        decimal.Decimal `json:"difficulty"`        // (numeric) The difficulty
 	ChainWork         string          `json:"chainwork"`         // (string) Expected number of hashes required to produce the chain up to this block (hex)
-	NTx               int             `json:"nTx"`               // (numeric) The number of transactions in the block
 	PreviousBlockHash string          `json:"previousblockhash"` // (string) The hash of the previous block (hex)
 	NextBlockHash     string          `json:"nextblockhash"`     // (string) The hash of the next block (hex)
 }
 
-// RpcBlockHeader is decoded from hex data by L1/Core.
+// RpcBlockHeader from Core includes on-chain status (Confirmations = -1 means on a fork)
 // Derived from the `getblockheader` Core API.
 // https://developer.bitcoin.org/reference/rpc/getblockheader.html
 type RpcBlockHeader struct {
