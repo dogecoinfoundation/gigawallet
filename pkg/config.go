@@ -6,6 +6,7 @@ type Config struct {
 	Store      StoreConfig
 	Loggers    map[string]LoggersConfig
 	Callbacks  map[string]CallbackConfig
+	MQTT       MQTTConfig
 
 	// Map of available networks, config.Core will be set to
 	// the one specified by config.Gigawallet.Network
@@ -80,4 +81,17 @@ type LoggersConfig struct {
 type CallbackConfig struct {
 	Path  string
 	Types []string
+}
+
+type MQTTConfig struct {
+	Address  string
+	Username string
+	Password string
+	ClientID string
+	Queues   map[string]MQTTQueueConfig
+}
+
+type MQTTQueueConfig struct {
+	TopicFilter string
+	Types       []string
 }

@@ -38,6 +38,9 @@ func main() {
 		Store: giga.StoreConfig{
 			DBFile: "gigawallet.db",
 		},
+		MQTT: giga.MQTTConfig{
+			Queues: make(map[string]giga.MQTTQueueConfig),
+		},
 		Loggers:   make(map[string]giga.LoggersConfig),
 		Dogecoind: make(map[string]giga.NodeConfig),
 		Core:      giga.NodeConfig{},

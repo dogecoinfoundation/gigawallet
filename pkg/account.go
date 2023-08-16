@@ -116,11 +116,11 @@ func (a Account) GetPublicInfo() AccountPublic {
 }
 
 type AccountPublic struct {
-	Address         Address `json:"id"`
-	ForeignID       string  `json:"foreign_id"`
-	PayoutAddress   string  `json:"payout_address"`
-	PayoutThreshold string  `json:"payout_threshold"`
-	PayoutFrequency string  `json:"payout_frequency"`
+	Address         Address    `json:"id"`
+	ForeignID       string     `json:"foreign_id"`
+	PayoutAddress   Address    `json:"payout_address"`
+	PayoutThreshold CoinAmount `json:"payout_threshold"`
+	PayoutFrequency string     `json:"payout_frequency"`
 }
 
 // Account UTXO Source used to find UTXOs to spend.
