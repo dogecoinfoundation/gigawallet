@@ -359,7 +359,7 @@ func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, txIDs []stri
 	// Mark Invoices as paid if the sum of their Confirmed UTXOs is at least the invoice total.
 	// This records the block-height where we decide the invoice is paid (paid_height)
 	// This is used by InvoiceStamper to send "Invoice Paid" events.
-	invoiceAccounts, err := tx.MarkInvoicesPaid(pos.BlockHeight)
+	invoiceAccounts, err := tx.MarkInvoicesPaid(pos.BlockHeight, pos.BlockHash)
 	if err != nil {
 		// Unable to complete block processing - roll back.
 		log.Println("ChainFollower: MarkInvoicesPaid:", err)

@@ -59,7 +59,7 @@ type StoreTransaction interface {
 
 	// GetAccount returns the account with the given ID.
 	// It returns giga.NotFound if the account does not exist (key: ID)
-	GetAccountByID(ID string) (Account, error)
+	GetAccountByID(accountID Address) (Account, error)
 
 	// CalculateBalance queries across UTXOs to calculate account balances.
 	CalculateBalance(accountID Address) (AccountBalance, error)
@@ -85,6 +85,10 @@ type StoreTransaction interface {
 	// List all unreserved UTXOs in the account's wallet.
 	// Unreserved means not already being used in a pending transaction.
 	GetAllUnreservedUTXOs(account Address) ([]UTXO, error)
+
+	// GetChainState gets the last saved Best Block information (checkpoint for restart)
+	// It returns giga.NotFound if the chainstate record does not exist.
+	GetChainState() (ChainState, error)
 
 	// StoreInvoice stores an invoice.
 	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
@@ -153,7 +157,10 @@ type StoreTransaction interface {
 	// Mark all invoices paid that have corresponding confirmed UTXOs [via ConfirmUTXOs]
 	// that sum up to the invoice value, storing the given block-height. Returns the IDs
 	// of the Accounts that own any affected invoices (can return duplicates)
-	MarkInvoicesPaid(blockHeight int64) (affectedAcconts []string, err error)
+	MarkInvoicesPaid(blockHeight int64, blockID string) (affectedAcconts []string, err error)
+
+	// Set an event-sent timestamp on an invoice.
+	MarkInvoiceEventSent(invoiceID Address, event EVENT_INV) error
 
 	// RevertChangesAboveHeight clears chain-heights above the given height recorded in UTXOs and Payments.
 	// This serves to roll back the effects of adding or spending those UTXOs and/or Payments.
