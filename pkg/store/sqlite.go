@@ -649,7 +649,7 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState, writeRoo
 }
 
 const create_utxo_sqlite = "INSERT INTO utxo (txn_id, vout, value, script, script_type, script_address, account_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO UPDATE SET value=$3, script=$4, script_type=$5, script_address=$6, account_address=$7, key_index=$8, is_internal=$9, added_height=$10 WHERE txn_id=$1 AND vout=$2"
-const create_utxo_psql = "INSERT INTO utxo (txn_id, vout, value, script, script_type, script_address, account_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE SET value=$3, script=$4, script_type=$5, script_address=$6, account_address=$7, key_index=$8, is_internal=$9, added_height=$10 WHERE txn_id=$1 AND vout=$2"
+const create_utxo_psql = "INSERT INTO utxo (txn_id, vout, value, script, script_type, script_address, account_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE SET value=$3, script=$4, script_type=$5, script_address=$6, account_address=$7, key_index=$8, is_internal=$9, added_height=$10"
 
 func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 	// Create a new Unspent Transaction Output in the database.
