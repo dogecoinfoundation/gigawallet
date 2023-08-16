@@ -359,7 +359,7 @@ func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, txIDs []stri
 	// Mark Invoices as paid if the sum of their Confirmed UTXOs is at least the invoice total.
 	// This records the block-height where we decide the invoice is paid (paid_height)
 	// This is used by InvoiceStamper to send "Invoice Paid" events.
-	invoiceAccounts, err := tx.MarkInvoicesPaid(pos.BlockHeight)
+	invoiceAccounts, err := tx.MarkInvoicesPaid(pos.BlockHeight, pos.BlockHash)
 	if err != nil {
 		// Unable to complete block processing - roll back.
 		log.Println("ChainFollower: MarkInvoicesPaid:", err)
@@ -624,7 +624,7 @@ func (c *ChainFollower) fetchChainState() giga.ChainState {
 			if giga.IsNotFoundError(err) {
 				return giga.ChainState{} // empty chainstate.
 			}
-			log.Println("ChainFollower: error retrieving best block:", err)
+			log.Println("ChainFollower: error retrieving best block (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
 			return state
@@ -636,7 +636,7 @@ func (c *ChainFollower) fetchBlock(blockHash string) giga.RpcBlock {
 	for {
 		block, err := c.l1.GetBlock(blockHash)
 		if err != nil {
-			log.Println("ChainFollower: error retrieving block:", err)
+			log.Println("ChainFollower: error retrieving block (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
 			return block
@@ -648,7 +648,7 @@ func (c *ChainFollower) fetchBlockHeader(blockHash string) giga.RpcBlockHeader {
 	for {
 		block, err := c.l1.GetBlockHeader(blockHash)
 		if err != nil {
-			log.Println("ChainFollower: error retrieving block header:", err)
+			log.Println("ChainFollower: error retrieving block header (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
 			return block
@@ -660,7 +660,7 @@ func (c *ChainFollower) fetchBlockHash(height int64) string {
 	for {
 		hash, err := c.l1.GetBlockHash(height)
 		if err != nil {
-			log.Println("ChainFollower: error retrieving block hash:", err)
+			log.Println("ChainFollower: error retrieving block hash (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
 			return hash
@@ -672,7 +672,7 @@ func (c *ChainFollower) fetchBlockCount() int64 {
 	for {
 		count, err := c.l1.GetBlockCount()
 		if err != nil {
-			log.Println("ChainFollower: error retrieving block count:", err)
+			log.Println("ChainFollower: error retrieving block count (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
 			return count
@@ -684,7 +684,7 @@ func (c *ChainFollower) fetchTransaction(txHash string) giga.RawTxn {
 	for {
 		txn, err := c.l1.GetTransaction(txHash)
 		if err != nil {
-			log.Println("ChainFollower: error retrieving transaction:", err)
+			log.Println("ChainFollower: error retrieving transaction (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
 			return txn
@@ -712,7 +712,7 @@ func (c *ChainFollower) sleepForRetry(err error, delay time.Duration) {
 			c.SetSync = &cm
 			panic("restart") // caught in `Run` method.
 		default:
-			log.Println("ChainFollower: unknown command received!")
+			log.Println("ChainFollower: unknown command received (ignored)")
 		}
 	case <-time.After(delay):
 		return
@@ -733,7 +733,7 @@ func (c *ChainFollower) checkShutdown() {
 			c.SetSync = &cm
 			panic("restart") // caught in `Run` method.
 		default:
-			log.Println("ChainFollower: unknown command received!")
+			log.Println("ChainFollower: unknown command received (ignored)")
 		}
 	default:
 		return

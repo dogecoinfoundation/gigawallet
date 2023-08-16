@@ -43,16 +43,15 @@ CREATE INDEX IF NOT EXISTS account_address_i ON account_address (account_address
 CREATE TABLE IF NOT EXISTS invoice (
 	invoice_address TEXT NOT NULL PRIMARY KEY,
 	account_address TEXT NOT NULL,
-	txn_id TEXT NOT NULL,
 	vendor TEXT NOT NULL,
 	items TEXT NOT NULL,
 	total NUMERIC NOT NULL,
 	key_index INTEGER NOT NULL,
-	block_id TEXT NOT NULL,
 	confirmations INTEGER NOT NULL,
 	created DATETIME NOT NULL,
 	paid_height INTEGER,
-	notified DATETIME
+	block_id TEXT,
+	paid_event DATETIME
 );
 CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
 
@@ -65,7 +64,7 @@ CREATE TABLE IF NOT EXISTS payment (
 	paid_txid TEXT,
 	paid_height INTEGER,
 	confirmed_height INTEGER,
-	notified DATETIME
+	paid_event DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS payment_account_i ON payment (account_address);
@@ -75,7 +74,7 @@ CREATE INDEX IF NOT EXISTS payment_paid_height_i ON payment (paid_height);
 CREATE TABLE IF NOT EXISTS utxo (
 	txn_id TEXT NOT NULL,
 	vout INTEGER NOT NULL,
-	value TEXT NOT NULL,
+	value NUMERIC NOT NULL,
 	script TEXT NOT NULL,
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
@@ -104,13 +103,8 @@ CREATE TABLE IF NOT EXISTS chainstate (
 CREATE TABLE IF NOT EXISTS services (
 	name TEXT NOT NULL PRIMARY KEY,
 	cursor INTEGER NOT NULL
-)
+);
 `
-
-// Prepare query for MarkInvoicesPaid:
-var sum_utxos_for_invoice = "SELECT SUM(value) FROM utxo WHERE script_address=i.invoice_address AND spendable_height IS NOT NULL"
-var invoices_above_total = fmt.Sprintf("SELECT invoice_address FROM invoice i WHERE (%s) >= total", sum_utxos_for_invoice)
-var mark_invoices_paid = fmt.Sprintf("UPDATE invoice SET paid_height=$1 WHERE invoice_address IN (%s) RETURNING account_address", invoices_above_total)
 
 /****************** SQLiteStore implements giga.Store ********************/
 var _ giga.Store = SQLiteStore{}
@@ -140,6 +134,7 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "opening database")
 	}
+	setup_sql := SETUP_SQL
 	if backend == "sqlite3" {
 		// limit concurrent access until we figure out a way to start transactions
 		// with the BEGIN CONCURRENT statement in Go.
@@ -149,9 +144,12 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 		// if err != nil {
 		// 	return SQLiteStore{}, store.dbErr(err, "creating database schema")
 		// }
+	} else {
+		setup_sql = strings.ReplaceAll(setup_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
+		setup_sql = strings.ReplaceAll(setup_sql, "DATETIME", "TIMESTAMP")
 	}
 	// init tables / indexes
-	_, err = db.Exec(SETUP_SQL)
+	_, err = db.Exec(setup_sql)
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "creating database schema")
 	}
@@ -200,7 +198,11 @@ func (s SQLiteStore) GetAllUnreservedUTXOs(account giga.Address) (result []giga.
 }
 
 func (s SQLiteStore) GetChainState() (giga.ChainState, error) {
-	row := s.db.QueryRow("SELECT best_hash, best_height, root_hash, first_height, next_seq FROM chainstate")
+	return s.getChainStateCommon(s.db)
+}
+
+func (s SQLiteStore) getChainStateCommon(tx Queryable) (giga.ChainState, error) {
+	row := tx.QueryRow("SELECT best_hash, best_height, root_hash, first_height, next_seq FROM chainstate")
 	var state giga.ChainState
 	err := row.Scan(&state.BestBlockHash, &state.BestBlockHeight, &state.RootHash, &state.FirstHeight, &state.NextSeq)
 	if err == sql.ErrNoRows {
@@ -296,66 +298,68 @@ func (s SQLiteStore) listAccountsModifiedCommon(tx Queryable, cursor int64, limi
 	return
 }
 
-func (s SQLiteStore) getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
-	row := tx.QueryRow("SELECT invoice_address, account_address, txn_id, vendor, items, key_index, block_id, confirmations, created FROM invoice WHERE invoice_address = $1", addr)
-	var id giga.Address
-	var account giga.Address
-	var tx_id string
-	var vendor string
-	var items_json string
-	var key_index uint32
-	var block_id string
-	var confirmations int32
-	var created time.Time
-	err := row.Scan(&id, &account, &tx_id, &vendor, &items_json, &key_index, &block_id, &confirmations, &created)
-	if err == sql.ErrNoRows {
-		return giga.Invoice{}, giga.NewErr(giga.NotFound, "invoice not found: %v", addr)
-	}
-	if err != nil {
-		return giga.Invoice{}, s.dbErr(err, "GetInvoice: row.Scan")
-	}
-	var items []giga.Item
-	err = json.Unmarshal([]byte(items_json), &items)
-	if err != nil {
-		return giga.Invoice{}, s.dbErr(err, "GetInvoice: json.Unmarshal")
-	}
-	return giga.Invoice{
-		ID:            id,
-		Account:       account,
-		TXID:          tx_id,
-		Vendor:        vendor,
-		Items:         items,
-		KeyIndex:      key_index,
-		BlockID:       block_id,
-		Confirmations: confirmations,
-		Created:       created,
-	}, nil
+type Scannable interface {
+	Scan(dest ...any) error
 }
 
+// These must match the row.Scan in scanInvoice below.
+const invoice_select_cols = "invoice_address, account_address, vendor, items, key_index, block_id, confirmations, created, paid_height, paid_event"
+
+func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.Invoice, error) {
+	var items_json string
+	var paid_height sql.NullInt64
+	var block_id sql.NullString
+	var paid_event sql.NullTime
+	inv := giga.Invoice{}
+	err := row.Scan(&inv.ID, &inv.Account, &inv.Vendor, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &paid_height, &paid_event)
+	if err == sql.ErrNoRows {
+		return inv, giga.NewErr(giga.NotFound, "invoice not found: %v", invoiceID)
+	}
+	if err != nil {
+		return inv, s.dbErr(err, "ScanInvoice: row.Scan")
+	}
+	err = json.Unmarshal([]byte(items_json), &inv.Items)
+	if err != nil {
+		return inv, s.dbErr(err, "ScanInvoice: json.Unmarshal")
+	}
+	if paid_height.Valid {
+		inv.PaidHeight = paid_height.Int64
+	}
+	if block_id.Valid {
+		inv.BlockID = block_id.String
+	}
+	if paid_event.Valid {
+		inv.PaidEvent = paid_event.Time
+	}
+	return inv, nil
+}
+
+var get_invoice_sql = fmt.Sprintf("SELECT %s FROM invoice WHERE invoice_address = $1", invoice_select_cols)
+
+func (s SQLiteStore) getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Invoice, error) {
+	return s.scanInvoice(tx.QueryRow(get_invoice_sql, addr), addr)
+}
+
+// MUST order by key_index (or SQLite OID) to support the cursor API:
+// we need a way to resume the query next time from whatever next_cursor we return,
+// and the aggregate result SHOULD be stable even as the DB is modified.
+var list_invoices_sql = fmt.Sprintf("SELECT %s FROM invoice WHERE account_address = $1 AND key_index >= $2 ORDER BY key_index LIMIT $3", invoice_select_cols)
+
 func (s SQLiteStore) listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
-	// MUST order by key_index (or sqlite OID) to support the cursor API:
-	// we need a way to resume the query next time from whatever next_cursor we return,
-	// and the aggregate result SHOULD be stable even as the DB is modified.
 	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
 	rows_found := 0
-	rows, err := tx.Query("SELECT invoice_address, txn_id, vendor, items, key_index, block_id, confirmations FROM invoice WHERE account_address = $1 AND key_index >= $2 ORDER BY key_index LIMIT $3", account, cursor, limit)
+	rows, err := tx.Query(list_invoices_sql, account, cursor, limit)
 	if err != nil {
 		return nil, 0, s.dbErr(err, "ListInvoices: querying invoices")
 	}
 	defer rows.Close()
 	for rows.Next() {
-		inv := giga.Invoice{Account: account}
-		var items_json string
-		err := rows.Scan(&inv.ID, &inv.TXID, &inv.Vendor, &items_json, &inv.KeyIndex, &inv.BlockID, &inv.Confirmations)
+		inv, err := s.scanInvoice(rows, account)
 		if err != nil {
-			return nil, 0, s.dbErr(err, "ListInvoices: scanning invoice row")
-		}
-		err = json.Unmarshal([]byte(items_json), &inv.Items)
-		if err != nil {
-			return nil, 0, s.dbErr(err, "ListInvoices: unmarshalling json")
+			return nil, 0, err // already s.dbErr
 		}
 		items = append(items, inv)
-		after_this := int(inv.KeyIndex) + 1 // XXX assumes non-hardened HD Key! (from uint32)
+		after_this := int(inv.KeyIndex) + 1
 		if after_this > next_cursor {
 			next_cursor = after_this // NB. starting cursor for next call
 		}
@@ -462,8 +466,8 @@ func (t SQLiteStoreTransaction) GetAccount(foreignID string) (giga.Account, erro
 	return t.store.getAccountCommon(t.tx, foreignID, true /*isForeignKey*/)
 }
 
-func (t SQLiteStoreTransaction) GetAccountByID(ID string) (giga.Account, error) {
-	return t.store.getAccountCommon(t.tx, ID, false /*isForeignKey*/)
+func (t SQLiteStoreTransaction) GetAccountByID(ID giga.Address) (giga.Account, error) {
+	return t.store.getAccountCommon(t.tx, string(ID), false /*isForeignKey*/)
 }
 
 func (t SQLiteStoreTransaction) CalculateBalance(accountID giga.Address) (giga.AccountBalance, error) {
@@ -502,19 +506,23 @@ func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (res
 	return t.store.getAllUnreservedUTXOsCommon(t.tx, account)
 }
 
+func (t SQLiteStoreTransaction) GetChainState() (giga.ChainState, error) {
+	return t.store.getChainStateCommon(t.tx)
+}
+
 // Store an invoice
 func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	items_b, err := json.Marshal(inv.Items)
 	if err != nil {
-		return t.store.dbErr(err, "createInvoice: json.Marshal items")
+		return t.store.dbErr(err, "StoreInvoice: json.Marshal items")
 	}
 	total := inv.CalcTotal()
 	_, err = t.tx.Exec(
-		"insert into invoice(invoice_address, account_address, txn_id, vendor, items, total, key_index, block_id, confirmations, created) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-		inv.ID, inv.Account, inv.TXID, inv.Vendor, string(items_b), total, inv.KeyIndex, inv.BlockID, inv.Confirmations, inv.Created,
+		"insert into invoice(invoice_address, account_address, vendor, items, total, key_index, confirmations, created) values($1,$2,$3,$4,$5,$6,$7,$8)",
+		inv.ID, inv.Account, inv.Vendor, string(items_b), total, inv.KeyIndex, inv.Confirmations, inv.Created,
 	)
 	if err != nil {
-		return t.store.dbErr(err, "createInvoice: insert")
+		return t.store.dbErr(err, "StoreInvoice: insert")
 	}
 	return nil
 }
@@ -553,7 +561,7 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 
 func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
 	res, err := t.tx.Exec(
-		"update account set next_int_key=MAX(next_int_key,$1), next_ext_key=MAX(next_ext_key,$2), next_pool_int=MAX(next_pool_int,$3), next_pool_ext=MAX(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 where foreign_id=$8",
+		"UPDATE account SET next_int_key=GREATEST(next_int_key,$1), next_ext_key=GREATEST(next_ext_key,$2), next_pool_int=GREATEST(next_pool_int,$3), next_pool_ext=GREATEST(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8",
 		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
 		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
@@ -563,7 +571,7 @@ func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
 
 func (t SQLiteStoreTransaction) UpdateAccountBalance(accountID giga.Address, bal giga.AccountBalance) error {
 	res, err := t.tx.Exec(
-		"update account set current_balance=$1, incoming_balance=$2, outgoing_balance=$3 where address=$4",
+		"UPDATE account SET current_balance=$1, incoming_balance=$2, outgoing_balance=$3 WHERE address=$4",
 		bal.CurrentBalance, bal.IncomingBalance, bal.OutgoingBalance, accountID)
 	return t.checkRowsAffected(res, err, "account", string(accountID))
 }
@@ -601,7 +609,7 @@ func (t SQLiteStoreTransaction) StoreAddresses(accountID giga.Address, addresses
 }
 
 func (t SQLiteStoreTransaction) FindAccountForAddress(address giga.Address) (giga.Address, uint32, bool, error) {
-	row := t.tx.QueryRow("SELECT account_address,key_index,is_internal FROM account_address WHERE address = $1", address)
+	row := t.tx.QueryRow("SELECT account_address, key_index, is_internal FROM account_address WHERE address = $1", address)
 	var accountID giga.Address
 	var keyIndex uint32
 	var isInternal bool
@@ -655,7 +663,7 @@ func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 }
 
 func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight int64, spendTxID string) (id string, scriptAddress giga.Address, err error) {
-	row := t.tx.QueryRow("UPDATE utxo SET spending_height=$3, spend_txid=$4 WHERE txn_id=$1 AND vout=$2 RETURNING account_address, script_address", txID, vOut, blockHeight, spendTxID)
+	row := t.tx.QueryRow("UPDATE utxo SET spending_height=$1, spend_txid=$2 WHERE txn_id=$3 AND vout=$4 RETURNING account_address, script_address", blockHeight, spendTxID, txID, vOut)
 	if err != nil {
 		return "", "", t.store.dbErr(err, "MarkUTXOSpent: executing update")
 	}
@@ -672,12 +680,12 @@ func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight
 // Mark payments paid that match any of the txIDs (storing the given block-height)
 // Returns the IDs of the Accounts that own any affected payments (can have duplicates)
 func (t SQLiteStoreTransaction) MarkPaymentsOnChain(txIDs []string, blockHeight int64) (accounts []string, err error) {
-	stmt, err := t.tx.Prepare("UPDATE payment SET paid_height=$2 WHERE paid_txid=$1 RETURNING account_address")
+	stmt, err := t.tx.Prepare("UPDATE payment SET paid_height=$1 WHERE paid_txid=$2 RETURNING account_address")
 	if err != nil {
 		return nil, t.store.dbErr(err, "MarkPaymentsOnChain: preparing update")
 	}
 	for id := range txIDs {
-		rows, err := stmt.Query(id, blockHeight)
+		rows, err := stmt.Query(blockHeight, id)
 		if err != nil {
 			return nil, t.store.dbErr(err, "MarkPaymentsOnChain: executing update")
 		}
@@ -696,11 +704,10 @@ func (t SQLiteStoreTransaction) MarkPaymentsOnChain(txIDs []string, blockHeight 
 }
 
 func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight int64) (affectedAccounts []string, err error) {
-	confirmHeight := blockHeight - int64(confirmations) // from config.
 	// note: there is an index on (paid_height) for this query.
 	rows, err := t.tx.Query(
-		"UPDATE payment SET confirmed_height=$1 WHERE paid_height<=$2 AND confirmed_height IS NULL RETURNING account_address",
-		blockHeight, confirmHeight,
+		"UPDATE payment SET confirmed_height = paid_height + $1 WHERE paid_height + $1 <= $2 AND confirmed_height IS NULL RETURNING account_address",
+		confirmations, blockHeight,
 	)
 	if err != nil {
 		return nil, t.store.dbErr(err, "ConfirmPayments: updating payments")
@@ -722,17 +729,14 @@ func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight i
 	return
 }
 
+// There is an index on (added_height, spendable_height) for this query.
+// This uses #confirmations from the invoice being paid, or the configured #confirmations.
+// This MUST be a LEFT OUTER join (script_address may not match any invoice)
+var confirmations_from_invoice = "(SELECT COALESCE(confirmations,$1) FROM invoice WHERE invoice_address = utxo.script_address)"
+var confirm_utxo_query = fmt.Sprintf("UPDATE utxo SET spendable_height = added_height + %s WHERE added_height + %s <= $2 AND spendable_height IS NULL RETURNING account_address", confirmations_from_invoice, confirmations_from_invoice)
+
 func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAccounts []string, err error) {
-	confirmedHeight := blockHeight - int64(confirmations) // from config.
-	// note: there is an index on (added_height, spendable_height) for this query.
-	// note: this uses num-confirmations from the invoice being paid, if there is one.
-	// note: this MUST be a LEFT OUTER join (script_address may not match any invoice)
-	rows, err := t.tx.Query(`
-		UPDATE utxo SET spendable_height=$1
-		WHERE added_height <= COALESCE((SELECT $1 - confirmations from invoice WHERE invoice_address = utxo.script_address), $2)
-		AND spendable_height IS NULL
-		RETURNING account_address
-	`, blockHeight, confirmedHeight)
+	rows, err := t.tx.Query(confirm_utxo_query, confirmations, blockHeight)
 	if err != nil {
 		return nil, t.store.dbErr(err, "ConfirmUTXOs: updating utxos")
 	}
@@ -753,11 +757,34 @@ func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int6
 	return
 }
 
+func (t SQLiteStoreTransaction) MarkInvoiceEventSent(invoiceID giga.Address, event giga.EVENT_INV) error {
+	field := ""
+	if event == giga.INV_PAYMENT_RECEIVED {
+		field = "paid_event"
+	} else {
+		return giga.NewErr(giga.BadRequest, "unsupported event")
+	}
+	now := time.Now()
+	query := fmt.Sprintf("UPDATE invoice SET %s=$1 WHERE invoice_address=$2", field)
+	_, err := t.tx.Exec(query, now, invoiceID)
+	if err != nil {
+		return t.store.dbErr(err, "MarkInvoiceEventSent: UPDATE")
+	}
+	return nil
+}
+
+// Prepare query for MarkInvoicesPaid.
+// Summing all UTXOs that payTo the Invoice Address that have been confirmed (spendable_height is non-null)
+// ConfirmUTXOs sets spendable_height when the UTXO has N confirmations, where N comes from the Invoice!
+var sum_utxos_for_invoice = "SELECT SUM(value) FROM utxo WHERE script_address=i.invoice_address AND spendable_height IS NOT NULL"
+var invoices_above_total = fmt.Sprintf("SELECT invoice_address FROM invoice i WHERE (%s) >= total", sum_utxos_for_invoice)
+var mark_invoices_paid = fmt.Sprintf("UPDATE invoice SET paid_height=$1, block_id=$2 WHERE invoice_address IN (%s) RETURNING account_address", invoices_above_total)
+
 // Mark all invoices paid that have corresponding confirmed UTXOs [via ConfirmUTXOs]
 // that sum up to the invoice total, storing the given block-height. Returns the IDs
 // of the Accounts that own any affected invoices (can return duplicates)
-func (t SQLiteStoreTransaction) MarkInvoicesPaid(blockHeight int64) (accounts []string, err error) {
-	rows, err := t.tx.Query(mark_invoices_paid, blockHeight)
+func (t SQLiteStoreTransaction) MarkInvoicesPaid(blockHeight int64, blockID string) (accounts []string, err error) {
+	rows, err := t.tx.Query(mark_invoices_paid, blockHeight, blockID)
 	if err != nil {
 		return nil, t.store.dbErr(err, "MarkInvoicesPaid: preparing update")
 	}
@@ -796,37 +823,46 @@ func collectIDs(rows *sql.Rows, dbErr error, accounts map[string]int64, seq int6
 }
 
 func (t SQLiteStoreTransaction) RevertChangesAboveHeight(maxValidHeight int64, seq int64) (int64, error) {
+	// UTXOs.
 	// The presence of a height in added_height, spendable_height, spending_height, spent_height
-	// indicates that the UTXO is in the process of being added, or has been added (confirmed); is
-	// reserved for spending, or has been spent (confirmed)
+	// indicates that the UTXO is in the process of being added, or has been added (confirmed);
+	// is reserved for spending, or has been spent (confirmed)
 	// When we undo one of these, we always undo the stages that happen later as well.
 	accounts := make(map[string]int64)
-	rows1, err := t.tx.Query("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height>$1 RETURNING account_address", maxValidHeight)
-	if seq, err = collectIDs(rows1, err, accounts, seq); err != nil {
+	rows, err := t.tx.Query("UPDATE utxo SET added_height=NULL,spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE added_height>$1 RETURNING account_address", maxValidHeight)
+	if seq, err = collectIDs(rows, err, accounts, seq); err != nil {
 		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: utxo update 1")
 	}
-	rows2, err := t.tx.Query("UPDATE utxo SET spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE spendable_height>$1 RETURNING account_address", maxValidHeight)
-	if seq, err = collectIDs(rows2, err, accounts, seq); err != nil {
+	rows, err = t.tx.Query("UPDATE utxo SET spendable_height=NULL,spending_height=NULL,spent_height=NULL WHERE spendable_height>$1 RETURNING account_address", maxValidHeight)
+	if seq, err = collectIDs(rows, err, accounts, seq); err != nil {
 		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: utxo update 2")
 	}
-	rows3, err := t.tx.Query("UPDATE utxo SET spending_height=NULL,spent_height=NULL WHERE spending_height>$1 RETURNING account_address", maxValidHeight)
-	if seq, err = collectIDs(rows3, err, accounts, seq); err != nil {
+	rows, err = t.tx.Query("UPDATE utxo SET spending_height=NULL,spent_height=NULL WHERE spending_height>$1 RETURNING account_address", maxValidHeight)
+	if seq, err = collectIDs(rows, err, accounts, seq); err != nil {
 		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: utxo update 3")
 	}
-	rows4, err := t.tx.Query("UPDATE utxo SET spent_height=NULL WHERE spent_height>$1 RETURNING account_address", maxValidHeight)
-	if seq, err = collectIDs(rows4, err, accounts, seq); err != nil {
+	rows, err = t.tx.Query("UPDATE utxo SET spent_height=NULL WHERE spent_height>$1 RETURNING account_address", maxValidHeight)
+	if seq, err = collectIDs(rows, err, accounts, seq); err != nil {
 		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: utxo update 4")
 	}
-	// Presence of paid_height means MarkPaymentsOnChain has seen the payment on-chain.
-	// If we undo this, we also undo confirmed_height (which happens later)
-	rows5, err := t.tx.Query("UPDATE payment SET paid_height=NULL,confirmed_height=NULL WHERE paid_height>$1 RETURNING account_address", maxValidHeight)
-	if seq, err = collectIDs(rows5, err, accounts, seq); err != nil {
-		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: executing update 5")
+	// Invoices.
+	// Presence of paid_height means MarkInvoicesPaid has seen sum(utxos) > total where
+	// the UTXOs have been marked as confirmed (i.e. N confirmations where N comes from the invoice!)
+	rows, err = t.tx.Query("UPDATE invoice SET paid_height=NULL,block_id=NULL WHERE paid_height>$1 RETURNING account_address", maxValidHeight)
+	if seq, err = collectIDs(rows, err, accounts, seq); err != nil {
+		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: invoice update")
 	}
-	// Presence of confirmed_height means ConfirmPayments has marked the payment confirmed.
-	rows6, err := t.tx.Query("UPDATE payment SET confirmed_height=NULL WHERE confirmed_height>$1 RETURNING account_address", maxValidHeight)
-	if seq, err = collectIDs(rows6, err, accounts, seq); err != nil {
-		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: executing update 6")
+	// Payments.
+	// Presence of paid_height means MarkPaymentsOnChain has seen the payment in a block.
+	// If we undo this, we also undo confirmed_height (which happens later)
+	rows, err = t.tx.Query("UPDATE payment SET paid_height=NULL,confirmed_height=NULL WHERE paid_height>$1 RETURNING account_address", maxValidHeight)
+	if seq, err = collectIDs(rows, err, accounts, seq); err != nil {
+		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: payment update 1")
+	}
+	// Presence of confirmed_height means ConfirmPayments has seen N confirmations.
+	rows, err = t.tx.Query("UPDATE payment SET confirmed_height=NULL WHERE confirmed_height>$1 RETURNING account_address", maxValidHeight)
+	if seq, err = collectIDs(rows, err, accounts, seq); err != nil {
+		return seq, t.store.dbErr(err, "RevertUTXOsAboveHeight: payment update 2")
 	}
 	return seq, t.IncChainSeqForAccounts(accounts)
 }
@@ -834,13 +870,13 @@ func (t SQLiteStoreTransaction) RevertChangesAboveHeight(maxValidHeight int64, s
 func (t SQLiteStoreTransaction) IncChainSeqForAccounts(accounts map[string]int64) error {
 	// Increment the chain-sequence-number for multiple accounts.
 	// Use this after modifying accounts' blockchain-derived state (UTXOs, TXNs)
-	stmt, err := t.tx.Prepare("UPDATE account SET chain_seq=$2 WHERE address=$1")
+	stmt, err := t.tx.Prepare("UPDATE account SET chain_seq=$1 WHERE address=$2")
 	if err != nil {
 		return t.store.dbErr(err, "IncAccountChainSeq: prepare")
 	}
 	defer stmt.Close()
 	for key, seq := range accounts {
-		_, err := stmt.Exec(key, seq)
+		_, err := stmt.Exec(seq, key)
 		if err != nil {
 			return t.store.dbErr(err, "IncAccountChainSeq: update "+key)
 		}

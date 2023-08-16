@@ -59,7 +59,14 @@ const (
 	ACC_BALANCE_CHANGE EVENT_ACC = "BALANCE_CHANGE"
 )
 
-type AccountBalanceChange struct {
+type AccPaymentSentEvent struct {
+	From   string     `json:"from"`
+	PayTo  Address    `json:"pay_to"`
+	Amount CoinAmount `json:"amount"`
+	TxID   string     `json:"txid"`
+}
+
+type AccBalanceChangeEvent struct {
 	AccountID       Address    `json:"account_id"`
 	ForeignID       string     `json:"foreign_id"`
 	CurrentBalance  CoinAmount `json:"current_balance"`
@@ -83,9 +90,8 @@ const (
 	INV_PAYMENT_REFUNDED EVENT_INV = "PAYMENT_REFUNDED"
 )
 
-type InvPaymentSentEvent struct {
-	From   string     `json:"from"`
-	PayTo  Address    `json:"pay_to"`
-	Amount CoinAmount `json:"amount"`
-	TxID   string     `json:"txid"`
+type InvPaymentReceivedEvent struct {
+	AccountID Address `json:"account_id"`
+	ForeignID string  `json:"foreign_id"`
+	InvoiceID Address `json:"invoice_id"`
 }

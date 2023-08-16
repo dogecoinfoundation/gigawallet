@@ -68,8 +68,14 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 
 	// Reserve the Invoice Address in the account.
 	acc.NextExternalKey = i.KeyIndex + 1
-	acc.UpdatePoolAddresses(txn, a.L1)
-	txn.UpdateAccount(acc)
+	err = acc.UpdatePoolAddresses(txn, a.L1)
+	if err != nil {
+		return Invoice{}, err
+	}
+	err = txn.UpdateAccount(acc)
+	if err != nil {
+		return Invoice{}, err
+	}
 
 	err = txn.Commit()
 	if err != nil {
@@ -330,7 +336,7 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 		return
 	}
 
-	msg := InvPaymentSentEvent{
+	msg := AccPaymentSentEvent{
 		From:   account.ForeignID,
 		PayTo:  payTo,
 		Amount: amount,
@@ -437,7 +443,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (txid st
 		return
 	}
 
-	msg := InvPaymentSentEvent{
+	msg := AccPaymentSentEvent{
 		From:   account.ForeignID,
 		PayTo:  payTo,
 		Amount: invoiceAmount,

@@ -13,7 +13,8 @@ const (
 	RETRY_DELAY        = 5 * time.Second // for Database errors.
 	CONFLICT_DELAY     = 1 * time.Second // for Database conflicts (concurrent transactions)
 	DELAY_BETWEEN_RUNS = 1 * time.Second // time between batch queries
-	BATCH_SIZE         = 10              // number of Accounts to process at once
+	ACCOUNT_BATCH_SIZE = 1               // number of Accounts to process at once
+	INVOICE_PAGE_SIZE  = 10              // number of Invoices to fetch per page
 	SERVICE_KEY        = "BalanceKeeper" // service name, stored in the database
 )
 
@@ -72,14 +73,14 @@ func (b BalanceKeeper) Run(started, stopped chan bool, stop chan context.Context
 
 func (b BalanceKeeper) runBatch(cursor int64) (int64, error) {
 	tx := b.beginStoreTxn()
-	ids, newCursor, err := tx.ListAccountsModifiedSince(cursor, BATCH_SIZE)
+	ids, newCursor, err := tx.ListAccountsModifiedSince(cursor, ACCOUNT_BATCH_SIZE)
 	if err != nil {
 		tx.Rollback()
 		log.Println("BalanceKeeper: ListAccountsModifiedSince:", err)
 		return cursor, err
 	}
 	for n, id := range ids {
-		err = b.updateAccountBalance(tx, id, cursor, n)
+		err = b.updateAccountBalance(tx, giga.Address(id), cursor, n)
 		if err != nil {
 			tx.Rollback()
 			return cursor, err // already logged.
@@ -102,13 +103,14 @@ func (b BalanceKeeper) runBatch(cursor int64) (int64, error) {
 	return newCursor, nil
 }
 
-func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id string, cursor int64, n int) error {
+func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id giga.Address, cursor int64, n int) error {
 	log.Printf("BalanceKeeper: checking account balance: %s\n", id)
 	acc, err := tx.GetAccountByID(id)
 	if err != nil {
 		log.Printf("BalanceKeeper: GetAccountByID '%s': %v\n", id, err)
 		return err
 	}
+	// Balance.
 	bal, err := tx.CalculateBalance(giga.Address(id))
 	if err != nil {
 		log.Printf("BalanceKeeper: CalculateBalance '%s': %v\n", id, err)
@@ -124,14 +126,14 @@ func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id string,
 			return err
 		}
 		// notify BUS listeners.
-		msg := giga.AccountBalanceChange{
+		msg := giga.AccBalanceChangeEvent{
 			AccountID:       acc.Address,
 			ForeignID:       acc.ForeignID,
 			CurrentBalance:  bal.CurrentBalance,
 			IncomingBalance: bal.IncomingBalance,
 			OutgoingBalance: bal.OutgoingBalance,
 		}
-		unique_id := fmt.Sprintf("BK-%d-%d", cursor, n)
+		unique_id := fmt.Sprintf("ABC-%d-%d", cursor, n)
 		err = b.bus.Send(giga.ACC_BALANCE_CHANGE, msg, unique_id)
 		if err != nil {
 			log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
@@ -139,6 +141,40 @@ func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id string,
 		}
 		log.Printf("BalanceKeeper: updated account balance: %s\n", id)
 	}
+	// Invoices.
+	log.Printf("BalanceKeeper: checking invoices: %s\n", id)
+	inv_c := 0
+	num_inv := 0
+	for cont := true; cont; cont = inv_c > 0 {
+		// Fetch a batch of invoices.
+		invoices, new_inv_c, err := tx.ListInvoices(id, inv_c, ACCOUNT_BATCH_SIZE)
+		if err != nil {
+			log.Printf("BalanceKeeper: ListInvoices '%s': %v\n", id, err)
+			return err
+		}
+		// Check each invoice to see if it's paid and we haven't sent an event yet.
+		for n, inv := range invoices {
+			if inv.PaidHeight != 0 && inv.PaidEvent.IsZero() {
+				// notify BUS listeners.
+				msg := giga.InvPaymentReceivedEvent{
+					AccountID: acc.Address,
+					ForeignID: acc.ForeignID,
+					InvoiceID: inv.ID,
+				}
+				unique_id := fmt.Sprintf("IPR-%d-%d", cursor, num_inv+n)
+				err = b.bus.Send(giga.INV_PAYMENT_RECEIVED, msg, unique_id)
+				if err != nil {
+					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
+					return err
+				}
+				tx.MarkInvoiceEventSent(inv.ID, giga.INV_PAYMENT_RECEIVED)
+				log.Printf("BalanceKeeper: sent invoice payment received: %s in %s\n", inv.ID, id)
+			}
+		}
+		num_inv += len(invoices)
+		inv_c = new_inv_c
+	}
+	log.Printf("BalanceKeeper: checked %d invoices: %s\n", num_inv, id)
 	return nil
 }
 
