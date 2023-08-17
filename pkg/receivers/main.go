@@ -12,4 +12,7 @@ func SetUpReceivers(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Co
 
 	// Set up configured Callbacks
 	SetupCallbacks(cond, bus, conf)
+
+	// Set up configured MQTT queues
+	SetupMQTTs(cond, bus, conf)
 }

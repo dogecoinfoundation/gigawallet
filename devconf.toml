@@ -28,12 +28,26 @@
   rpcpass = "suchpay"
   rpcuser = "suchpay"
 
+## Setup loggers, see pkg/config.go LoggersConfig
 [loggers.events]
   path = "./events.log"
   types = ["ALL"]
 
-# To create http callbacks for events to your service:
+## Setup http Callbacks, see pkg/config.go CallbackConfig
 
 #[callbacks.example1]
 #  path = "https://example.com/invoiceEvents"
 #  types = ["INV"]
+
+
+## Setup MQTT event publishing, see pkg/config.go MQTTConfig
+
+#[mqtt]
+#  address = "test.mosquitto.org:1884"
+#  username = "rw"
+#  password = "readwrite"
+#  clientid = "gigawallet"
+#
+#[mqtt.queues.accounts]
+#  topicfilter = "account"
+#  Types = ["ACC"]

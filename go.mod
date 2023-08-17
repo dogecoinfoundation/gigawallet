@@ -18,4 +18,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-require gopkg.in/yaml.v2 v2.4.0 // indirect
+require (
+	github.com/yosssi/gmq v0.0.1 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
+)

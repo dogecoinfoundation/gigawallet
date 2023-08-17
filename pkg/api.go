@@ -152,8 +152,8 @@ func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upser
 		account := Account{
 			Address:         addr,
 			ForeignID:       foreignID,
-			PayoutAddress:   request.PayoutAddress,
-			PayoutThreshold: request.PayoutThreshold,
+			PayoutAddress:   Address(request.PayoutAddress),
+			PayoutThreshold: decimal.RequireFromString(request.PayoutThreshold),
 			PayoutFrequency: request.PayoutFrequency,
 			Privkey:         priv,
 		}
