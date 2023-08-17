@@ -146,7 +146,7 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 		// }
 	} else {
 		setup_sql = strings.ReplaceAll(setup_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
-		setup_sql = strings.ReplaceAll(setup_sql, "DATETIME", "TIMESTAMP")
+		setup_sql = strings.ReplaceAll(setup_sql, "DATETIME", "TIMESTAMP WITH TIME ZONE")
 	}
 	// init tables / indexes
 	_, err = db.Exec(setup_sql)
