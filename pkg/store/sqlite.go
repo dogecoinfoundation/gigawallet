@@ -23,11 +23,11 @@ CREATE TABLE IF NOT EXISTS account (
 	next_pool_int INTEGER NOT NULL,
 	next_pool_ext INTEGER NOT NULL,
 	payout_address TEXT NOT NULL,
-	payout_threshold NUMERIC NOT NULL,
+	payout_threshold NUMERIC(18,8) NOT NULL,
 	payout_frequency TEXT NOT NULL,
-	current_balance NUMERIC NOT NULL DEFAULT 0,
-	incoming_balance NUMERIC NOT NULL DEFAULT 0,
-	outgoing_balance NUMERIC NOT NULL DEFAULT 0,
+	current_balance NUMERIC(18,8) NOT NULL DEFAULT 0,
+	incoming_balance NUMERIC(18,8) NOT NULL DEFAULT 0,
+	outgoing_balance NUMERIC(18,8) NOT NULL DEFAULT 0,
 	chain_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS account_foreign_i ON account (foreign_id);
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS invoice (
 	account_address TEXT NOT NULL,
 	vendor TEXT NOT NULL,
 	items TEXT NOT NULL,
-	total NUMERIC NOT NULL,
+	total NUMERIC(18,8) NOT NULL,
 	key_index INTEGER NOT NULL,
 	confirmations INTEGER NOT NULL,
 	created DATETIME NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS payment (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	account_address TEXT NOT NULL,
 	pay_to TEXT NOT NULL,
-	amount INTEGER NOT NULL,
+	amount NUMERIC(18,8) NOT NULL,
 	created DATETIME NOT NULL,
 	paid_txid TEXT,
 	paid_height INTEGER,
@@ -74,7 +74,7 @@ CREATE INDEX IF NOT EXISTS payment_paid_height_i ON payment (paid_height);
 CREATE TABLE IF NOT EXISTS utxo (
 	txn_id TEXT NOT NULL,
 	vout INTEGER NOT NULL,
-	value NUMERIC NOT NULL,
+	value NUMERIC(18,8) NOT NULL,
 	script TEXT NOT NULL,
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
