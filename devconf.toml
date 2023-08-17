@@ -8,7 +8,10 @@
   pubapirooturl = "http://localhost:8082"
 
 [Store]
-#  DBFile = "postgres://postgres:@localhost/gigawallet?sslmode=disable"
+#  SQLite: (default)
+#  DBFile = "gigawallet.db"
+#  Postgres:
+#  DBFile = "postgres://username:password@localhost/gigawallet?sslmode=disable"
 
 [gigawallet]
   network = "mainnet"  # which dogecoind to connect to
