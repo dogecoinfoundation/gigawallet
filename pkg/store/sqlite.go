@@ -48,10 +48,10 @@ CREATE TABLE IF NOT EXISTS invoice (
 	total NUMERIC(18,8) NOT NULL,
 	key_index INTEGER NOT NULL,
 	confirmations INTEGER NOT NULL,
-	created TIMESTAMP NOT NULL,
+	created DATETIME NOT NULL,
 	paid_height INTEGER,
 	block_id TEXT,
-	paid_event TIMESTAMP
+	paid_event DATETIME
 );
 CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
 
@@ -60,11 +60,11 @@ CREATE TABLE IF NOT EXISTS payment (
 	account_address TEXT NOT NULL,
 	pay_to TEXT NOT NULL,
 	amount NUMERIC(18,8) NOT NULL,
-	created TIMESTAMP NOT NULL,
+	created DATETIME NOT NULL,
 	paid_txid TEXT,
 	paid_height INTEGER,
 	confirmed_height INTEGER,
-	paid_event TIMESTAMP
+	paid_event DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS payment_account_i ON payment (account_address);
@@ -146,7 +146,7 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 		// }
 	} else {
 		setup_sql = strings.ReplaceAll(setup_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
-		setup_sql = strings.ReplaceAll(setup_sql, "TIMESTAMP", "TIMESTAMP WITH TIME ZONE")
+		setup_sql = strings.ReplaceAll(setup_sql, "DATETIME", "TIMESTAMP WITH TIME ZONE")
 	}
 	// init tables / indexes
 	_, err = db.Exec(setup_sql)
