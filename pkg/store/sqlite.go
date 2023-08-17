@@ -654,6 +654,8 @@ const create_utxo_psql = "INSERT INTO utxo (txn_id, vout, value, script, script_
 func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 	// Create a new Unspent Transaction Output in the database.
 	// Updates Account 'incoming' to indicate unconfirmed funds.
+	// For psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE ..."
+	// Remove in the end "WHERE txn_id=$1 AND vout=$2"
 	// psql: " ..."
 	sql := create_utxo_sqlite
 	if t.store.isPostgres {
