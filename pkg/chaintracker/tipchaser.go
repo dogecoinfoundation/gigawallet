@@ -54,23 +54,23 @@ func (c *TipChaser) Run(started, stopped chan bool, stop chan context.Context) e
 			case e := <-c.ReceiveFromCore:
 				switch e.Type {
 				case giga.Block:
-					txid := e.ID
-					if txid != lastid {
-						lastid = txid
-						c.sendEvent(txid)
+					blockid := e.ID
+					if blockid != lastid {
+						lastid = blockid
+						c.sendEvent(blockid)
 					}
 				}
 			case <-time.After(expectedBlockInterval):
 				log.Println("TipChaser: falling back to getbestblockhash")
 				// c.bus.Send(giga.SYS_ERR, "TipChaser: falling back to getbestblockhash")
-				txid, err := c.l1.GetBestBlockHash()
+				blockid, err := c.l1.GetBestBlockHash()
 				if err != nil {
 					log.Println("TipChaser: core RPC request failed: getbestblockhash")
 					// c.bus.Send(giga.SYS_ERR, "TipChaser: core RPC request failed: getbestblockhash")
 				} else {
-					if txid != lastid {
-						lastid = txid
-						c.sendEvent(txid)
+					if blockid != lastid {
+						lastid = blockid
+						c.sendEvent(blockid)
 					}
 				}
 			}
