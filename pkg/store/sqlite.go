@@ -23,11 +23,11 @@ CREATE TABLE IF NOT EXISTS account (
 	next_pool_int INTEGER NOT NULL,
 	next_pool_ext INTEGER NOT NULL,
 	payout_address TEXT NOT NULL,
-	payout_threshold NUMERIC NOT NULL,
+	payout_threshold NUMERIC(18,8) NOT NULL,
 	payout_frequency TEXT NOT NULL,
-	current_balance NUMERIC NOT NULL DEFAULT 0,
-	incoming_balance NUMERIC NOT NULL DEFAULT 0,
-	outgoing_balance NUMERIC NOT NULL DEFAULT 0,
+	current_balance NUMERIC(18,8) NOT NULL DEFAULT 0,
+	incoming_balance NUMERIC(18,8) NOT NULL DEFAULT 0,
+	outgoing_balance NUMERIC(18,8) NOT NULL DEFAULT 0,
 	chain_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS account_foreign_i ON account (foreign_id);
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS invoice (
 	account_address TEXT NOT NULL,
 	vendor TEXT NOT NULL,
 	items TEXT NOT NULL,
-	total NUMERIC NOT NULL,
+	total NUMERIC(18,8) NOT NULL,
 	key_index INTEGER NOT NULL,
 	confirmations INTEGER NOT NULL,
 	created DATETIME NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS payment (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	account_address TEXT NOT NULL,
 	pay_to TEXT NOT NULL,
-	amount INTEGER NOT NULL,
+	amount NUMERIC(18,8) NOT NULL,
 	created DATETIME NOT NULL,
 	paid_txid TEXT,
 	paid_height INTEGER,
@@ -74,7 +74,7 @@ CREATE INDEX IF NOT EXISTS payment_paid_height_i ON payment (paid_height);
 CREATE TABLE IF NOT EXISTS utxo (
 	txn_id TEXT NOT NULL,
 	vout INTEGER NOT NULL,
-	value NUMERIC NOT NULL,
+	value NUMERIC(18,8) NOT NULL,
 	script TEXT NOT NULL,
 	script_type TEXT NOT NULL,
 	script_address TEXT NOT NULL,
@@ -648,13 +648,20 @@ func (t SQLiteStoreTransaction) UpdateChainState(state giga.ChainState, writeRoo
 	return nil
 }
 
+const create_utxo_sqlite = "INSERT INTO utxo (txn_id, vout, value, script, script_type, script_address, account_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO UPDATE SET value=$3, script=$4, script_type=$5, script_address=$6, account_address=$7, key_index=$8, is_internal=$9, added_height=$10 WHERE txn_id=$1 AND vout=$2"
+const create_utxo_psql = "INSERT INTO utxo (txn_id, vout, value, script, script_type, script_address, account_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE SET value=$3, script=$4, script_type=$5, script_address=$6, account_address=$7, key_index=$8, is_internal=$9, added_height=$10"
+
 func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 	// Create a new Unspent Transaction Output in the database.
 	// Updates Account 'incoming' to indicate unconfirmed funds.
-	// psql: "ON CONFLICT ON CONSTRAINT utxo_pkey DO UPDATE ..."
+	// psql: " ..."
+	sql := create_utxo_sqlite
+	if t.store.isPostgres {
+		sql = create_utxo_psql
+	}
 	_, err := t.tx.Exec(
-		"INSERT INTO utxo (txn_id, vout, value, script, script_type, script_address, account_address, key_index, is_internal, added_height) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO UPDATE SET value=$3, script=$4, script_type=$5, script_address=$6, account_address=$7, key_index=$8, is_internal=$9, added_height=$10 WHERE txn_id=$1 AND vout=$2",
-		utxo.TxID, utxo.VOut, utxo.Value, utxo.ScriptHex, utxo.ScriptType, utxo.ScriptAddress, utxo.AccountID, utxo.KeyIndex, utxo.IsInternal, utxo.BlockHeight,
+		sql, utxo.TxID, utxo.VOut, utxo.Value, utxo.ScriptHex, utxo.ScriptType, utxo.ScriptAddress,
+		utxo.AccountID, utxo.KeyIndex, utxo.IsInternal, utxo.BlockHeight,
 	)
 	if err != nil {
 		return t.store.dbErr(err, "CreateUTXO: preparing insert")
