@@ -95,3 +95,39 @@ func (i *Invoice) Validate() error {
 
 	return nil
 }
+
+func (i *Invoice) ToPublic() PublicInvoice {
+
+	pub := PublicInvoice{
+		ID:        i.ID,
+		Items:     i.Items,
+		Created:   i.Created,
+		Total:     i.CalcTotal(),
+		PayTo:     i.ID,
+		Paid:      false,
+		Confirmed: false,
+	}
+
+	if i.PaidHeight > 0 {
+		pub.Paid = true
+	}
+
+	if i.BlockID != "" {
+		pub.Confirmed = true
+	}
+
+	return pub
+}
+
+// This is the address as seen by the public API
+type PublicInvoice struct {
+	ID        Address    `json:"id"`
+	Items     []Item     `json:"items"`
+	Created   time.Time  `json:"created"`
+	Total     CoinAmount `json:"total"`             // Calculated
+	PayTo     Address    `json:"pay_to_address"`    // Calculated
+	Paid      bool       `json:"payment_seen"`      // Calculated
+	Confirmed bool       `json:"payment_confirmed"` // Calculated
+	// TODO: needs current block height
+	//Estimate  int        `json:"estimate_seconds_to_confirm"` // Calculated
+}
