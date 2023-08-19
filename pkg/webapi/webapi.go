@@ -155,10 +155,6 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
 		return
 	}
-	if o.Vendor == "" {
-		sendBadRequest(w, "missing 'vendor' in JSON body")
-		return
-	}
 	if len(o.Items) < 1 {
 		sendBadRequest(w, "missing 'items' in JSON body")
 		return

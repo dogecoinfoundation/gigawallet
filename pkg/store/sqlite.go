@@ -43,7 +43,6 @@ CREATE INDEX IF NOT EXISTS account_address_i ON account_address (account_address
 CREATE TABLE IF NOT EXISTS invoice (
 	invoice_address TEXT NOT NULL PRIMARY KEY,
 	account_address TEXT NOT NULL,
-	vendor TEXT NOT NULL,
 	items TEXT NOT NULL,
 	total NUMERIC(18,8) NOT NULL,
 	key_index INTEGER NOT NULL,
@@ -303,7 +302,7 @@ type Scannable interface {
 }
 
 // These must match the row.Scan in scanInvoice below.
-const invoice_select_cols = "invoice_address, account_address, vendor, items, key_index, block_id, confirmations, created, paid_height, paid_event"
+const invoice_select_cols = "invoice_address, account_address, items, key_index, block_id, confirmations, created, paid_height, paid_event"
 
 func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.Invoice, error) {
 	var items_json string
@@ -311,7 +310,7 @@ func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.In
 	var block_id sql.NullString
 	var paid_event sql.NullTime
 	inv := giga.Invoice{}
-	err := row.Scan(&inv.ID, &inv.Account, &inv.Vendor, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &paid_height, &paid_event)
+	err := row.Scan(&inv.ID, &inv.Account, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &paid_height, &paid_event)
 	if err == sql.ErrNoRows {
 		return inv, giga.NewErr(giga.NotFound, "invoice not found: %v", invoiceID)
 	}
@@ -518,8 +517,8 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	}
 	total := inv.CalcTotal()
 	_, err = t.tx.Exec(
-		"insert into invoice(invoice_address, account_address, vendor, items, total, key_index, confirmations, created) values($1,$2,$3,$4,$5,$6,$7,$8)",
-		inv.ID, inv.Account, inv.Vendor, string(items_b), total, inv.KeyIndex, inv.Confirmations, inv.Created,
+		"insert into invoice(invoice_address, account_address, items, total, key_index, confirmations, created) values($1,$2,$3,$4,$5,$6,$7)",
+		inv.ID, inv.Account, string(items_b), total, inv.KeyIndex, inv.Confirmations, inv.Created,
 	)
 	if err != nil {
 		return t.store.dbErr(err, "StoreInvoice: insert")

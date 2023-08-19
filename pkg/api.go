@@ -20,9 +20,8 @@ func NewAPI(store Store, l1 L1, bus MessageBus, follower ChainFollower, config C
 }
 
 type InvoiceCreateRequest struct {
-	Vendor        string `json:"vendor"`
 	Items         []Item `json:"items"`
-	Confirmations int32  `json:"confirmations"` // specify -1 to mean not set
+	Confirmations int32  `json:"required_confirmations"` // specify -1 to mean not set
 }
 
 func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invoice, error) {
@@ -53,7 +52,7 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 		confirmations = request.Confirmations
 	}
 
-	i := Invoice{ID: invoiceID, Account: acc.Address, Vendor: request.Vendor, Items: request.Items, KeyIndex: keyIndex, Confirmations: confirmations, Created: time.Now()}
+	i := Invoice{ID: invoiceID, Account: acc.Address, Items: request.Items, KeyIndex: keyIndex, Confirmations: confirmations, Created: time.Now()}
 
 	//validate invoice
 	err = i.Validate()

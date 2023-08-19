@@ -12,9 +12,8 @@ type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
 	ID            Address   `json:"id"`      // pay-to Address (Invoice ID)
 	Account       Address   `json:"account"` // an Account.Address (Account ID)
-	Vendor        string    `json:"vendor"`
 	Items         []Item    `json:"items"`
-	Confirmations int32     `json:"confirmations"` // number of confirmed blocks (since block_id)
+	Confirmations int32     `json:"required_confirmations"` // number of confirmed blocks (since block_id)
 	Created       time.Time `json:"created"`
 	// These are used internally to track invoice status.
 	KeyIndex   uint32    `json:"-"` // which HD Wallet child-key was generated
