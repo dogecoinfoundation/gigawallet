@@ -99,15 +99,19 @@ func (i *Invoice) Validate() error {
 func (i *Invoice) ToPublic() PublicInvoice {
 
 	pub := PublicInvoice{
-		ID:        i.ID,
-		Items:     i.Items,
-		Created:   i.Created,
-		Total:     i.CalcTotal(),
-		PayTo:     i.ID,
-		Paid:      false,
-		Confirmed: false,
+		ID:             i.ID,
+		Items:          i.Items,
+		Created:        i.Created,
+		Total:          i.CalcTotal(),
+		PayTo:          i.ID,
+		PartDetected:   false,
+		TotalDetected:  false,
+		TotalConfirmed: false,
+		Unconfirmed:    false,
+		Estimate:       0,
 	}
 
+	/* TODO:  calculate status booleans and estimate
 	if i.PaidHeight > 0 {
 		pub.Paid = true
 	}
@@ -115,19 +119,20 @@ func (i *Invoice) ToPublic() PublicInvoice {
 	if i.BlockID != "" {
 		pub.Confirmed = true
 	}
-
+	*/
 	return pub
 }
 
 // This is the address as seen by the public API
 type PublicInvoice struct {
-	ID        Address    `json:"id"`
-	Items     []Item     `json:"items"`
-	Created   time.Time  `json:"created"`
-	Total     CoinAmount `json:"total"`             // Calculated
-	PayTo     Address    `json:"pay_to_address"`    // Calculated
-	Paid      bool       `json:"payment_seen"`      // Calculated
-	Confirmed bool       `json:"payment_confirmed"` // Calculated
-	// TODO: needs current block height
-	//Estimate  int        `json:"estimate_seconds_to_confirm"` // Calculated
+	ID             Address    `json:"id"`
+	Items          []Item     `json:"items"`
+	Created        time.Time  `json:"created"`
+	Total          CoinAmount `json:"total"`                       // Calculated
+	PayTo          Address    `json:"pay_to_address"`              // Calculated
+	PartDetected   bool       `json:"part_payment_detected"`       // Calculated
+	TotalDetected  bool       `json:"total_payment_detected"`      // Calculated
+	TotalConfirmed bool       `json:"total_payment_confirmed"`     // Calculated
+	Unconfirmed    bool       `json:"payment_unconfirmed"`         // Calculated
+	Estimate       int        `json:"estimate_seconds_to_confirm"` // Calculated
 }
