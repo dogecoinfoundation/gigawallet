@@ -12,9 +12,8 @@ type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
 	ID            Address   `json:"id"`      // pay-to Address (Invoice ID)
 	Account       Address   `json:"account"` // an Account.Address (Account ID)
-	Vendor        string    `json:"vendor"`
 	Items         []Item    `json:"items"`
-	Confirmations int32     `json:"confirmations"` // number of confirmed blocks (since block_id)
+	Confirmations int32     `json:"required_confirmations"` // number of confirmed blocks (since block_id)
 	Created       time.Time `json:"created"`
 	// These are used internally to track invoice status.
 	KeyIndex   uint32    `json:"-"` // which HD Wallet child-key was generated
@@ -95,4 +94,40 @@ func (i *Invoice) Validate() error {
 	}
 
 	return nil
+}
+
+func (i *Invoice) ToPublic() PublicInvoice {
+
+	pub := PublicInvoice{
+		ID:        i.ID,
+		Items:     i.Items,
+		Created:   i.Created,
+		Total:     i.CalcTotal(),
+		PayTo:     i.ID,
+		Paid:      false,
+		Confirmed: false,
+	}
+
+	if i.PaidHeight > 0 {
+		pub.Paid = true
+	}
+
+	if i.BlockID != "" {
+		pub.Confirmed = true
+	}
+
+	return pub
+}
+
+// This is the address as seen by the public API
+type PublicInvoice struct {
+	ID        Address    `json:"id"`
+	Items     []Item     `json:"items"`
+	Created   time.Time  `json:"created"`
+	Total     CoinAmount `json:"total"`             // Calculated
+	PayTo     Address    `json:"pay_to_address"`    // Calculated
+	Paid      bool       `json:"payment_seen"`      // Calculated
+	Confirmed bool       `json:"payment_confirmed"` // Calculated
+	// TODO: needs current block height
+	//Estimate  int        `json:"estimate_seconds_to_confirm"` // Calculated
 }
