@@ -335,22 +335,24 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 		return
 	}
 
-	msg := AccPaymentSentEvent{
-		From:   account.ForeignID,
-		PayTo:  payTo,
-		Amount: amount,
-		TxID:   txid,
+	msg := PaymentEvent{
+		PaymentID: payment.ID,
+		ForeignID: account.ForeignID,
+		AccountID: account.Address,
+		PayTo:     payTo,
+		Amount:    amount,
+		TxID:      txid,
 	}
-	a.bus.Send(INV_PAYMENT_SENT, msg)
+	a.bus.Send(PAYMENT_SENT, msg)
 	return
 }
 
-func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (txid string, fee CoinAmount, err error) {
+func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid string, fee CoinAmount, err error) {
 	invoice, err := a.Store.GetInvoice(invoiceID)
 	if err != nil {
 		return
 	}
-	account, err := a.Store.GetAccount(accountID)
+	account, err := a.Store.GetAccount(foreignID)
 	if err != nil {
 		return
 	}
@@ -442,13 +444,15 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, accountID string) (txid st
 		return
 	}
 
-	msg := AccPaymentSentEvent{
-		From:   account.ForeignID,
-		PayTo:  payTo,
-		Amount: invoiceAmount,
-		TxID:   txid,
+	msg := PaymentEvent{
+		PaymentID: payment.ID,
+		ForeignID: account.ForeignID,
+		AccountID: account.Address,
+		PayTo:     payTo,
+		Amount:    invoiceAmount,
+		TxID:      txid,
 	}
-	a.bus.Send(INV_PAYMENT_SENT, msg)
+	a.bus.Send(PAYMENT_SENT, msg)
 	return txn.TxnHex, fee, nil
 }
 
