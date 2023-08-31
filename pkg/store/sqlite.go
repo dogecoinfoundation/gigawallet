@@ -68,7 +68,9 @@ CREATE TABLE IF NOT EXISTS payment (
 	paid_txid TEXT,
 	paid_height INTEGER,
 	confirmed_height INTEGER,
-	paid_event DATETIME
+	on_chain_event DATETIME,
+	confirmed_event DATETIME,
+	unconfirmed_event DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS payment_account_i ON payment (account_address);
@@ -307,7 +309,9 @@ type Scannable interface {
 }
 
 // These must match the row.Scan in scanInvoice below.
-const invoice_select_cols = "invoice_address, account_address, items, key_index, block_id, confirmations, created, total, paid_height, paid_event, incoming_amount, paid_amount, last_incoming, last_paid"
+const invoice_select_cols = `invoice_address, account_address, items, key_index, block_id, confirmations, created, total, paid_height, paid_event, last_incoming, last_paid,
+COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address=invoice.invoice_address),0) AS incoming_amount,
+COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address=invoice.invoice_address),0) AS paid_amount`
 
 func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.Invoice, error) {
 	var items_json string
@@ -319,7 +323,7 @@ func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.In
 	var last_incoming sql.NullString
 	var last_paid sql.NullString
 	inv := giga.Invoice{}
-	err := row.Scan(&inv.ID, &inv.Account, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &inv.Total, &paid_height, &paid_event, &incoming_amount, &paid_amount, &last_incoming, &last_paid)
+	err := row.Scan(&inv.ID, &inv.Account, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &inv.Total, &paid_height, &paid_event, &last_incoming, &last_paid, &incoming_amount, &paid_amount)
 	if err == sql.ErrNoRows {
 		return inv, giga.NewErr(giga.NotFound, "invoice not found: %v", invoiceID)
 	}
@@ -407,30 +411,63 @@ func (s SQLiteStore) listInvoicesCommon(tx Queryable, account giga.Address, curs
 	return
 }
 
-func (s SQLiteStore) getPaymentCommon(tx Queryable, account giga.Address, id int64) (giga.Payment, error) {
-	row := tx.QueryRow("SELECT id, account_address, pay_to, amount, created, paid_txid, paid_height, notify_height FROM payment WHERE id = $1 AND account_address = $2", id, account)
-	p := giga.Payment{}
-	err := row.Scan(&p.ID, &p.AccountAddress, &p.PayTo, &p.Amount, &p.Created, &p.PaidTxID, &p.PaidHeight, &p.NotifyHeight)
+// These must match the row.Scan in scanPayment below.
+const payment_select_cols = "id, account_address, pay_to, amount, created, paid_txid, paid_height, confirmed_height, on_chain_event, confirmed_event, unconfirmed_event"
+
+func (s SQLiteStore) scanPayment(row Scannable, account giga.Address) (giga.Payment, error) {
+	var paid_txid sql.NullString
+	var paid_height sql.NullInt64
+	var confirmed_height sql.NullInt64
+	var on_chain_event sql.NullTime
+	var confirmed_event sql.NullTime
+	var unconfirmed_event sql.NullTime
+	pay := giga.Payment{}
+	err := row.Scan(&pay.ID, &pay.AccountAddress, &pay.PayTo, &pay.Amount, &pay.Created, &paid_txid, &paid_height, &confirmed_height, &on_chain_event, &confirmed_event, &unconfirmed_event)
 	if err == sql.ErrNoRows {
-		return p, giga.NewErr(giga.NotFound, "payment not found: %v", id)
+		return pay, giga.NewErr(giga.NotFound, "payment not found: %v", account)
 	}
 	if err != nil {
-		return p, s.dbErr(err, "GetPayment: row.Scan")
+		return pay, s.dbErr(err, "ScanPayment: row.Scan")
 	}
-	return p, nil
+	if paid_txid.Valid {
+		pay.PaidTxID = paid_txid.String
+	}
+	if paid_height.Valid {
+		pay.PaidHeight = paid_height.Int64
+	}
+	if confirmed_height.Valid {
+		pay.ConfirmedHeight = confirmed_height.Int64
+	}
+	if on_chain_event.Valid {
+		pay.OnChainEvent = on_chain_event.Time
+	}
+	if confirmed_event.Valid {
+		pay.ConfirmedEvent = confirmed_event.Time
+	}
+	if unconfirmed_event.Valid {
+		pay.UnconfirmedEvent = unconfirmed_event.Time
+	}
+	return pay, nil
 }
 
+var get_payment_sql = fmt.Sprintf("SELECT %s FROM payment WHERE id = $1 AND account_address = $2", payment_select_cols)
+
+func (s SQLiteStore) getPaymentCommon(tx Queryable, account giga.Address, id int64) (giga.Payment, error) {
+	return s.scanPayment(tx.QueryRow(get_payment_sql, id, account), account)
+}
+
+var list_payments_sql = fmt.Sprintf("SELECT %s FROM payment WHERE account_address = $1 AND id >= $2 ORDER BY id LIMIT $3", payment_select_cols)
+
 func (s SQLiteStore) listPaymentsCommon(tx Queryable, account giga.Address, cursor int64, limit int) (items []giga.Payment, next_cursor int64, err error) {
-	rows, err := tx.Query("SELECT id, account_address, pay_to, amount, created, paid_txid, paid_height, notify_height FROM payment WHERE account_address = $1 AND id >= $2 ORDER BY id LIMIT $3", account, cursor, limit)
+	rows, err := tx.Query(list_payments_sql, account, cursor, limit)
 	if err != nil {
 		return nil, 0, s.dbErr(err, "ListPayments: querying payments")
 	}
 	defer rows.Close()
 	for rows.Next() {
-		p := giga.Payment{}
-		err := rows.Scan(&p.ID, &p.AccountAddress, &p.PayTo, &p.Amount, &p.Created, &p.PaidTxID, &p.PaidHeight, &p.NotifyHeight)
+		p, err := s.scanPayment(rows, account)
 		if err != nil {
-			return nil, 0, s.dbErr(err, "ListPayments: scanning payment row")
+			return nil, 0, err // already s.dbErr
 		}
 		items = append(items, p)
 		next_cursor = p.ID + 1

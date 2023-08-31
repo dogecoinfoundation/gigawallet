@@ -54,17 +54,8 @@ func (e EVENT_ACC) Type() string {
 const (
 	ACC_CREATED        EVENT_ACC = "CREATED"
 	ACC_UPDATED        EVENT_ACC = "UPDATED"
-	ACC_PAYMENT        EVENT_ACC = "PAYMENT"
-	ACC_CHAIN_ACTIVITY EVENT_ACC = "CHAIN_ACTIVITY"
 	ACC_BALANCE_CHANGE EVENT_ACC = "BALANCE_CHANGE"
 )
-
-type AccPaymentSentEvent struct {
-	From   string     `json:"from"`
-	PayTo  Address    `json:"pay_to"`
-	Amount CoinAmount `json:"amount"`
-	TxID   string     `json:"txid"`
-}
 
 type AccBalanceChangeEvent struct {
 	AccountID       Address    `json:"account_id"`
@@ -72,6 +63,29 @@ type AccBalanceChangeEvent struct {
 	CurrentBalance  CoinAmount `json:"current_balance"`
 	IncomingBalance CoinAmount `json:"incoming_balance"`
 	OutgoingBalance CoinAmount `json:"outgoing_balance"`
+}
+
+// Payment Events
+type EVENT_PAYMENT string
+
+func (e EVENT_PAYMENT) Type() string {
+	return "PAYMENT"
+}
+
+const (
+	PAYMENT_SENT        EVENT_PAYMENT = "PAYMENT_SENT"
+	PAYMENT_ON_CHAIN    EVENT_PAYMENT = "PAYMENT_ON_CHAIN"
+	PAYMENT_CONFIRMED   EVENT_PAYMENT = "PAYMENT_CONFIRMED"
+	PAYMENT_UNCONFIRMED EVENT_PAYMENT = "PAYMENT_UNCONFIRMED"
+)
+
+type PaymentEvent struct {
+	PaymentID int64      `json:"payment_id"`
+	AccountID Address    `json:"account_id"`
+	ForeignID string     `json:"foreign_id"`
+	PayTo     Address    `json:"pay_to"`
+	Amount    CoinAmount `json:"amount"`
+	TxID      string     `json:"txid"`
 }
 
 // Invoice Events
