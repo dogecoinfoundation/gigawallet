@@ -310,8 +310,8 @@ type Scannable interface {
 
 // These must match the row.Scan in scanInvoice below.
 const invoice_select_cols = `invoice_address, account_address, items, key_index, block_id, confirmations, created, total, paid_height, paid_event, last_incoming, last_paid,
-COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address=invoice.invoice_address),0) AS incoming_amount,
-COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address=invoice.invoice_address),0) AS paid_amount`
+COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND script_address=invoice.invoice_address),0) AS incoming_amount,
+COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND script_address=invoice.invoice_address),0) AS paid_amount`
 
 func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.Invoice, error) {
 	var items_json string
