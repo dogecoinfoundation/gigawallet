@@ -125,7 +125,6 @@ func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id giga.Ad
 			log.Printf("BalanceKeeper: UpdateAccountBalance '%s': %v\n", id, err)
 			return err
 		}
-		// notify BUS listeners.
 		msg := giga.AccBalanceChangeEvent{
 			AccountID:       acc.Address,
 			ForeignID:       acc.ForeignID,
@@ -141,7 +140,15 @@ func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id giga.Ad
 		}
 		log.Printf("BalanceKeeper: updated account balance: %s\n", id)
 	}
-	// Invoices.
+	err = b.sendInvoiceEvents(tx, &acc, id, cursor, n)
+	if err != nil {
+		return err
+	}
+	return b.sendPaymentEvents(tx, &acc, id, cursor, n)
+}
+
+// Invoices.
+func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Account, id giga.Address, cursor int64, n int) error {
 	log.Printf("BalanceKeeper: checking invoices: %s\n", id)
 	inv_c := 0
 	num_inv := 0
@@ -152,29 +159,145 @@ func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id giga.Ad
 			log.Printf("BalanceKeeper: ListInvoices '%s': %v\n", id, err)
 			return err
 		}
-		// Check each invoice to see if it's paid and we haven't sent an event yet.
+		// Check each invoice to see if it's paid and we haven't sent an event yet,
+		// or other changes in amounts paid.
 		for n, inv := range invoices {
-			if inv.PaidHeight != 0 && inv.PaidEvent.IsZero() {
-				// notify BUS listeners.
-				msg := giga.InvPaymentReceivedEvent{
-					AccountID: acc.Address,
-					ForeignID: acc.ForeignID,
-					InvoiceID: inv.ID,
+			// need a way to detect:
+			// new unconfirmed payment: Incoming > LastIncoming
+			// new confirmed payment: PaidTotal > LastPaidTotal
+			// invoice fully paid (in Store): PaidHeight is set
+			// rollbacks: PaidHeight unset & PaidEvent set; PaidTotal < LastPaidTotal; Incoming < LastIncoming
+			// NB. IncomingAmount doesn't reduce when payments are confirmed (unlike
+			// IncomingBalance on Account) because it simplifies this logic:
+			if inv.IncomingAmount.GreaterThan(inv.LastIncomingAmount) {
+				// incoming amount has increased.
+				// need to avoid reporting PART/TOTAL again after we report TOTAL.
+				if inv.LastIncomingAmount.LessThan(inv.Total) {
+					event := giga.INV_PART_PAYMENT_DETECTED
+					if inv.IncomingAmount.GreaterThanOrEqual(inv.Total) {
+						event = giga.INV_TOTAL_PAYMENT_DETECTED
+					}
+					// notify BUS listeners.
+					msg := giga.InvPaymentEvent{
+						InvoiceID:      inv.ID,
+						AccountID:      acc.Address,
+						ForeignID:      acc.ForeignID,
+						InvoiceTotal:   inv.Total,
+						TotalIncoming:  inv.IncomingAmount,
+						TotalConfirmed: inv.PaidAmount,
+					}
+					unique_id := fmt.Sprintf("IPD-%d-%d", cursor, num_inv+n)
+					err = b.bus.Send(event, msg, unique_id)
+					if err != nil {
+						log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
+						return err
+					}
+					b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
 				}
-				unique_id := fmt.Sprintf("IPR-%d-%d", cursor, num_inv+n)
-				err = b.bus.Send(giga.INV_PAYMENT_RECEIVED, msg, unique_id)
+				// detect and report over-payments.
+				if inv.IncomingAmount.GreaterThan(inv.Total) {
+					// notify BUS listeners.
+					msg := giga.InvPaymentEvent{
+						InvoiceID:      inv.ID,
+						AccountID:      acc.Address,
+						ForeignID:      acc.ForeignID,
+						InvoiceTotal:   inv.Total,
+						TotalIncoming:  inv.IncomingAmount,
+						TotalConfirmed: inv.PaidAmount,
+					}
+					event := giga.INV_OVER_PAYMENT_DETECTED
+					unique_id := fmt.Sprintf("IPO-%d-%d", cursor, num_inv+n)
+					err = b.bus.Send(event, msg, unique_id)
+					if err != nil {
+						log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
+						return err
+					}
+					b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
+				}
+				// This updates LastIncomingAmount from IncomingAmount.
+				tx.MarkInvoiceEventSent(inv.ID, giga.INV_PART_PAYMENT_DETECTED)
+			}
+			if inv.PaidHeight != 0 && inv.PaidEvent.IsZero() {
+				// invoice is fully paid and confirmed.
+				// notify BUS listeners.
+				msg := giga.InvPaymentEvent{
+					InvoiceID:      inv.ID,
+					AccountID:      acc.Address,
+					ForeignID:      acc.ForeignID,
+					InvoiceTotal:   inv.Total,
+					TotalIncoming:  inv.IncomingAmount,
+					TotalConfirmed: inv.PaidAmount,
+				}
+				event := giga.INV_TOTAL_PAYMENT_CONFIRMED
+				unique_id := fmt.Sprintf("IPC-%d-%d", cursor, num_inv+n)
+				err = b.bus.Send(event, msg, unique_id)
 				if err != nil {
 					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
 					return err
 				}
-				tx.MarkInvoiceEventSent(inv.ID, giga.INV_PAYMENT_RECEIVED)
-				log.Printf("BalanceKeeper: sent invoice payment received: %s in %s\n", inv.ID, id)
+				err = tx.MarkInvoiceEventSent(inv.ID, event)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", id, err)
+					return err
+				}
+				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
+			} else if inv.PaidHeight == 0 && !inv.PaidEvent.IsZero() {
+				// rollback detected.
+				msg := giga.InvPaymentEvent{
+					InvoiceID:      inv.ID,
+					AccountID:      acc.Address,
+					ForeignID:      acc.ForeignID,
+					InvoiceTotal:   inv.Total,
+					TotalIncoming:  inv.IncomingAmount,
+					TotalConfirmed: inv.PaidAmount,
+				}
+				event := giga.INV_PAYMENT_UNCONFIRMED
+				unique_id := fmt.Sprintf("IPU-%d-%d", cursor, num_inv+n)
+				err = b.bus.Send(event, msg, unique_id)
+				if err != nil {
+					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
+					return err
+				}
+				err = tx.MarkInvoiceEventSent(inv.ID, event)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", id, err)
+					return err
+				}
+				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
+			}
+			if inv.PaidAmount.GreaterThan(inv.LastPaidAmount) && inv.PaidAmount.GreaterThan(inv.Total) {
+				// an overpayment was confirmed.
+				msg := giga.InvOverpaymentEvent{
+					InvoiceID:            inv.ID,
+					AccountID:            acc.Address,
+					ForeignID:            acc.ForeignID,
+					InvoiceTotal:         inv.Total,
+					TotalIncoming:        inv.IncomingAmount,
+					TotalConfirmed:       inv.PaidAmount,
+					OverpaymentIncoming:  inv.IncomingAmount,
+					OverpaymentConfirmed: inv.PaidAmount,
+				}
+				event := giga.INV_OVER_PAYMENT_CONFIRMED
+				unique_id := fmt.Sprintf("IOC-%d-%d", cursor, num_inv+n)
+				err = b.bus.Send(event, msg, unique_id)
+				if err != nil {
+					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
+					return err
+				}
+				// This updates LastPaidAmount from PaidAmount.
+				tx.MarkInvoiceEventSent(inv.ID, event)
+				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
 			}
 		}
 		num_inv += len(invoices)
 		inv_c = new_inv_c
 	}
 	log.Printf("BalanceKeeper: checked %d invoices: %s\n", num_inv, id)
+	return nil
+}
+
+// Payments.
+func (b BalanceKeeper) sendPaymentEvents(tx giga.StoreTransaction, acc *giga.Account, id giga.Address, cursor int64, n int) error {
 	return nil
 }
 

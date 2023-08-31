@@ -10,16 +10,21 @@ import (
 // Invoice is a request for payment created by Gigawallet.
 type Invoice struct {
 	// ID is the single-use address that the invoice needs to be paid to.
-	ID            Address   `json:"id"`      // pay-to Address (Invoice ID)
-	Account       Address   `json:"account"` // an Account.Address (Account ID)
-	Items         []Item    `json:"items"`
-	Confirmations int32     `json:"required_confirmations"` // number of confirmed blocks (since block_id)
-	Created       time.Time `json:"created"`
+	ID            Address    `json:"id"`      // pay-to Address (Invoice ID)
+	Account       Address    `json:"account"` // an Account.Address (Account ID)
+	Items         []Item     `json:"items"`
+	Confirmations int32      `json:"required_confirmations"` // number of confirmed blocks (since block_id)
+	Created       time.Time  `json:"created"`
+	Total         CoinAmount `json:"total"` // derived from items
 	// These are used internally to track invoice status.
-	KeyIndex   uint32    `json:"-"` // which HD Wallet child-key was generated
-	BlockID    string    `json:"-"` // transaction seen in this mined block
-	PaidHeight int64     `json:"-"` // block-height when the invoice was marked as paid
-	PaidEvent  time.Time `json:"-"` // timestamp when INV_PAID event was sent
+	KeyIndex           uint32     `json:"-"` // which HD Wallet child-key was generated
+	BlockID            string     `json:"-"` // transaction seen in this mined block
+	PaidHeight         int64      `json:"-"` // block-height when the invoice was marked as paid
+	PaidEvent          time.Time  `json:"-"` // timestamp when INV_PAID event was sent
+	IncomingAmount     CoinAmount `json:"-"` // total of all incoming UTXOs
+	PaidAmount         CoinAmount `json:"-"` // total of all confirmed UTXOs
+	LastIncomingAmount CoinAmount `json:"-"` // last incoming total used to send an event
+	LastPaidAmount     CoinAmount `json:"-"` // last confirmed total used to send an event
 }
 
 // CalcTotal sums up the Items listed on the Invoice.

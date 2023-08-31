@@ -82,16 +82,32 @@ func (e EVENT_INV) Type() string {
 }
 
 const (
-	INV_CREATED          EVENT_INV = "CREATED"
-	INV_UPDATED          EVENT_INV = "UPDATED"
-	INV_PAYMENT_RECEIVED EVENT_INV = "PAYMENT_RECEIVED"
-	INV_PAYMENT_SENT     EVENT_INV = "PAYMENT_SENT"
-	INV_PAYMENT_VERIFIED EVENT_INV = "PAYMENT_VERIFIED"
-	INV_PAYMENT_REFUNDED EVENT_INV = "PAYMENT_REFUNDED"
+	INV_CREATED                 EVENT_INV = "CREATED"
+	INV_PART_PAYMENT_DETECTED   EVENT_INV = "PART_PAYMENT_DETECTED"
+	INV_TOTAL_PAYMENT_DETECTED  EVENT_INV = "TOTAL_PAYMENT_DETECTED"
+	INV_OVER_PAYMENT_DETECTED   EVENT_INV = "OVER_PAYMENT_DETECTED"
+	INV_TOTAL_PAYMENT_CONFIRMED EVENT_INV = "TOTAL_PAYMENT_CONFIRMED"
+	INV_OVER_PAYMENT_CONFIRMED  EVENT_INV = "OVER_PAYMENT_CONFIRMED"
+	INV_PAYMENT_UNCONFIRMED     EVENT_INV = "PAYMENT_UNCONFIRMED"
+	INV_PAYMENT_REFUNDED        EVENT_INV = "PAYMENT_REFUNDED"
 )
 
-type InvPaymentReceivedEvent struct {
-	AccountID Address `json:"account_id"`
-	ForeignID string  `json:"foreign_id"`
-	InvoiceID Address `json:"invoice_id"`
+type InvPaymentEvent struct {
+	InvoiceID      Address    `json:"invoice_id"`
+	AccountID      Address    `json:"account_id"`
+	ForeignID      string     `json:"foreign_id"`
+	InvoiceTotal   CoinAmount `json:"invoice_total"`
+	TotalIncoming  CoinAmount `json:"total_incoming"`
+	TotalConfirmed CoinAmount `json:"total_confirmed"`
+}
+
+type InvOverpaymentEvent struct {
+	InvoiceID            Address    `json:"invoice_id"`
+	AccountID            Address    `json:"account_id"`
+	ForeignID            string     `json:"foreign_id"`
+	InvoiceTotal         CoinAmount `json:"invoice_total"`
+	TotalIncoming        CoinAmount `json:"total_incoming"`
+	TotalConfirmed       CoinAmount `json:"total_confirmed"`
+	OverpaymentIncoming  CoinAmount `json:"overpayment_incoming"`
+	OverpaymentConfirmed CoinAmount `json:"overpayment_confirmed"`
 }
