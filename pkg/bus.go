@@ -21,7 +21,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"log"
 )
 
@@ -33,9 +32,9 @@ type MessageSubscriber interface {
 
 // Created by the bus, wraps message sent with Send
 type Message struct {
-	EventType EventType
-	Message   []byte
-	ID        string // optional
+	EventType EventType   `json:"event_type"`
+	Message   interface{} `json:"message"`
+	ID        string      `json:"event_id"` // optional
 }
 
 type Subscription struct {
@@ -62,15 +61,11 @@ type MessageBus struct {
 // msg can be anything JSON serialisable, this will be
 // turned into a Message and delivered to any interested MessageSubscribers
 func (b MessageBus) Send(t EventType, msg interface{}, msgID ...string) error {
-	j, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
 
 	if len(msgID) == 0 {
-		b.inbound <- Message{t, j, generateID()}
+		b.inbound <- Message{t, msg, generateID()}
 	} else {
-		b.inbound <- Message{t, j, msgID[0]}
+		b.inbound <- Message{t, msg, msgID[0]}
 	}
 	return nil
 }

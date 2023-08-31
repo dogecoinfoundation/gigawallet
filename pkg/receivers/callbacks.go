@@ -45,7 +45,6 @@ func (s CallbackSender) Run(started, stopped chan bool, stop chan context.Contex
 				close(stopped)
 				return
 			case msg := <-s.Rec:
-				s.Bus.Send(giga.SYS_MSG, fmt.Sprintf("CallbackSender: Sending msg %s: %v", s.Path, msg))
 				err := postWithRetry(s.Path, msg, s.Bus)
 				if err != nil {
 					s.Bus.Send(giga.SYS_ERR, fmt.Sprintf("CallbackSender: %v", msg))
@@ -79,12 +78,12 @@ func SetupCallbacks(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Co
 	}
 }
 
-func postWithRetry(path string, obj interface{}, bus giga.MessageBus) error {
+func postWithRetry(path string, msg giga.Message, bus giga.MessageBus) error {
 	maxRetries := 6
 	initialDelay := 1 * time.Second
 	maxDelay := 32 * time.Second
 
-	objJSON, err := json.Marshal(obj)
+	objJSON, err := json.Marshal(msg)
 	if err != nil {
 		bus.Send(giga.SYS_ERR, fmt.Sprintf("CallbackSender: Failed to serialize object to JSON: %v", err))
 		return err
