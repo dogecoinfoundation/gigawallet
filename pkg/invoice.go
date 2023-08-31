@@ -109,6 +109,7 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		Created:        i.Created,
 		Total:          i.CalcTotal(),
 		PayTo:          i.ID,
+		Confirmations:  i.Confirmations,
 		PartDetected:   false,
 		TotalDetected:  false,
 		TotalConfirmed: false,
@@ -133,8 +134,9 @@ type PublicInvoice struct {
 	ID             Address    `json:"id"`
 	Items          []Item     `json:"items"`
 	Created        time.Time  `json:"created"`
-	Total          CoinAmount `json:"total"`                       // Calculated
-	PayTo          Address    `json:"pay_to_address"`              // Calculated
+	Total          CoinAmount `json:"total"` // Calculated
+	PayTo          Address    `json:"pay_to_address"`
+	Confirmations  int32      `json:"required_confirmations"`
 	PartDetected   bool       `json:"part_payment_detected"`       // Calculated
 	TotalDetected  bool       `json:"total_payment_detected"`      // Calculated
 	TotalConfirmed bool       `json:"total_payment_confirmed"`     // Calculated
