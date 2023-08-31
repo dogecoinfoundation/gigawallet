@@ -164,7 +164,7 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 		sendError(w, "CreateInvoice", err)
 		return
 	}
-	sendResponse(w, invoice)
+	sendResponse(w, invoice.ToPublic())
 }
 
 // getAccountInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL
@@ -195,7 +195,7 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
 		return
 	}
-	sendResponse(w, invoice)
+	sendResponse(w, invoice.ToPublic())
 }
 
 func (t WebAPI) getInvoiceConnect(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
@@ -242,7 +242,7 @@ func (t WebAPI) getInvoiceQR(w http.ResponseWriter, r *http.Request, p httproute
 	}
 
 	connectURL := fmt.Sprintf("%s/invoice/%s/connect", t.config.WebAPI.PubAPIRootURL, id)
-	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=%d&cxt=%s", string(invoice.ID), invoice.CalcTotal(), url.QueryEscape(connectURL)), 256)
+	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=%v&cxt=%s", string(invoice.ID), invoice.CalcTotal().String(), url.QueryEscape(connectURL)), 256)
 	w.Header().Set("Content-Type", "image/png")
 	//  Maxage 900 (15 minutes) is because this image should not
 	//  change at all for a given invoice and we expect most invoices
@@ -309,7 +309,18 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 		sendError(w, "ListInvoices", err)
 		return
 	}
-	sendResponse(w, invoices)
+
+	pubInvoices := ListInvoicesPublicResponse{Cursor: invoices.Cursor}
+
+	for _, inv := range invoices.Items {
+		pubInvoices.Items = append(pubInvoices.Items, inv.ToPublic())
+	}
+	sendResponse(w, pubInvoices)
+}
+
+type ListInvoicesPublicResponse struct {
+	Items  []giga.PublicInvoice `json:"items"`
+	Cursor int                  `json:"cursor"`
 }
 
 type PayToAddressRequest struct {
