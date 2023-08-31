@@ -835,15 +835,18 @@ func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int6
 	return
 }
 
+const incoming_amount_sql = "UPDATE invoice SET last_incoming=COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND script_address=invoice.invoice_address),0) WHERE invoice_address=$1"
+const paid_amount_sql = "UPDATE invoice SET last_paid=COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND script_address=invoice.invoice_address),0) WHERE invoice_address=$1"
+
 func (t SQLiteStoreTransaction) MarkInvoiceEventSent(invoiceID giga.Address, event giga.EVENT_INV) error {
 	sql := ""
 	switch event {
 	case giga.INV_PART_PAYMENT_DETECTED, giga.INV_TOTAL_PAYMENT_DETECTED, giga.INV_OVER_PAYMENT_DETECTED:
 		// set LastIncomingAmount = IncomingAmount
-		sql = "UPDATE invoice SET last_incoming_amount=incoming_amount WHERE invoice_address=$1"
+		sql = incoming_amount_sql // "UPDATE invoice SET last_incoming=incoming_amount WHERE invoice_address=$1"
 	case giga.INV_OVER_PAYMENT_CONFIRMED:
 		// set LastPaidAmount = PaidAmount
-		sql = "UPDATE invoice SET last_paid_amount=paid_amount WHERE invoice_address=$1"
+		sql = paid_amount_sql // "UPDATE invoice SET last_paid=paid_amount WHERE invoice_address=$1"
 	case giga.INV_TOTAL_PAYMENT_CONFIRMED:
 		// set paid_event = NOW
 		sql = "UPDATE invoice SET paid_event=CURRENT_TIMESTAMP WHERE invoice_address=$1"
