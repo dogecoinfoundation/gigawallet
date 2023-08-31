@@ -32,9 +32,9 @@ type MessageSubscriber interface {
 
 // Created by the bus, wraps message sent with Send
 type Message struct {
-	EventType EventType
-	Message   interface{}
-	ID        string // optional
+	EventType EventType   `json:"event_type"`
+	Message   interface{} `json:"message"`
+	ID        string      `json:"event_id"` // optional
 }
 
 type Subscription struct {
