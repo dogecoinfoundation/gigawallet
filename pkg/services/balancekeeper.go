@@ -214,7 +214,11 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 					b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
 				}
 				// This updates LastIncomingAmount from IncomingAmount.
-				tx.MarkInvoiceEventSent(inv.ID, giga.INV_PART_PAYMENT_DETECTED)
+				err = tx.MarkInvoiceEventSent(inv.ID, giga.INV_PART_PAYMENT_DETECTED)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkInvoiceEventSent: '%s': %v\n", inv.ID, err)
+					return err
+				}
 			}
 			if inv.PaidHeight != 0 && inv.PaidEvent.IsZero() {
 				// invoice is fully paid and confirmed.
@@ -236,7 +240,7 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 				}
 				err = tx.MarkInvoiceEventSent(inv.ID, event)
 				if err != nil {
-					log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", id, err)
+					log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", inv.ID, err)
 					return err
 				}
 				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
@@ -259,7 +263,7 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 				}
 				err = tx.MarkInvoiceEventSent(inv.ID, event)
 				if err != nil {
-					log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", id, err)
+					log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", inv.ID, err)
 					return err
 				}
 				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
@@ -284,7 +288,11 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 					return err
 				}
 				// This updates LastPaidAmount from PaidAmount.
-				tx.MarkInvoiceEventSent(inv.ID, event)
+				err = tx.MarkInvoiceEventSent(inv.ID, event)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkInvoiceEventSent: '%s': %v\n", inv.ID, err)
+					return err
+				}
 				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
 			}
 		}
