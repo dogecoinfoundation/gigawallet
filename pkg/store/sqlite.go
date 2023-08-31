@@ -9,6 +9,7 @@ import (
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 
 	sqlite3 "github.com/mattn/go-sqlite3"
 )
@@ -48,6 +49,10 @@ CREATE TABLE IF NOT EXISTS invoice (
 	key_index INTEGER NOT NULL,
 	confirmations INTEGER NOT NULL,
 	created DATETIME NOT NULL,
+	incoming_amount NUMERIC(18,8),
+	paid_amount NUMERIC(18,8),
+	last_incoming NUMERIC(18,8),
+	last_paid NUMERIC(18,8),
 	paid_height INTEGER,
 	block_id TEXT,
 	paid_event DATETIME
@@ -302,15 +307,19 @@ type Scannable interface {
 }
 
 // These must match the row.Scan in scanInvoice below.
-const invoice_select_cols = "invoice_address, account_address, items, key_index, block_id, confirmations, created, paid_height, paid_event"
+const invoice_select_cols = "invoice_address, account_address, items, key_index, block_id, confirmations, created, total, paid_height, paid_event, incoming_amount, paid_amount, last_incoming, last_paid"
 
 func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.Invoice, error) {
 	var items_json string
 	var paid_height sql.NullInt64
 	var block_id sql.NullString
 	var paid_event sql.NullTime
+	var incoming_amount sql.NullString
+	var paid_amount sql.NullString
+	var last_incoming sql.NullString
+	var last_paid sql.NullString
 	inv := giga.Invoice{}
-	err := row.Scan(&inv.ID, &inv.Account, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &paid_height, &paid_event)
+	err := row.Scan(&inv.ID, &inv.Account, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &inv.Total, &paid_height, &paid_event, &incoming_amount, &paid_amount, &last_incoming, &last_paid)
 	if err == sql.ErrNoRows {
 		return inv, giga.NewErr(giga.NotFound, "invoice not found: %v", invoiceID)
 	}
@@ -329,6 +338,30 @@ func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.In
 	}
 	if paid_event.Valid {
 		inv.PaidEvent = paid_event.Time
+	}
+	if incoming_amount.Valid {
+		inv.IncomingAmount, err = decimal.NewFromString(incoming_amount.String)
+		if err != nil {
+			return inv, s.dbErr(err, "ScanInvoice: decimal incoming_amount")
+		}
+	}
+	if paid_amount.Valid {
+		inv.PaidAmount, err = decimal.NewFromString(paid_amount.String)
+		if err != nil {
+			return inv, s.dbErr(err, "ScanInvoice: decimal paid_amount")
+		}
+	}
+	if last_incoming.Valid {
+		inv.LastIncomingAmount, err = decimal.NewFromString(last_incoming.String)
+		if err != nil {
+			return inv, s.dbErr(err, "ScanInvoice: decimal last_incoming")
+		}
+	}
+	if last_paid.Valid {
+		inv.LastPaidAmount, err = decimal.NewFromString(last_paid.String)
+		if err != nil {
+			return inv, s.dbErr(err, "ScanInvoice: decimal last_paid")
+		}
 	}
 	return inv, nil
 }
@@ -766,15 +799,24 @@ func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int6
 }
 
 func (t SQLiteStoreTransaction) MarkInvoiceEventSent(invoiceID giga.Address, event giga.EVENT_INV) error {
-	field := ""
-	if event == giga.INV_PAYMENT_RECEIVED {
-		field = "paid_event"
-	} else {
+	sql := ""
+	switch event {
+	case giga.INV_PART_PAYMENT_DETECTED, giga.INV_TOTAL_PAYMENT_DETECTED, giga.INV_OVER_PAYMENT_DETECTED:
+		// set LastIncomingAmount = IncomingAmount
+		sql = "UPDATE invoice SET last_incoming_amount=incoming_amount WHERE invoice_address=$1"
+	case giga.INV_OVER_PAYMENT_CONFIRMED:
+		// set LastPaidAmount = PaidAmount
+		sql = "UPDATE invoice SET last_paid_amount=paid_amount WHERE invoice_address=$1"
+	case giga.INV_TOTAL_PAYMENT_CONFIRMED:
+		// set paid_event = NOW
+		sql = "UPDATE invoice SET paid_event=CURRENT_TIMESTAMP WHERE invoice_address=$1"
+	case giga.INV_PAYMENT_UNCONFIRMED:
+		// set PaidEvent = NULL
+		sql = "UPDATE invoice SET paid_event=NULL WHERE invoice_address=$1"
+	default:
 		return giga.NewErr(giga.BadRequest, "unsupported event")
 	}
-	now := time.Now()
-	query := fmt.Sprintf("UPDATE invoice SET %s=$1 WHERE invoice_address=$2", field)
-	_, err := t.tx.Exec(query, now, invoiceID)
+	_, err := t.tx.Exec(sql, invoiceID)
 	if err != nil {
 		return t.store.dbErr(err, "MarkInvoiceEventSent: UPDATE")
 	}
