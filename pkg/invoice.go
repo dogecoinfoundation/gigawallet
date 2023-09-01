@@ -117,15 +117,20 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		Estimate:       0,
 	}
 
-	/* TODO:  calculate status booleans and estimate
-	if i.PaidHeight > 0 {
-		pub.Paid = true
+	if i.LastIncomingAmount.IsPositive() {
+		pub.PartDetected = true
 	}
 
-	if i.BlockID != "" {
-		pub.Confirmed = true
+	if i.LastIncomingAmount.GreaterThanOrEqual(i.Total) {
+		pub.TotalDetected = true
 	}
-	*/
+
+	//if i.LastPaidAmount.GreaterThanOrEqual(i.Total) {
+	if i.PaidHeight > 1 {
+		pub.TotalConfirmed = true
+	}
+
+	// TODO: we still need a way to handle Unconfirmed?
 	return pub
 }
 
