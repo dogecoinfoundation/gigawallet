@@ -2,7 +2,6 @@ package webapi
 
 import (
 	"encoding/hex"
-	"fmt"
 	"image/color"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -15,14 +14,13 @@ func GenerateQRCodePNG(content string, size int, fg string, bg string) ([]byte, 
 	DefaultFG := []byte{0, 0, 0, 254}
 	DefaultBG := []byte{255, 255, 255, 255}
 
-	fmt.Println("DEF", DefaultBG, DefaultFG)
 	// decode passed in fg/bg if sent
 	f, err := hex.DecodeString(fg)
-	if err == nil && len(f) > 0 {
+	if err == nil && len(f) >= 3 {
 		DefaultFG = f
 	}
 	b, err := hex.DecodeString(bg)
-	if err == nil && len(b) > 0 {
+	if err == nil && len(b) >= 3 {
 		DefaultBG = b
 	}
 
