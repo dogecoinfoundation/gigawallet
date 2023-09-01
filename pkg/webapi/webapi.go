@@ -241,8 +241,11 @@ func (t WebAPI) getInvoiceQR(w http.ResponseWriter, r *http.Request, p httproute
 		return
 	}
 
+	qs := r.URL.Query()
+	fg := qs.Get("fg")
+	bg := qs.Get("bg")
 	connectURL := fmt.Sprintf("%s/invoice/%s/connect", t.config.WebAPI.PubAPIRootURL, id)
-	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=%v&cxt=%s", string(invoice.ID), invoice.CalcTotal().String(), url.QueryEscape(connectURL)), 256)
+	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=%v&cxt=%s", string(invoice.ID), invoice.CalcTotal().String(), url.QueryEscape(connectURL)), 512, fg, bg)
 	w.Header().Set("Content-Type", "image/png")
 	//  Maxage 900 (15 minutes) is because this image should not
 	//  change at all for a given invoice and we expect most invoices
