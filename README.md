@@ -1,5 +1,4 @@
-> THIS IS BETA SOFTARE, PLEASE HELP US TEST BY TRYING IT OUT
-> BUT ENSURE IT DOES WHAT YOU EXPECT BEFORE USING IT IN PROD.
+
 
 
 ![GigaWallet Logo](/doc/gigawallet-logo.png)
@@ -14,6 +13,10 @@ The purpose of the GigaWallet is to promote the rapid uptake of
 Dogecoin as a payment option, by taking the complexity and 
 risk out of integrating Dogecoin payments into business. 
 
+***Read the manual here: [https://gigawallet.dogecoin.org](https://gigawallet.dogecoin.org)***
+
+> THIS IS BETA SOFTARE, PLEASE HELP US TEST BY TRYING IT OUT
+> BUT ENSURE IT DOES WHAT YOU EXPECT BEFORE USING IT IN PROD.
 
 ## Major Components / Architecture overview
 
