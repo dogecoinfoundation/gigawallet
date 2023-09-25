@@ -1,5 +1,10 @@
 package main
 
+/* THIS IS A MESS :)
+ * When it's vaguely working it will need a refactor
+ * into several files but for now, enjoy the spaghetti
+ */
+
 import (
 	"cmp"
 	"encoding/json"
@@ -24,23 +29,31 @@ type BrowserAccount struct {
 	Invoices []giga.PublicInvoice
 }
 
-func (b BrowserAccount) updateInvoices(c giga.Config) {
+type InvResp struct {
+	Items []giga.PublicInvoice
+}
+
+func (b *BrowserAccount) updateInvoices(c giga.Config) {
 	url := adminURL(c, fmt.Sprintf("account/%s/invoices", b.ID))
 	s, err := getURL(url)
 	if err != nil {
 		log.Fatalf("failed to get blasdfhjafdk", err)
 	}
-	if err := json.NewDecoder(strings.NewReader(s)).Decode(&b.Invoices); err != nil {
-		log.Fatalf("bad bad", err)
+	resp := InvResp{}
+	if err := json.NewDecoder(strings.NewReader(s)).Decode(&resp); err != nil {
+		log.Fatalf("bad bad", s, err)
 		// bad
 	}
+	b.Invoices = resp.Items
 }
 
 type Browser struct {
 	newAccountField *tview.InputField
 	accountList     *tview.List
+	invoiceList     *tview.Table
 	pages           *tview.Pages
 	state           *BrowserState
+	config          giga.Config
 }
 
 func LaunchBrowser(conf giga.Config) {
@@ -50,8 +63,9 @@ func LaunchBrowser(conf giga.Config) {
 		Accounts: map[string]*BrowserAccount{},
 	}
 	b := Browser{
-		state: &s,
-		pages: tview.NewPages(),
+		state:  &s,
+		pages:  tview.NewPages(),
+		config: conf,
 	}
 	b.loadState()
 	b.buildMainView()
@@ -63,7 +77,7 @@ func LaunchBrowser(conf giga.Config) {
 
 func (b *Browser) loadState() {
 	// TODO: load from .. something?
-	data := []string{"crumpets", "raffe", "tjs", "inevitable", "bluezr", "michi", "ed", "Marshall", "Jens"}
+	data := []string{"crumpets"}
 	for _, n := range data {
 		b.state.Accounts[n] = &BrowserAccount{ID: n}
 	}
@@ -77,9 +91,12 @@ func (b *Browser) buildMainView() {
 			SetText(text)
 	}
 
-	accUI, input, list := b.buildAccountList(b.state)
+	accUI, input, list := b.buildAccountList()
 	b.accountList = list
 	b.newAccountField = input
+
+	invUI, invList := b.buildInvoiceList()
+	b.invoiceList = invList
 
 	grid := tview.NewGrid().
 		SetRows(1, 0).
@@ -87,18 +104,20 @@ func (b *Browser) buildMainView() {
 		SetBorders(true).
 		AddItem(newPrimitive("🐶 GigaWallet Browser"), 0, 0, 1, 2, 0, 0, false).
 		AddItem(accUI, 1, 0, 1, 1, 0, 15, true).
-		AddItem(newPrimitive("Invoices"), 1, 1, 1, 1, 0, 0, false)
+		AddItem(invUI, 1, 1, 1, 1, 0, 0, false)
 
 	b.pages.AddPage("main", grid, true, true)
 }
 
 func (b *Browser) switchAccount(a *BrowserAccount) {
 	b.state.Current = a
+	a.updateInvoices(b.config)
 	b.refreshUI()
 }
 
 func (b *Browser) refreshUI() {
 	b.updateAccountList()
+	b.updateInvoiceTable()
 }
 
 func (b *Browser) updateAccountList() {
@@ -126,7 +145,67 @@ func (b *Browser) updateAccountList() {
 	b.accountList.SetCurrentItem(selected)
 }
 
-func (b *Browser) buildAccountList(s *BrowserState) (*tview.Grid, *tview.InputField, *tview.List) {
+func (b *Browser) updateInvoiceTable() {
+	t := b.invoiceList
+
+	t.Clear()
+	// draw headers
+	t.
+		SetCellSimple(0, 0, "ID").
+		SetCellSimple(0, 1, "Created").
+		SetCellSimple(0, 2, "Amount").
+		SetCellSimple(0, 3, "Detected").
+		SetCellSimple(0, 4, "Confirmed")
+	for i, inv := range b.state.Current.Invoices {
+		i++
+		t.SetCellSimple(i, 0, truncateAddr(inv.ID))
+		t.SetCellSimple(i, 1, inv.Created.Format("02 Jan 06 15:04 MST"))
+		t.SetCellSimple(i, 2, inv.Total.String())
+		if inv.TotalDetected {
+			t.SetCell(i, 3,
+				tview.NewTableCell("✔").
+					SetTextColor(tcell.ColorGreen).
+					SetAlign(tview.AlignCenter))
+		} else {
+			t.SetCell(i, 3,
+				tview.NewTableCell("✘").
+					SetTextColor(tcell.ColorRed).
+					SetAlign(tview.AlignCenter))
+
+		}
+		if inv.TotalConfirmed {
+			t.SetCell(i, 4,
+				tview.NewTableCell("✔").
+					SetTextColor(tcell.ColorGreen).
+					SetAlign(tview.AlignCenter))
+
+		} else {
+			t.SetCell(i, 4,
+				tview.NewTableCell("✘").
+					SetTextColor(tcell.ColorRed).
+					SetAlign(tview.AlignCenter))
+
+		}
+	}
+}
+
+func (b *Browser) buildInvoiceList() (*tview.Grid, *tview.Table) {
+	table := tview.NewTable().
+		SetBorders(false).
+		SetSeparator(rune('|')).
+		SetFixed(1, 0).
+		SetSelectable(true, false).
+		SetCellSimple(0, 0, "hello")
+
+	grid := tview.NewGrid().
+		SetRows(0).
+		SetColumns(0).
+		SetBorders(false).
+		AddItem(table, 0, 0, 1, 1, 0, 0, true)
+
+	return grid, table
+}
+func (b *Browser) buildAccountList() (*tview.Grid, *tview.InputField, *tview.List) {
 	newAccountField := tview.NewInputField().
 		SetLabel("Find Account: ").
 		SetFieldWidth(15).
@@ -156,4 +235,9 @@ func adminURL(c giga.Config, path string) string {
 	u, _ := url.Parse(base)
 	p, _ := url.Parse(path)
 	return u.ResolveReference(p).String()
+}
+
+func truncateAddr(a giga.Address) string {
+	s := string(a)
+	return fmt.Sprintf("%s...%s", s[0:5], s[len(s)-5:])
 }
