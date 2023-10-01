@@ -764,19 +764,9 @@ func (t SQLiteStoreTransaction) MarkPaymentsOnChain(txIDs []string, blockHeight 
 	}
 	for id := range txIDs {
 		rows, err := stmt.Query(blockHeight, id)
-		if err != nil {
-			return nil, t.store.dbErr(err, "MarkPaymentsOnChain: executing update")
+		if accounts, err = collectArrayIDs(rows, err, accounts); err != nil {
+			return nil, t.store.dbErr(err, "MarkPaymentsOnChain")
 		}
-		for rows.Next() {
-			var account string
-			err := rows.Scan(&account)
-			if err != nil {
-				rows.Close()
-				return nil, t.store.dbErr(err, "MarkPaymentsOnChain: scanning row")
-			}
-			accounts = append(accounts, account)
-		}
-		rows.Close()
 	}
 	return
 }
@@ -787,22 +777,8 @@ func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight i
 		"UPDATE payment SET confirmed_height = paid_height + $1 WHERE paid_height + $1 <= $2 AND confirmed_height IS NULL RETURNING account_address",
 		confirmations, blockHeight,
 	)
-	if err != nil {
+	if affectedAccounts, err = collectArrayIDs(rows, err, affectedAccounts); err != nil {
 		return nil, t.store.dbErr(err, "ConfirmPayments: updating payments")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		err := rows.Scan(&id)
-		if err != nil {
-			return nil, t.store.dbErr(err, "ConfirmUTXOs: scanning row")
-		}
-		if id != "" {
-			affectedAccounts = append(affectedAccounts, id)
-		}
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, t.store.dbErr(err, "ConfirmUTXOs: scanning rows")
 	}
 	return
 }
@@ -811,26 +787,19 @@ func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight i
 // This uses #confirmations from the invoice being paid, or the configured #confirmations.
 // This MUST be a LEFT OUTER join (script_address may not match any invoice)
 var confirmations_from_invoice = "(SELECT COALESCE(confirmations,$1) FROM invoice WHERE invoice_address = utxo.script_address)"
-var confirm_utxo_query = fmt.Sprintf("UPDATE utxo SET spendable_height = added_height + %s WHERE added_height + %s <= $2 AND spendable_height IS NULL RETURNING account_address", confirmations_from_invoice, confirmations_from_invoice)
+var confirm_spendable_sql = fmt.Sprintf("UPDATE utxo SET spendable_height = added_height + %s WHERE added_height + %s <= $2 AND spendable_height IS NULL RETURNING account_address", confirmations_from_invoice, confirmations_from_invoice)
+var confirm_spent_sql = "UPDATE utxo SET spent_height = spending_height + %s WHERE spending_height + %s <= $2 AND spent_height IS NULL RETURNING account_address"
 
 func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAccounts []string, err error) {
-	rows, err := t.tx.Query(confirm_utxo_query, confirmations, blockHeight)
-	if err != nil {
-		return nil, t.store.dbErr(err, "ConfirmUTXOs: updating utxos")
+	// confirm_spendable
+	rows, err := t.tx.Query(confirm_spendable_sql, confirmations, blockHeight)
+	if affectedAccounts, err = collectArrayIDs(rows, err, affectedAccounts); err != nil {
+		return nil, t.store.dbErr(err, "ConfirmUTXOs: confirming spendable")
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		err := rows.Scan(&id)
-		if err != nil {
-			return nil, t.store.dbErr(err, "ConfirmUTXOs: scanning row")
-		}
-		if id != "" {
-			affectedAccounts = append(affectedAccounts, id)
-		}
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, t.store.dbErr(err, "ConfirmUTXOs: scanning rows")
+	// confirm_spent
+	rows, err = t.tx.Query(confirm_spent_sql, confirmations, blockHeight)
+	if affectedAccounts, err = collectArrayIDs(rows, err, affectedAccounts); err != nil {
+		return nil, t.store.dbErr(err, "ConfirmUTXOs: confirming spent")
 	}
 	return
 }
@@ -875,22 +844,28 @@ var mark_invoices_paid = fmt.Sprintf("UPDATE invoice SET paid_height=$1, block_i
 // of the Accounts that own any affected invoices (can return duplicates)
 func (t SQLiteStoreTransaction) MarkInvoicesPaid(blockHeight int64, blockID string) (accounts []string, err error) {
 	rows, err := t.tx.Query(mark_invoices_paid, blockHeight, blockID)
-	if err != nil {
-		return nil, t.store.dbErr(err, "MarkInvoicesPaid: preparing update")
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var account string
-		err := rows.Scan(&account)
-		if err != nil {
-			return nil, t.store.dbErr(err, "MarkInvoicesPaid: scanning row")
-		}
-		accounts = append(accounts, account)
-	}
-	if err = rows.Err(); err != nil { // docs say this check is required!
-		return nil, t.store.dbErr(err, "MarkInvoicesPaid: scanning rows")
+	if accounts, err = collectArrayIDs(rows, err, accounts); err != nil {
+		return nil, t.store.dbErr(err, "MarkInvoicesPaid")
 	}
 	return
+}
+
+func collectArrayIDs(rows *sql.Rows, err error, ids []string) ([]string, error) {
+	if err != nil {
+		return ids, err
+	}
+	for rows.Next() {
+		var id string
+		err := rows.Scan(&id)
+		if err != nil {
+			rows.Close()
+			return ids, err
+		}
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, rows.Err()
 }
 
 func collectIDs(rows *sql.Rows, dbErr error, accounts map[string]int64, seq int64) (int64, error) {
