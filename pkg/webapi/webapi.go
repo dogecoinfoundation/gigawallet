@@ -327,8 +327,10 @@ type ListInvoicesPublicResponse struct {
 }
 
 type PayToAddressRequest struct {
-	Amount giga.CoinAmount `json:"amount"`
-	PayTo  giga.Address    `json:"to"`
+	Amount      giga.CoinAmount `json:"amount"`
+	PayTo       giga.Address    `json:"to"`
+	ExplicitFee giga.CoinAmount `json:"explicit_fee"` // optional fee amount
+	Pay         []giga.PayTo    `json:"pay"`          // either Pay, or Amount and PayTo.
 }
 type PayToAddressResponse struct {
 	TxId string          `json:"hex"`
@@ -337,6 +339,7 @@ type PayToAddressResponse struct {
 
 // Pays funds from an account managed by gigawallet to any Dogecoin Address.
 // POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
+// or { "explicit_fee": "0.2", "pay": [ "amount": "1.0", "to": "DPeT…", "deduct_fee_percent": "100" ] }
 func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
@@ -350,7 +353,11 @@ func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httproute
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
 		return
 	}
-	txid, fee, err := t.api.SendFundsToAddress(foreignID, o.Amount, o.PayTo)
+	if len(o.Pay) == 0 {
+		// treat the request as an array of one item.
+		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
+	}
+	txid, fee, err := t.api.SendFundsToAddress(foreignID, o.ExplicitFee, o.Pay)
 	if err != nil {
 		sendError(w, "SendFundsToAddress", err)
 		return
