@@ -277,7 +277,7 @@ func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo 
 			return
 		}
 	}
-	err = builder.CalculateFee(ZeroCoins)
+	err = builder.CalculateFee(explicitFee)
 	if err != nil {
 		return
 	}
