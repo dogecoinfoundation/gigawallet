@@ -676,8 +676,11 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 }
 
 func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
-	res, err := t.tx.Exec(
-		"UPDATE account SET next_int_key=GREATEST(next_int_key,$1), next_ext_key=GREATEST(next_ext_key,$2), next_pool_int=GREATEST(next_pool_int,$3), next_pool_ext=GREATEST(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8",
+	sql := "UPDATE account SET next_int_key=MAX(next_int_key,$1), next_ext_key=MAX(next_ext_key,$2), next_pool_int=MAX(next_pool_int,$3), next_pool_ext=MAX(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8"
+	if t.store.isPostgres {
+		sql = "UPDATE account SET next_int_key=GREATEST(next_int_key,$1), next_ext_key=GREATEST(next_ext_key,$2), next_pool_int=GREATEST(next_pool_int,$3), next_pool_ext=GREATEST(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8"
+	}
+	res, err := t.tx.Exec(sql,
 		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
 		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,

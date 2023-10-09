@@ -95,3 +95,33 @@ type MQTTQueueConfig struct {
 	TopicFilter string
 	Types       []string
 }
+
+func TestConfig() Config {
+	return Config{
+		Gigawallet: GigawalletConfig{
+			ServiceName:         "Example Dogecoin Store",
+			ServiceDomain:       "example.com",
+			ServiceIconURL:      "https://example.com/icon.png",
+			ServiceKeyHash:      "",
+			Network:             "testnet",
+			ConfirmationsNeeded: 6,
+			RejectionsNeeded:    12,
+		},
+		WebAPI: WebAPIConfig{
+			AdminPort:     "8081",
+			AdminBind:     "localhost",
+			PubPort:       "8082",
+			PubBind:       "localhost",
+			PubAPIRootURL: "http://localhost:8082",
+		},
+		Store: StoreConfig{
+			DBFile: ":memory:",
+		},
+		MQTT: MQTTConfig{
+			Queues: make(map[string]MQTTQueueConfig),
+		},
+		Loggers:   make(map[string]LoggersConfig),
+		Dogecoind: make(map[string]NodeConfig),
+		Core:      NodeConfig{},
+	}
+}

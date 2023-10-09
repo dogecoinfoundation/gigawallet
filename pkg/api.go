@@ -144,7 +144,8 @@ func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upser
 		}
 
 		// Account does not exist yet.
-		addr, priv, err := a.L1.MakeAddress(false)
+		isTestNet := a.config.Gigawallet.Network == "testnet"
+		addr, priv, err := a.L1.MakeAddress(isTestNet)
 		if err != nil {
 			return AccountPublic{}, NewErr(NotAvailable, "cannot create address: %v", err)
 		}
