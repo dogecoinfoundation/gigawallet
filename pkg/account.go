@@ -90,6 +90,20 @@ func (a *Account) GenerateAddresses(lib L1, first uint32, count uint32, isIntern
 	return result, nil
 }
 
+// NextPayToAddress generates the next unused "external address"
+// in the Account's HD-Wallet keyspace.
+// Modifies `NextExternalKey` so the caller should run `UpdatePoolAddresses`
+// and commit changes using `dbtx.UpdateAccount`
+func (a *Account) NextPayToAddress(lib L1) (Address, uint32, error) {
+	keyIndex := a.NextExternalKey
+	address, err := lib.MakeChildAddress(a.Privkey, keyIndex, false)
+	if err != nil {
+		return "", 0, err
+	}
+	a.NextExternalKey += 1 // "use" the key index.
+	return address, keyIndex, nil
+}
+
 // NextChangeAddress generates the next unused "internal address"
 // in the Account's HD-Wallet keyspace. NOTE: since callers don't run
 // inside a transaction, concurrent requests can end up paying to the
@@ -163,7 +177,7 @@ func (s *UTXOSource) fetchMoreUTXOs() error {
 func (s *UTXOSource) NextUnspentUTXO(taken UTXOSet) (UTXO, error) {
 	for {
 		for _, utxo := range s.unspent {
-			if utxo.ScriptType == scriptTypeP2PKH {
+			if utxo.ScriptType == ScriptTypeP2PKH {
 				// Exclude UTXOs that have already been taken from the source.
 				if !taken.Includes(utxo.TxID, utxo.VOut) {
 					return utxo, nil // found matching UTXO.
@@ -184,7 +198,7 @@ func (s *UTXOSource) NextUnspentUTXO(taken UTXOSet) (UTXO, error) {
 func (s *UTXOSource) FindUTXOLargerThan(amount CoinAmount, taken UTXOSet) (UTXO, error) {
 	for {
 		for _, utxo := range s.unspent {
-			if utxo.ScriptType == scriptTypeP2PKH {
+			if utxo.ScriptType == ScriptTypeP2PKH {
 				// We can (presumably) spend this UTXO with one of our private keys,
 				// otherwise it wouldn't be in our account.
 				if utxo.Value.GreaterThanOrEqual(amount) {

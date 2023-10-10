@@ -45,17 +45,17 @@ func (l L1Mock) GetBlockHash(height int64) (hash string, err error) {
 }
 
 func (l L1Mock) GetBestBlockHash() (blockHash string, err error) {
-	return "", fmt.Errorf("not implemented")
+	return "FEED000000000000000000000000000000000000000000000000000000000000", nil
 }
 
 func (l L1Mock) GetBlockCount() (blockCount int64, err error) {
-	return 0, fmt.Errorf("not implemented")
+	return 100, nil
 }
 
 func (l L1Mock) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
-	return giga.RawTxn{}, fmt.Errorf("not implemented")
+	return giga.RawTxn{}, nil
 }
 
 func (l L1Mock) Send(txnHex string) (txid string, err error) {
-	return "", fmt.Errorf("not implemented")
+	return "FEED000000000000000000000000000000000000000000000000000000000000", nil
 }

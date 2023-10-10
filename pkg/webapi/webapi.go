@@ -337,10 +337,8 @@ type PayToAddressRequest struct {
 	ExplicitFee giga.CoinAmount `json:"explicit_fee"` // optional fee amount
 	Pay         []giga.PayTo    `json:"pay"`          // either Pay, or Amount and PayTo.
 }
-type PayToAddressResponse struct {
-	TxId string          `json:"hex"`
-	Fee  giga.CoinAmount `json:"fee"`
-}
+
+type PayToAddressResponse = giga.SendFundsResult
 
 // Pays funds from an account managed by gigawallet to any Dogecoin Address.
 // POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
@@ -362,15 +360,12 @@ func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httproute
 		// treat the request as an array of one item.
 		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
 	}
-	txid, fee, err := t.api.SendFundsToAddress(foreignID, o.ExplicitFee, o.Pay)
+	res, err := t.api.SendFundsToAddress(foreignID, o.ExplicitFee, o.Pay)
 	if err != nil {
 		sendError(w, "SendFundsToAddress", err)
 		return
 	}
-	sendResponse(w, &PayToAddressResponse{
-		TxId: txid,
-		Fee:  fee,
-	})
+	sendResponse(w, res)
 }
 
 // pays an invoice from another account managed by gigawallet
@@ -386,15 +381,12 @@ func (t WebAPI) payInvoiceFromInternal(w http.ResponseWriter, r *http.Request, p
 		sendBadRequest(w, "missing foreign ID in URL")
 		return
 	}
-	txid, fee, err := t.api.PayInvoiceFromAccount(giga.Address(invoice_id), foreign_id)
+	res, err := t.api.PayInvoiceFromAccount(giga.Address(invoice_id), foreign_id)
 	if err != nil {
 		sendError(w, "PayInvoiceFromAccount", err)
 		return
 	}
-	sendResponse(w, &PayToAddressResponse{
-		TxId: txid,
-		Fee:  fee,
-	})
+	sendResponse(w, res)
 }
 
 // upsertAccount returns the address of the new account with the foreignID in the URL

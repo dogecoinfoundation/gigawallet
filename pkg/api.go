@@ -25,24 +25,23 @@ type InvoiceCreateRequest struct {
 }
 
 func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invoice, error) {
-	txn, err := a.Store.Begin()
+	dbtx, err := a.Store.Begin()
 	if err != nil {
 		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to begin txn: %s", err))
 		return Invoice{}, err
 	}
-	defer txn.Rollback()
+	defer dbtx.Rollback()
 
-	acc, err := txn.GetAccount(foreignID)
+	acc, err := dbtx.GetAccount(foreignID)
 	if err != nil {
 		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to find Account: %s", foreignID))
 		return Invoice{}, err
 	}
 
 	// Create a new child address for this invoice from the account's HD key
-	keyIndex := acc.NextExternalKey
-	invoiceID, err := a.L1.MakeChildAddress(acc.Privkey, keyIndex, false)
+	invoiceID, keyIndex, err := acc.NextPayToAddress(a.L1)
 	if err != nil {
-		eMsg := fmt.Sprintf("MakeChildAddress failed: %v", err)
+		eMsg := fmt.Sprintf("NextPayToAddress failed: %v", err)
 		a.bus.Send(SYS_ERR, eMsg)
 		return Invoice{}, NewErr(UnknownError, eMsg, err)
 	}
@@ -60,23 +59,22 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 		return Invoice{}, err
 	}
 
-	err = txn.StoreInvoice(i)
+	err = dbtx.StoreInvoice(i)
 	if err != nil {
 		return Invoice{}, err
 	}
 
 	// Reserve the Invoice Address in the account.
-	acc.NextExternalKey = i.KeyIndex + 1
-	err = acc.UpdatePoolAddresses(txn, a.L1)
+	err = acc.UpdatePoolAddresses(dbtx, a.L1)
 	if err != nil {
 		return Invoice{}, err
 	}
-	err = txn.UpdateAccount(acc)
+	err = dbtx.UpdateAccount(acc)
 	if err != nil {
 		return Invoice{}, err
 	}
 
-	err = txn.Commit()
+	err = dbtx.Commit()
 	if err != nil {
 		a.bus.Send(SYS_ERR, fmt.Sprintf("CreateInvoice: Failed to commit: %s", foreignID))
 		return Invoice{}, err
@@ -252,7 +250,14 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 	return pub, nil
 }
 
-func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo []PayTo) (txid string, fee CoinAmount, err error) {
+type SendFundsResult struct {
+	TxId  string     `json:"hex"`
+	Total CoinAmount `json:"total"`
+	Paid  CoinAmount `json:"paid"`
+	Fee   CoinAmount `json:"fee"`
+}
+
+func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo []PayTo) (res SendFundsResult, err error) {
 	account, err := a.Store.GetAccount(foreignID)
 	if err != nil {
 		return
@@ -261,7 +266,7 @@ func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo 
 	for _, pay := range payTo {
 		total = total.Add(pay.Amount)
 		if pay.Amount.LessThan(TxnDustLimit) {
-			return "", ZeroCoins, NewErr(BadRequest, "amount is less than dust limit - transaction will be rejected: %s pay to %s", pay.Amount.String(), pay.PayTo)
+			return SendFundsResult{}, NewErr(BadRequest, "amount is less than dust limit - transaction will be rejected: %s pay to %s", pay.Amount.String(), pay.PayTo)
 		}
 	}
 	builder, err := NewTxnBuilder(&account, a.Store, a.L1)
@@ -321,7 +326,7 @@ func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo 
 	}
 
 	// Submit the transaction to core.
-	txid, err = a.L1.Send(txn.TxnHex)
+	txid, err := a.L1.Send(txn.TxnHex)
 	if err != nil {
 		return
 	}
@@ -351,10 +356,11 @@ func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo 
 		TxID:      txid,
 	}
 	a.bus.Send(PAYMENT_SENT, msg)
-	return
+
+	return SendFundsResult{TxId: txid, Total: total.Add(fee), Paid: total, Fee: fee}, nil
 }
 
-func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid string, fee CoinAmount, err error) {
+func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res SendFundsResult, err error) {
 	invoice, err := a.Store.GetInvoice(invoiceID)
 	if err != nil {
 		return
@@ -365,7 +371,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 	}
 	invoiceAmount := invoice.CalcTotal()
 	if invoiceAmount.LessThan(TxnDustLimit) {
-		return "", ZeroCoins, fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
+		return SendFundsResult{}, fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
 	}
 	payToAddress := invoice.ID // pay-to Address is the ID
 
@@ -426,7 +432,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 	}
 
 	// Submit the transaction to core.
-	txid, err = a.L1.Send(txn.TxnHex)
+	txid, err := a.L1.Send(txn.TxnHex)
 	if err != nil {
 		return
 	}
@@ -456,7 +462,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 		TxID:      txid,
 	}
 	a.bus.Send(PAYMENT_SENT, msg)
-	return txn.TxnHex, fee, nil
+	return SendFundsResult{TxId: txn.TxnHex, Total: invoiceAmount.Add(fee), Paid: invoiceAmount, Fee: fee}, nil
 }
 
 // Re-sync from a specific block height, or skip ahead (for now)

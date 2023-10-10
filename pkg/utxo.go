@@ -116,7 +116,7 @@ func (b *TxnBuilder) AddOutput(payTo Address, amount CoinAmount) error {
 		return NewErr(InvalidTxn, "invalid transaction output")
 	}
 	b.outputs = append(b.outputs, NewTxOut{
-		ScriptType:    scriptTypeP2PKH,
+		ScriptType:    ScriptTypeP2PKH,
 		Amount:        amount,
 		ScriptAddress: payTo,
 	})

@@ -640,8 +640,8 @@ func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, total gi
 	defer stmt.Close()
 	now := time.Now()
 	row := t.tx.QueryRow(
-		"insert into payment(account_address, pay_to, amount, created) values($1,$2,$3,$4) returning id",
-		accountAddr, payTo, total, now)
+		"INSERT INTO payment (account_address, created, total) VALUES ($1,$2,$3) RETURNING ID",
+		accountAddr, now, total)
 	var id int64
 	err = row.Scan(&id)
 	if err != nil {
@@ -836,7 +836,7 @@ func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight i
 // There is an index on (added_height, spendable_height) for this query.
 // This uses #confirmations from the invoice being paid, or the configured #confirmations.
 // This MUST be a LEFT OUTER join (script_address may not match any invoice)
-var confirmations_from_invoice = "(SELECT COALESCE(confirmations,$1) FROM invoice WHERE invoice_address = utxo.script_address)"
+var confirmations_from_invoice = "COALESCE((SELECT confirmations FROM invoice WHERE invoice_address = utxo.script_address),$1)"
 var confirm_spendable_sql = fmt.Sprintf("UPDATE utxo SET spendable_height = added_height + %s WHERE added_height + %s <= $2 AND spendable_height IS NULL RETURNING account_address", confirmations_from_invoice, confirmations_from_invoice)
 var confirm_spent_sql = "UPDATE utxo SET spent_height = spending_height + %s WHERE spending_height + %s <= $2 AND spent_height IS NULL RETURNING account_address"
 
