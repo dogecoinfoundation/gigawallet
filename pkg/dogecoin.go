@@ -41,11 +41,18 @@ var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
 
 // A new transaction (hex) from libdogecoin.
 type NewTxn struct {
-	TxnHex       string // Transaction in Hexadecimal format.
-	TotalIn      CoinAmount
-	TotalOut     CoinAmount
-	FeeAmount    CoinAmount
-	ChangeAmount CoinAmount
+	TxnHex       string     // Transaction in Hexadecimal format.
+	TotalIn      CoinAmount // Sum of all inputs (UTXOs)
+	TotalOut     CoinAmount // Sum of all outputs (NewTxOuts)
+	FeeAmount    CoinAmount // Calculated fee
+	ChangeAmount CoinAmount // Change returned to wallet (excess input)
+}
+
+// NewTxOut is an output from a new Txn, i.e. creates a new UTXO.
+type NewTxOut struct {
+	ScriptType    ScriptType // 'p2pkh' etc, see ScriptType constants
+	Amount        CoinAmount // Amount of Dogecoin to pay to the PayTo address
+	ScriptAddress Address    // Dogecoin P2PKH Address to receive the funds
 }
 
 // Dogecoin Script Types enum.

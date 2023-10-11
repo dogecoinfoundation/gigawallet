@@ -13,20 +13,19 @@ const HD_DISCOVERY_RANGE = 20
 	 - PayoutFrequency, if set, payout at this schedule
 */
 type Account struct {
-	Address          Address     // HD Wallet master public key as a dogecoin address (Account ID)
-	Privkey          Privkey     // HD Wallet master extended private key.
-	ForeignID        string      // unique identifier supplied by the organisation using Gigawallet.
-	NextInternalKey  uint32      // next internal HD Wallet address to use for txn change outputs.
-	NextExternalKey  uint32      // next external HD Wallet address to use for an invoice or pay-to address.
-	NextPoolInternal uint32      // next internal HD Wallet address to insert into account_address table.
-	NextPoolExternal uint32      // next external HD Wallet address to insert into account_address table.
-	PayoutAddress    Address     // Dogecoin address to receive funds periodically
-	PayoutThreshold  CoinAmount  // Minimum amount to automatically pay to PayoutAddress
-	PayoutFrequency  string      // Minimum time between automatic payments to PayoutAddress
-	CurrentBalance   CoinAmount  // current balance available to spend now (from BalanceKeeper)
-	IncomingBalance  CoinAmount  // receiving coins waiting for confirmation (from BalanceKeeper)
-	OutgoingBalance  CoinAmount  // spent coins waiting for confirmation (from BalanceKeeper)
-	utxoSource       *UTXOSource // cache: UTXOSource instance for this account.
+	Address          Address    // HD Wallet master public key as a dogecoin address (Account ID)
+	Privkey          Privkey    // HD Wallet master extended private key.
+	ForeignID        string     // unique identifier supplied by the organisation using Gigawallet.
+	NextInternalKey  uint32     // next internal HD Wallet address to use for txn change outputs.
+	NextExternalKey  uint32     // next external HD Wallet address to use for an invoice or pay-to address.
+	NextPoolInternal uint32     // next internal HD Wallet address to insert into account_address table.
+	NextPoolExternal uint32     // next external HD Wallet address to insert into account_address table.
+	PayoutAddress    Address    // Dogecoin address to receive funds periodically
+	PayoutThreshold  CoinAmount // Minimum amount to automatically pay to PayoutAddress
+	PayoutFrequency  string     // Minimum time between automatic payments to PayoutAddress
+	CurrentBalance   CoinAmount // current balance available to spend now (from BalanceKeeper)
+	IncomingBalance  CoinAmount // receiving coins waiting for confirmation (from BalanceKeeper)
+	OutgoingBalance  CoinAmount // spent coins waiting for confirmation (from BalanceKeeper)
 }
 
 // AccountBalance holds the current account balances for an Account.
@@ -118,14 +117,6 @@ func (a *Account) NextChangeAddress(lib L1) (Address, error) {
 	return address, nil
 }
 
-func (a *Account) GetUTXOSource(store Store) *UTXOSource {
-	if a.utxoSource != nil {
-		return a.utxoSource
-	}
-	a.utxoSource = NewUTXOSource(store, a.Address)
-	return a.utxoSource
-}
-
 // GetPublicInfo gets those parts of the Account that are safe
 // to expose to the outside world (i.e. NOT private keys)
 func (a Account) GetPublicInfo() AccountPublic {
@@ -146,10 +137,6 @@ type UTXOSource struct {
 	account Address
 	unspent []UTXO
 	noMore  bool
-}
-
-type UTXOSet interface {
-	Includes(txID string, vOut int) bool
 }
 
 func NewUTXOSource(store Store, account Address) *UTXOSource {
