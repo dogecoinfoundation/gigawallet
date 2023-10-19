@@ -15,4 +15,5 @@ dev:
 
 test:
 	go test -v ./pkg/doge
+	go test -v ./pkg/webapi
 	go test -v ./test
