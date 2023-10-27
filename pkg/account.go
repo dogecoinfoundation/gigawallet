@@ -13,20 +13,19 @@ const HD_DISCOVERY_RANGE = 20
 	 - PayoutFrequency, if set, payout at this schedule
 */
 type Account struct {
-	Address          Address     // HD Wallet master public key as a dogecoin address (Account ID)
-	Privkey          Privkey     // HD Wallet master extended private key.
-	ForeignID        string      // unique identifier supplied by the organisation using Gigawallet.
-	NextInternalKey  uint32      // next internal HD Wallet address to use for txn change outputs.
-	NextExternalKey  uint32      // next external HD Wallet address to use for an invoice or pay-to address.
-	NextPoolInternal uint32      // next internal HD Wallet address to insert into account_address table.
-	NextPoolExternal uint32      // next external HD Wallet address to insert into account_address table.
-	PayoutAddress    Address     // Dogecoin address to receive funds periodically
-	PayoutThreshold  CoinAmount  // Minimum amount to automatically pay to PayoutAddress
-	PayoutFrequency  string      // Minimum time between automatic payments to PayoutAddress
-	CurrentBalance   CoinAmount  // current balance available to spend now (from BalanceKeeper)
-	IncomingBalance  CoinAmount  // receiving coins waiting for confirmation (from BalanceKeeper)
-	OutgoingBalance  CoinAmount  // spent coins waiting for confirmation (from BalanceKeeper)
-	utxoSource       *UTXOSource // cache: UTXOSource instance for this account.
+	Address          Address    // HD Wallet master public key as a dogecoin address (Account ID)
+	Privkey          Privkey    // HD Wallet master extended private key.
+	ForeignID        string     // unique identifier supplied by the organisation using Gigawallet.
+	NextInternalKey  uint32     // next internal HD Wallet address to use for txn change outputs.
+	NextExternalKey  uint32     // next external HD Wallet address to use for an invoice or pay-to address.
+	NextPoolInternal uint32     // next internal HD Wallet address to insert into account_address table.
+	NextPoolExternal uint32     // next external HD Wallet address to insert into account_address table.
+	PayoutAddress    Address    // Dogecoin address to receive funds periodically
+	PayoutThreshold  CoinAmount // Minimum amount to automatically pay to PayoutAddress
+	PayoutFrequency  string     // Minimum time between automatic payments to PayoutAddress
+	CurrentBalance   CoinAmount // current balance available to spend now (from BalanceKeeper)
+	IncomingBalance  CoinAmount // receiving coins waiting for confirmation (from BalanceKeeper)
+	OutgoingBalance  CoinAmount // spent coins waiting for confirmation (from BalanceKeeper)
 }
 
 // AccountBalance holds the current account balances for an Account.
@@ -90,6 +89,20 @@ func (a *Account) GenerateAddresses(lib L1, first uint32, count uint32, isIntern
 	return result, nil
 }
 
+// NextPayToAddress generates the next unused "external address"
+// in the Account's HD-Wallet keyspace.
+// Modifies `NextExternalKey` so the caller should run `UpdatePoolAddresses`
+// and commit changes using `dbtx.UpdateAccount`
+func (a *Account) NextPayToAddress(lib L1) (Address, uint32, error) {
+	keyIndex := a.NextExternalKey
+	address, err := lib.MakeChildAddress(a.Privkey, keyIndex, false)
+	if err != nil {
+		return "", 0, err
+	}
+	a.NextExternalKey += 1 // "use" the key index.
+	return address, keyIndex, nil
+}
+
 // NextChangeAddress generates the next unused "internal address"
 // in the Account's HD-Wallet keyspace. NOTE: since callers don't run
 // inside a transaction, concurrent requests can end up paying to the
@@ -102,14 +115,6 @@ func (a *Account) NextChangeAddress(lib L1) (Address, error) {
 	}
 	a.NextInternalKey += 1 // "use" the key index.
 	return address, nil
-}
-
-func (a *Account) GetUTXOSource(store Store) *UTXOSource {
-	if a.utxoSource != nil {
-		return a.utxoSource
-	}
-	a.utxoSource = NewUTXOSource(store, a.Address)
-	return a.utxoSource
 }
 
 // GetPublicInfo gets those parts of the Account that are safe
@@ -132,10 +137,6 @@ type UTXOSource struct {
 	account Address
 	unspent []UTXO
 	noMore  bool
-}
-
-type UTXOSet interface {
-	Includes(txID string, vOut int) bool
 }
 
 func NewUTXOSource(store Store, account Address) *UTXOSource {
@@ -163,7 +164,7 @@ func (s *UTXOSource) fetchMoreUTXOs() error {
 func (s *UTXOSource) NextUnspentUTXO(taken UTXOSet) (UTXO, error) {
 	for {
 		for _, utxo := range s.unspent {
-			if utxo.ScriptType == scriptTypeP2PKH {
+			if utxo.ScriptType == ScriptTypeP2PKH {
 				// Exclude UTXOs that have already been taken from the source.
 				if !taken.Includes(utxo.TxID, utxo.VOut) {
 					return utxo, nil // found matching UTXO.
@@ -184,7 +185,7 @@ func (s *UTXOSource) NextUnspentUTXO(taken UTXOSet) (UTXO, error) {
 func (s *UTXOSource) FindUTXOLargerThan(amount CoinAmount, taken UTXOSet) (UTXO, error) {
 	for {
 		for _, utxo := range s.unspent {
-			if utxo.ScriptType == scriptTypeP2PKH {
+			if utxo.ScriptType == ScriptTypeP2PKH {
 				// We can (presumably) spend this UTXO with one of our private keys,
 				// otherwise it wouldn't be in our account.
 				if utxo.Value.GreaterThanOrEqual(amount) {

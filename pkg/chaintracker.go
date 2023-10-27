@@ -23,3 +23,9 @@ type RestartChainFollowerCmd struct{}
 type StopChainFollowerCmd struct {
 	Ctx context.Context
 }
+
+// Mock ChainFollower for tests.
+type MockFollower struct {
+}
+
+func (m MockFollower) SendCommand(cmd any) {}

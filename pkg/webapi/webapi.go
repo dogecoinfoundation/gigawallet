@@ -29,63 +29,7 @@ func NewWebAPI(config giga.Config, api giga.API) (WebAPI, error) {
 
 func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error {
 	go func() {
-
-		adminMux := httprouter.New() // Admin APIs
-		pubMux := httprouter.New()   // Public APIs
-
-		// Admin APIs
-
-		adminMux.POST("/admin/setsyncheight/:blockheight", t.setSyncHeight)
-
-		// POST { account } /account/:foreignID -> { account } upsert account
-		adminMux.POST("/account/:foreignID", t.upsertAccount)
-
-		// GET /account/:foreignID -> { account } return an account
-		adminMux.GET("/account/:foreignID", t.getAccount)
-
-		// GET /account:foreignID/Balance -> { AccountBalance    Get the account balance
-		adminMux.GET("/account/:foreignID/balance", t.getAccountBalance)
-
-		// POST {invoice} /account/:foreignID/invoice/ -> { invoice } create new invoice
-		adminMux.POST("/account/:foreignID/invoice/", t.createInvoice)
-
-		// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
-		adminMux.GET("/account/:foreignID/invoices", t.listInvoices)
-
-		// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
-		adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
-
-		// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
-		adminMux.POST("/account/:foreignID/pay", t.payToAddress)
-
-		// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
-		adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
-
-		// POST /decode-txn -> test decoding
-		adminMux.POST("/decode-txn", t.decodeTxn)
-
-		// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
-
-		// POST { amount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
-
-		// External APIs
-
-		// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
-		pubMux.GET("/invoice/:invoiceID", t.getInvoice)
-
-		pubMux.GET("/invoice/:invoiceID/qr.png", t.getInvoiceQR)
-
-		pubMux.GET("/invoice/:invoiceID/connect", t.getInvoiceConnect)
-
-		// GET /invoice/:invoiceID/connect -> { dogeConnect json } get the dogeConnect JSON for an invoice
-
-		// GET /invoice/:invoiceID/status -> { status } get status of an invoice
-
-		// GET /invoice/:invoiceID/poll -> { status } long-poll invoice waiting for status change
-
-		// GET /invoice/:invoiceID/splash -> html page that tries to launch dogeconnect:// with QRcode fallback
-
-		// POST { dogeConnect payment } /invoice/:invoiceID/pay -> { status } pay an invoice with a dogeConnect response
+		adminMux, pubMux := t.createRouters()
 
 		// Start the admin server
 		adminServer := &http.Server{Addr: t.config.WebAPI.AdminBind + ":" + t.config.WebAPI.AdminPort, Handler: adminMux}
@@ -112,6 +56,67 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 		stopped <- true
 	}()
 	return nil
+}
+
+func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter.Router) {
+	adminMux = httprouter.New() // Admin APIs
+	pubMux = httprouter.New()   // Public APIs
+
+	// Admin APIs
+
+	adminMux.POST("/admin/setsyncheight/:blockheight", t.setSyncHeight)
+
+	// POST { account } /account/:foreignID -> { account } upsert account
+	adminMux.POST("/account/:foreignID", t.upsertAccount)
+
+	// GET /account/:foreignID -> { account } return an account
+	adminMux.GET("/account/:foreignID", t.getAccount)
+
+	// GET /account:foreignID/Balance -> { AccountBalance    Get the account balance
+	adminMux.GET("/account/:foreignID/balance", t.getAccountBalance)
+
+	// POST {invoice} /account/:foreignID/invoice/ -> { invoice } create new invoice
+	adminMux.POST("/account/:foreignID/invoice/", t.createInvoice)
+
+	// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
+	adminMux.GET("/account/:foreignID/invoices", t.listInvoices)
+
+	// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
+	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
+
+	// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
+	adminMux.POST("/account/:foreignID/pay", t.payToAddress)
+
+	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
+	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
+
+	// POST /decode-txn -> test decoding
+	adminMux.POST("/decode-txn", t.decodeTxn)
+
+	// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
+
+	// POST { amount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
+
+	// External APIs
+
+	// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
+	pubMux.GET("/invoice/:invoiceID", t.getInvoice)
+
+	pubMux.GET("/invoice/:invoiceID/qr.png", t.getInvoiceQR)
+
+	pubMux.GET("/invoice/:invoiceID/connect", t.getInvoiceConnect)
+
+	// GET /invoice/:invoiceID/connect -> { dogeConnect json } get the dogeConnect JSON for an invoice
+
+	// GET /invoice/:invoiceID/status -> { status } get status of an invoice
+
+	// GET /invoice/:invoiceID/poll -> { status } long-poll invoice waiting for status change
+
+	// GET /invoice/:invoiceID/splash -> html page that tries to launch dogeconnect:// with QRcode fallback
+
+	// POST { dogeConnect payment } /invoice/:invoiceID/pay -> { status } pay an invoice with a dogeConnect response
+
+	return
 }
 
 // SetSyncHeight resets the sync height for GigaWallet, which will cause
@@ -332,10 +337,8 @@ type PayToAddressRequest struct {
 	ExplicitFee giga.CoinAmount `json:"explicit_fee"` // optional fee amount
 	Pay         []giga.PayTo    `json:"pay"`          // either Pay, or Amount and PayTo.
 }
-type PayToAddressResponse struct {
-	TxId string          `json:"hex"`
-	Fee  giga.CoinAmount `json:"fee"`
-}
+
+type PayToAddressResponse = giga.SendFundsResult
 
 // Pays funds from an account managed by gigawallet to any Dogecoin Address.
 // POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
@@ -357,15 +360,12 @@ func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httproute
 		// treat the request as an array of one item.
 		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
 	}
-	txid, fee, err := t.api.SendFundsToAddress(foreignID, o.ExplicitFee, o.Pay)
+	res, err := t.api.SendFundsToAddress(foreignID, o.ExplicitFee, o.Pay)
 	if err != nil {
 		sendError(w, "SendFundsToAddress", err)
 		return
 	}
-	sendResponse(w, &PayToAddressResponse{
-		TxId: txid,
-		Fee:  fee,
-	})
+	sendResponse(w, res)
 }
 
 // pays an invoice from another account managed by gigawallet
@@ -381,15 +381,12 @@ func (t WebAPI) payInvoiceFromInternal(w http.ResponseWriter, r *http.Request, p
 		sendBadRequest(w, "missing foreign ID in URL")
 		return
 	}
-	txid, fee, err := t.api.PayInvoiceFromAccount(giga.Address(invoice_id), foreign_id)
+	res, err := t.api.PayInvoiceFromAccount(giga.Address(invoice_id), foreign_id)
 	if err != nil {
 		sendError(w, "PayInvoiceFromAccount", err)
 		return
 	}
-	sendResponse(w, &PayToAddressResponse{
-		TxId: txid,
-		Fee:  fee,
-	})
+	sendResponse(w, res)
 }
 
 // upsertAccount returns the address of the new account with the foreignID in the URL

@@ -41,11 +41,18 @@ var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
 
 // A new transaction (hex) from libdogecoin.
 type NewTxn struct {
-	TxnHex       string // Transaction in Hexadecimal format.
-	TotalIn      CoinAmount
-	TotalOut     CoinAmount
-	FeeAmount    CoinAmount
-	ChangeAmount CoinAmount
+	TxnHex       string     // Transaction in Hexadecimal format.
+	TotalIn      CoinAmount // Sum of all inputs (UTXOs)
+	TotalOut     CoinAmount // Sum of all outputs (NewTxOuts)
+	FeeAmount    CoinAmount // Calculated fee
+	ChangeAmount CoinAmount // Change returned to wallet (excess input)
+}
+
+// NewTxOut is an output from a new Txn, i.e. creates a new UTXO.
+type NewTxOut struct {
+	ScriptType    ScriptType // 'p2pkh' etc, see ScriptType constants
+	Amount        CoinAmount // Amount of Dogecoin to pay to the PayTo address
+	ScriptAddress Address    // Dogecoin P2PKH Address to receive the funds
 }
 
 // Dogecoin Script Types enum.
@@ -54,14 +61,14 @@ type ScriptType string
 
 // ScriptType constants - stored in gigawallet database!
 const (
-	scriptTypeP2PK     ScriptType = "p2pk"     // TX_PUBKEY (in Core)
-	scriptTypeP2PKH    ScriptType = "p2pkh"    // TX_PUBKEYHASH
-	scriptTypeP2PKHW   ScriptType = "p2wpkh"   // TX_WITNESS_V0_KEYHASH
-	scriptTypeP2SH     ScriptType = "p2sh"     // TX_SCRIPTHASH
-	scriptTypeP2SHW    ScriptType = "p2wsh"    // TX_WITNESS_V0_SCRIPTHASH
-	scriptTypeMultiSig ScriptType = "multisig" // TX_MULTISIG
-	scriptTypeNullData ScriptType = "nulldata" // TX_NULL_DATA
-	scriptTypeCustom   ScriptType = "custom"   // TX_NONSTANDARD
+	ScriptTypeP2PK     ScriptType = "p2pk"     // TX_PUBKEY (in Core)
+	ScriptTypeP2PKH    ScriptType = "p2pkh"    // TX_PUBKEYHASH
+	ScriptTypeP2PKHW   ScriptType = "p2wpkh"   // TX_WITNESS_V0_KEYHASH
+	ScriptTypeP2SH     ScriptType = "p2sh"     // TX_SCRIPTHASH
+	ScriptTypeP2SHW    ScriptType = "p2wsh"    // TX_WITNESS_V0_SCRIPTHASH
+	ScriptTypeMultiSig ScriptType = "multisig" // TX_MULTISIG
+	ScriptTypeNullData ScriptType = "nulldata" // TX_NULL_DATA
+	ScriptTypeCustom   ScriptType = "custom"   // TX_NONSTANDARD
 )
 
 // Decode the 'Type' from Core RPC to our ScriptType enum.
@@ -70,23 +77,23 @@ const (
 func DecodeCoreRPCScriptType(coreRpcType string) ScriptType {
 	switch coreRpcType {
 	case "nonstandard":
-		return scriptTypeCustom
+		return ScriptTypeCustom
 	case "pubkey":
-		return scriptTypeP2PK
+		return ScriptTypeP2PK
 	case "pubkeyhash":
-		return scriptTypeP2PKH
+		return ScriptTypeP2PKH
 	case "scripthash":
-		return scriptTypeP2SH
+		return ScriptTypeP2SH
 	case "multisig":
-		return scriptTypeMultiSig
+		return ScriptTypeMultiSig
 	case "nulldata":
-		return scriptTypeNullData
+		return ScriptTypeNullData
 	case "witness_v0_keyhash":
-		return scriptTypeP2PKHW
+		return ScriptTypeP2PKHW
 	case "witness_v0_scripthash":
-		return scriptTypeP2SHW
+		return ScriptTypeP2SHW
 	default:
-		return scriptTypeCustom
+		return ScriptTypeCustom
 	}
 }
 

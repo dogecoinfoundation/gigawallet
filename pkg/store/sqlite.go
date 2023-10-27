@@ -640,8 +640,8 @@ func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, total gi
 	defer stmt.Close()
 	now := time.Now()
 	row := t.tx.QueryRow(
-		"insert into payment(account_address, pay_to, amount, created) values($1,$2,$3,$4) returning id",
-		accountAddr, payTo, total, now)
+		"INSERT INTO payment (account_address, created, total) VALUES ($1,$2,$3) RETURNING ID",
+		accountAddr, now, total)
 	var id int64
 	err = row.Scan(&id)
 	if err != nil {
@@ -676,8 +676,11 @@ func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 }
 
 func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
-	res, err := t.tx.Exec(
-		"UPDATE account SET next_int_key=GREATEST(next_int_key,$1), next_ext_key=GREATEST(next_ext_key,$2), next_pool_int=GREATEST(next_pool_int,$3), next_pool_ext=GREATEST(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8",
+	sql := "UPDATE account SET next_int_key=MAX(next_int_key,$1), next_ext_key=MAX(next_ext_key,$2), next_pool_int=MAX(next_pool_int,$3), next_pool_ext=MAX(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8"
+	if t.store.isPostgres {
+		sql = "UPDATE account SET next_int_key=GREATEST(next_int_key,$1), next_ext_key=GREATEST(next_ext_key,$2), next_pool_int=GREATEST(next_pool_int,$3), next_pool_ext=GREATEST(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8"
+	}
+	res, err := t.tx.Exec(sql,
 		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
 		acc.NextPoolInternal, acc.NextPoolExternal,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
@@ -833,18 +836,19 @@ func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight i
 // There is an index on (added_height, spendable_height) for this query.
 // This uses #confirmations from the invoice being paid, or the configured #confirmations.
 // This MUST be a LEFT OUTER join (script_address may not match any invoice)
-var confirmations_from_invoice = "(SELECT COALESCE(confirmations,$1) FROM invoice WHERE invoice_address = utxo.script_address)"
-var confirm_spendable_sql = fmt.Sprintf("UPDATE utxo SET spendable_height = added_height + %s WHERE added_height + %s <= $2 AND spendable_height IS NULL RETURNING account_address", confirmations_from_invoice, confirmations_from_invoice)
-var confirm_spent_sql = "UPDATE utxo SET spent_height = spending_height + %s WHERE spending_height + %s <= $2 AND spent_height IS NULL RETURNING account_address"
+var confirm_spendable_sql = `UPDATE utxo SET spendable_height = added_height +
+	COALESCE((SELECT confirmations FROM invoice WHERE invoice_address = utxo.script_address),$1) WHERE added_height +
+	COALESCE((SELECT confirmations FROM invoice WHERE invoice_address = utxo.script_address),$2) <= $3 AND spendable_height IS NULL RETURNING account_address`
+var confirm_spent_sql = "UPDATE utxo SET spent_height = spending_height + $1 WHERE spending_height + $2 <= $3 AND spent_height IS NULL RETURNING account_address"
 
 func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAccounts []string, err error) {
 	// confirm_spendable
-	rows, err := t.tx.Query(confirm_spendable_sql, confirmations, blockHeight)
+	rows, err := t.tx.Query(confirm_spendable_sql, confirmations, confirmations, blockHeight)
 	if affectedAccounts, err = collectArrayIDs(rows, err, affectedAccounts); err != nil {
 		return nil, t.store.dbErr(err, "ConfirmUTXOs: confirming spendable")
 	}
 	// confirm_spent
-	rows, err = t.tx.Query(confirm_spent_sql, confirmations, blockHeight)
+	rows, err = t.tx.Query(confirm_spent_sql, confirmations, confirmations, blockHeight)
 	if affectedAccounts, err = collectArrayIDs(rows, err, affectedAccounts); err != nil {
 		return nil, t.store.dbErr(err, "ConfirmUTXOs: confirming spent")
 	}
