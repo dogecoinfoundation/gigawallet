@@ -107,7 +107,7 @@ func TestWebAPI(t *testing.T) {
 	if payTo.TxId == "" {
 		t.Fatalf("Pay To Address 3: missing txid")
 	}
-	if !payTo.Total.Equals(decimal.RequireFromString("3")) {
+	if !payTo.Total.Equals(decimal.RequireFromString("3")) { // TEST CURRENTLY FAILS (need to implement deduct_fee_percent)
 		t.Fatalf("Pay To Address 3: wrong total: %v", payTo.Total)
 	}
 	if !payTo.Fee.Equals(decimal.RequireFromString("0.0026")) {
