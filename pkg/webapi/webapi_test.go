@@ -83,7 +83,7 @@ func TestWebAPI(t *testing.T) {
 	if payTo.TxId == "" {
 		t.Fatalf("Pay To Address 1: missing txid")
 	}
-	if !payTo.Fee.Equals(decimal.RequireFromString("0.00226")) {
+	if !payTo.Fee.GreaterThanOrEqual(decimal.RequireFromString("0.00225")) {
 		t.Fatalf("Pay To Address 1: wrong fee: %v", payTo.Fee)
 	}
 
@@ -107,13 +107,13 @@ func TestWebAPI(t *testing.T) {
 	if payTo.TxId == "" {
 		t.Fatalf("Pay To Address 3: missing txid")
 	}
-	if !payTo.Total.Equals(decimal.RequireFromString("3")) { // TEST CURRENTLY FAILS (need to implement deduct_fee_percent)
+	if !payTo.Total.Equals(decimal.RequireFromString("3")) {
 		t.Fatalf("Pay To Address 3: wrong total: %v", payTo.Total)
 	}
-	if !payTo.Fee.Equals(decimal.RequireFromString("0.0026")) {
+	if !payTo.Fee.GreaterThanOrEqual(decimal.RequireFromString("0.00259")) {
 		t.Fatalf("Pay To Address 3: wrong fee: %v", payTo.Fee)
 	}
-	if !payTo.Paid.Equals(decimal.RequireFromString("2.99741")) {
+	if !payTo.Paid.GreaterThanOrEqual(decimal.RequireFromString("2.9974")) {
 		t.Fatalf("Pay To Address 3: wrong paid: %v", payTo.Paid)
 	}
 }

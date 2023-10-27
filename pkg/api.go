@@ -264,7 +264,8 @@ func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo 
 	}
 
 	// Create the Dogecoin Transaction
-	newTxn, err := CreateTxn(payTo, explicitFee, account, a.Store, a.L1)
+	source := NewUTXOSource(a.Store, account.Address)
+	newTxn, err := CreateTxn(payTo, explicitFee, account, source, a.L1)
 	if err != nil {
 		return
 	}
@@ -357,7 +358,8 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 
 	// Make a Doge Txn to pay `invoiceAmount` from `account` to `payTo`
 	payTo := []PayTo{{PayTo: payToAddress, Amount: invoiceAmount}}
-	newTxn, err := CreateTxn(payTo, ZeroCoins, account, a.Store, a.L1)
+	source := NewUTXOSource(a.Store, account.Address)
+	newTxn, err := CreateTxn(payTo, ZeroCoins, account, source, a.L1)
 	if err != nil {
 		return
 	}

@@ -16,3 +16,13 @@ type UTXO struct {
 	SpendTxID     string     // TxID of the spending transaction
 	PaymentID     int64      // ID of payment in `payment` table (if spent by us)
 }
+
+type UTXOSet interface {
+	Add(txID string, vOut int)
+	Includes(txID string, vOut int) bool
+}
+
+type UTXOSource interface {
+	NextUnspentUTXO(taken UTXOSet) (UTXO, error)
+	FindUTXOLargerThan(amount CoinAmount, taken UTXOSet) (UTXO, error)
+}

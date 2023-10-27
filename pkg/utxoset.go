@@ -6,20 +6,22 @@ type key struct {
 	VOut int    // Transaction VOut number
 }
 
-type UTXOSet struct {
+type UTXOMapSet struct {
 	used map[key]bool
 }
 
-func NewUTXOSet() UTXOSet {
-	return UTXOSet{
+var _ UTXOSet = UTXOMapSet{}
+
+func NewUTXOSet() UTXOMapSet {
+	return UTXOMapSet{
 		used: map[key]bool{},
 	}
 }
 
-func (u *UTXOSet) Add(txID string, vOut int) {
+func (u UTXOMapSet) Add(txID string, vOut int) {
 	u.used[key{TxID: txID, VOut: vOut}] = true
 }
 
-func (u *UTXOSet) Includes(txID string, vOut int) bool {
+func (u UTXOMapSet) Includes(txID string, vOut int) bool {
 	return u.used[key{TxID: txID, VOut: vOut}]
 }
