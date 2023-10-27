@@ -135,45 +135,54 @@ func (b *TxnBuilder) calculateFeeForSize() (CoinAmount, error) {
 // Make sure the UTXO Inputs cover that fee as well as all Outputs,
 // and add new UTXOs to cover the fee if necessary (if this happens,
 // the transaction size changes and we need to loop and go again.)
-func (b *TxnBuilder) CalculateFee(extraFee CoinAmount) error {
+func (b *TxnBuilder) CalculateFee(specifiedFee CoinAmount) error {
 	// Iterate until b.txn includes the final (stable) fee calculation.
 	numInputs := len(b.inputs)
 	attempt := 0
-	var fees []string
+	if specifiedFee.IsPositive() { // if > 0
+		b.fee = specifiedFee // start with the specified fee.
+	}
 	for {
 		// Build the transaction with the current b.inputs and b.fee.
 		err := b.buildTxn()
 		if err != nil {
 			return err
 		}
-		// Calculate the fee required for the [new] transaction size.
-		newFee, err := b.calculateFeeForSize()
+		// Calculate the fee required for the new transaction size.
+		minFee, err := b.calculateFeeForSize()
 		if err != nil {
 			return err
 		}
+		// Override the minimum fee with the specified fee (if > 0)
+		if specifiedFee.IsPositive() {
+			if specifiedFee.LessThan(minFee) {
+				return NewErr(InvalidTxn, "specified fee %v is less than minimum fee %v", specifiedFee, minFee)
+			}
+			minFee = specifiedFee // override with the specified fee.
+		}
 		// Calculate the total required to cover that fee.
-		newTotal := b.TotalOutputs().Add(newFee).Add(extraFee)
+		newTotal := b.TotalOutputs().Add(minFee)
 		// Add new transaction inputs if necessary to cover the fee.
 		err = b.AddUTXOsUpToAmount(newTotal)
 		if err != nil {
 			return err
 		}
 		// If we added an input, it changes the size of the transaction.
-		// If the fee changed, it changes the "change" output in the transaction.
-		if len(b.inputs) != numInputs || !newFee.Equals(b.fee) {
-			// Number of inputs changed (will change the txn size)
-			// or fee changed (will change the "change" output)
-			// so go back and build the transaction again.
-			if newFee.LessThan(b.fee) && len(b.inputs) == numInputs {
-				// Fee will oscillate, go with the txn we have.
+		// If the fee changed, it changes the "change" output (which can also change the size!)
+		if len(b.inputs) != numInputs || !minFee.Equals(b.fee) {
+			// Prevent fee oscillation.
+			if minFee.LessThan(b.fee) && len(b.inputs) == numInputs {
+				// Min fee got smaller (because the transction got slightly smaller) and the
+				// size will often oscillate if we change the fee again; go with the current
+				// b.fee and the current encoded transaction (which includes that fee)
 				return nil
 			}
-			fees = append(fees, newFee.String())
-			b.fee = newFee
+			// Loop again to rebuild the transaction with the new minFee.
+			b.fee = minFee
 			numInputs = len(b.inputs)
 			attempt += 1
 			if attempt > 10 {
-				return NewErr(InvalidTxn, "cannot create txn with a stable fee: %v", fees)
+				return NewErr(InvalidTxn, "too many attempts to find a stable fee")
 			}
 			continue
 		}

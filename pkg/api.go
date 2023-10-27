@@ -251,27 +251,33 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 	return pub, nil
 }
 
-func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Address) (txid string, fee CoinAmount, err error) {
+func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo []PayTo) (txid string, fee CoinAmount, err error) {
 	account, err := a.Store.GetAccount(foreignID)
 	if err != nil {
 		return
 	}
-	if amount.LessThan(TxnDustLimit) {
-		return "", ZeroCoins, NewErr(BadRequest, "amount is too small - transaction will be rejected: %s", amount.String())
+	total := decimal.Zero
+	for _, pay := range payTo {
+		total = total.Add(pay.Amount)
+		if pay.Amount.LessThan(TxnDustLimit) {
+			return "", ZeroCoins, NewErr(BadRequest, "amount is less than dust limit - transaction will be rejected: %s pay to %s", pay.Amount.String(), pay.PayTo)
+		}
 	}
 	builder, err := NewTxnBuilder(&account, a.Store, a.L1)
 	if err != nil {
 		return
 	}
-	err = builder.AddUTXOsUpToAmount(amount)
+	err = builder.AddUTXOsUpToAmount(total)
 	if err != nil {
 		return
 	}
-	err = builder.AddOutput(payTo, amount)
-	if err != nil {
-		return
+	for _, pay := range payTo {
+		err = builder.AddOutput(pay.PayTo, pay.Amount)
+		if err != nil {
+			return
+		}
 	}
-	err = builder.CalculateFee(ZeroCoins)
+	err = builder.CalculateFee(explicitFee)
 	if err != nil {
 		return
 	}
@@ -283,24 +289,24 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 	// Create the Payment record up-front.
 	// Save changes to the Account (NextInternalKey) and address pool.
 	// Reserve the UTXOs for the payment.
-	tx, err := a.Store.Begin()
+	dbtx, err := a.Store.Begin()
 	if err != nil {
 		return
 	}
-	err = account.UpdatePoolAddresses(tx, a.L1) // we have used an address.
+	err = account.UpdatePoolAddresses(dbtx, a.L1) // we have used an address.
 	if err != nil {
-		tx.Rollback()
+		dbtx.Rollback()
 		return
 	}
-	err = tx.UpdateAccount(account) // for NextInternalKey (change address)
+	err = dbtx.UpdateAccount(account) // for NextInternalKey (change address)
 	if err != nil {
-		tx.Rollback()
+		dbtx.Rollback()
 		return
 	}
 	// Create the `payment` row with no txid or paid_height.
-	payment, err := tx.CreatePayment(account.Address, amount, payTo)
+	payment, err := dbtx.CreatePayment(account.Address, total, payTo)
 	if err != nil {
-		tx.Rollback()
+		dbtx.Rollback()
 		return
 	}
 	// err = tx.ReserveUTXOsForPayment(payId, builder.GetUTXOs()) // TODO
@@ -308,7 +314,7 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 	//  tx.Rollback()
 	// 	return
 	// }
-	err = tx.Commit()
+	err = dbtx.Commit()
 	if err != nil {
 		return
 	}
@@ -321,16 +327,16 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 
 	// Update the Payment with the txid,
 	// which changes it to "accepted" status (accepted by the network)
-	tx, err = a.Store.Begin()
+	dbtx, err = a.Store.Begin()
 	if err != nil {
 		return
 	}
-	err = tx.UpdatePaymentWithTxID(payment.ID, txid)
+	err = dbtx.UpdatePaymentWithTxID(payment.ID, txid)
 	if err != nil {
-		tx.Rollback()
+		dbtx.Rollback()
 		return
 	}
-	err = tx.Commit()
+	err = dbtx.Commit()
 	if err != nil {
 		return
 	}
@@ -340,7 +346,7 @@ func (a API) SendFundsToAddress(foreignID string, amount CoinAmount, payTo Addre
 		ForeignID: account.ForeignID,
 		AccountID: account.Address,
 		PayTo:     payTo,
-		Amount:    amount,
+		Total:     total,
 		TxID:      txid,
 	}
 	a.bus.Send(PAYMENT_SENT, msg)
@@ -360,7 +366,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 	if invoiceAmount.LessThan(TxnDustLimit) {
 		return "", ZeroCoins, fmt.Errorf("invoice amount is too small - transaction will be rejected: %s", invoiceAmount.String())
 	}
-	payTo := invoice.ID // pay-to Address is the ID
+	payToAddress := invoice.ID // pay-to Address is the ID
 
 	// Make a Txn to pay `invoiceAmount` from `account` to `payTo`
 	builder, err := NewTxnBuilder(&account, a.Store, a.L1)
@@ -371,7 +377,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 	if err != nil {
 		return
 	}
-	err = builder.AddOutput(payTo, invoiceAmount)
+	err = builder.AddOutput(payToAddress, invoiceAmount)
 	if err != nil {
 		return
 	}
@@ -383,11 +389,6 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 	if err != nil {
 		return
 	}
-
-	// TODO: submit the transaction to Core.
-	// TODO: store back the account (to save NextInternalKey; also call UpdatePoolAddresses)
-	// TODO: somehow reserve the UTXOs in the interim (prevent accidental double-spend)
-	//       until ChainTracker sees the Txn in a Block and calls MarkUTXOSpent.
 
 	// Create the Payment record up-front.
 	// Save changes to the Account (NextInternalKey) and address pool.
@@ -407,6 +408,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 		return
 	}
 	// Create the `payment` row with no txid or paid_height.
+	payTo := []PayTo{{Amount: invoiceAmount, PayTo: payToAddress}}
 	payment, err := tx.CreatePayment(account.Address, invoiceAmount, payTo)
 	if err != nil {
 		tx.Rollback()
@@ -449,7 +451,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (txid st
 		ForeignID: account.ForeignID,
 		AccountID: account.Address,
 		PayTo:     payTo,
-		Amount:    invoiceAmount,
+		Total:     invoiceAmount,
 		TxID:      txid,
 	}
 	a.bus.Send(PAYMENT_SENT, msg)

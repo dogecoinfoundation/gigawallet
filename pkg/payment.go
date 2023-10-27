@@ -1,12 +1,16 @@
 package giga
 
-import "time"
+import (
+	"time"
+
+	"github.com/shopspring/decimal"
+)
 
 type Payment struct {
 	ID               int64      // incrementing payment number, per account
 	AccountAddress   Address    // owner account (source of funds)
-	PayTo            Address    // a dogecoin address
-	Amount           CoinAmount // how much was paid
+	PayTo            []PayTo    // dogecoin addresses and amounts
+	Total            CoinAmount // total paid (excluding fees)
 	Created          time.Time  // when the payment was created
 	PaidTxID         string     // TXID of the Transaction that made the payment
 	PaidHeight       int64      // Block Height of the Transaction that made the payment
@@ -14,4 +18,12 @@ type Payment struct {
 	OnChainEvent     time.Time  // Time when the on-chain event was sent
 	ConfirmedEvent   time.Time  // Time when the confirmed event was sent
 	UnconfirmedEvent time.Time  // Time when the unconfirmed event was sent
+}
+
+// Pay an amount to an address
+// optional DeductFeePercent deducts a percentage of required fees from each PayTo (should sum to 100)
+type PayTo struct {
+	Amount           CoinAmount      `json:"amount"`
+	PayTo            Address         `json:"to"`
+	DeductFeePercent decimal.Decimal `json:"deduct_fee_percent"`
 }

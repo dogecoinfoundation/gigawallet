@@ -328,7 +328,7 @@ func (b BalanceKeeper) sendPaymentEvents(tx giga.StoreTransaction, acc *giga.Acc
 					ForeignID: acc.ForeignID,
 					AccountID: acc.Address,
 					PayTo:     pay.PayTo,
-					Amount:    pay.Amount,
+					Total:     pay.Total,
 					TxID:      pay.PaidTxID,
 				}
 				event := giga.PAYMENT_ON_CHAIN
@@ -351,7 +351,7 @@ func (b BalanceKeeper) sendPaymentEvents(tx giga.StoreTransaction, acc *giga.Acc
 					ForeignID: acc.ForeignID,
 					AccountID: acc.Address,
 					PayTo:     pay.PayTo,
-					Amount:    pay.Amount,
+					Total:     pay.Total,
 					TxID:      pay.PaidTxID,
 				}
 				event := giga.PAYMENT_CONFIRMED

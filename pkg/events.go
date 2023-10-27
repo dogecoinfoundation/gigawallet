@@ -83,8 +83,8 @@ type PaymentEvent struct {
 	PaymentID int64      `json:"payment_id"`
 	AccountID Address    `json:"account_id"`
 	ForeignID string     `json:"foreign_id"`
-	PayTo     Address    `json:"pay_to"`
-	Amount    CoinAmount `json:"amount"`
+	PayTo     []PayTo    `json:"pay_to"`
+	Total     CoinAmount `json:"total"`
 	TxID      string     `json:"txid"`
 }
 

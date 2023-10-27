@@ -97,7 +97,7 @@ type StoreTransaction interface {
 
 	// Store a 'payment' which represents a pay-out to another address from a gigawallet
 	// managed account.
-	CreatePayment(account Address, amount CoinAmount, payTo Address) (Payment, error)
+	CreatePayment(account Address, amount CoinAmount, payTo []PayTo) (Payment, error)
 
 	// GetPayment returns the Payment for the given ID
 	GetPayment(account Address, id int64) (Payment, error)
