@@ -154,7 +154,7 @@ func (l L1CoreRPC) Send(txnHex string) (txid string, err error) {
 	if len(txid) != 64 || !doge.IsValidHex(txid) {
 		return "", fmt.Errorf("sendrawtransaction: did not return txid")
 	}
-	hash := doge.HexEncode(doge.DoubleSha256(txn))
+	hash := doge.TxHashHex(txn)
 	if txid != hash {
 		log.Printf("[!] sendrawtransaction: did not return the expected txid: %s vs %s", txid, hash)
 	}
