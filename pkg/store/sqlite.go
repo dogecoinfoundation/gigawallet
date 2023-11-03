@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS payment (
 	account_address TEXT NOT NULL,
 	created DATETIME NOT NULL,
 	total NUMERIC(18,8) NOT NULL,
+	fee NUMERIC(18,8) NOT NULL,
 	paid_txid TEXT,
 	paid_height INTEGER,
 	confirmed_height INTEGER,
@@ -420,7 +421,7 @@ func (s SQLiteStore) listInvoicesCommon(tx Queryable, account giga.Address, curs
 }
 
 // These must match the row.Scan in scanPayment below.
-const payment_select_cols = "id, account_address, total, created, paid_txid, paid_height, confirmed_height, on_chain_event, confirmed_event, unconfirmed_event"
+const payment_select_cols = "id, account_address, total, fee, created, paid_txid, paid_height, confirmed_height, on_chain_event, confirmed_event, unconfirmed_event"
 
 func (s SQLiteStore) scanPayment(row Scannable, account giga.Address) (giga.Payment, error) {
 	var paid_txid sql.NullString
@@ -430,7 +431,7 @@ func (s SQLiteStore) scanPayment(row Scannable, account giga.Address) (giga.Paym
 	var confirmed_event sql.NullTime
 	var unconfirmed_event sql.NullTime
 	pay := giga.Payment{}
-	err := row.Scan(&pay.ID, &pay.AccountAddress, &pay.Total, &pay.Created, &paid_txid, &paid_height, &confirmed_height, &on_chain_event, &confirmed_event, &unconfirmed_event)
+	err := row.Scan(&pay.ID, &pay.AccountAddress, &pay.Total, &pay.Fee, &pay.Created, &paid_txid, &paid_height, &confirmed_height, &on_chain_event, &confirmed_event, &unconfirmed_event)
 	if err == sql.ErrNoRows {
 		return pay, giga.NewErr(giga.NotFound, "payment not found: %v", account)
 	}
@@ -632,7 +633,7 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, total giga.CoinAmount, payTo []giga.PayTo) (giga.Payment, error) {
+func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, payTo []giga.PayTo, total giga.CoinAmount, fee giga.CoinAmount) (giga.Payment, error) {
 	stmt, err := t.tx.Prepare("INSERT INTO output (payment_id, vout, pay_to, amount, deduct_fee_percent) VALUES ($1,$2,$3,$4,$5)")
 	if err != nil {
 		return giga.Payment{}, t.store.dbErr(err, "CreatePayment: preparing insert")
@@ -640,8 +641,8 @@ func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, total gi
 	defer stmt.Close()
 	now := time.Now()
 	row := t.tx.QueryRow(
-		"INSERT INTO payment (account_address, created, total) VALUES ($1,$2,$3) RETURNING ID",
-		accountAddr, now, total)
+		"INSERT INTO payment (account_address, created, total, fee) VALUES ($1,$2,$3,$4) RETURNING ID",
+		accountAddr, now, total, fee)
 	var id int64
 	err = row.Scan(&id)
 	if err != nil {
@@ -658,6 +659,7 @@ func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, total gi
 		AccountAddress: accountAddr,
 		PayTo:          payTo,
 		Total:          total,
+		Fee:            fee,
 		Created:        now,
 	}, nil
 }

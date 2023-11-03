@@ -9,15 +9,16 @@ var oneHundred = decimal.NewFromInt(100)
 // We may need to use addUTXOsUpToAmount during calculateFee (source, inputs, used)
 // and we need to generate the tx hex repeatedly (lib, acc, inputs, outputs, changeAddress)
 type txState struct {
-	lib           L1         // L1 for MakeTransaction
-	account       Account    // Account for private key to sign transactions
-	inputs        []UTXO     // accumulated tx inputs (from addUTXOsUpToAmount)
-	outputs       []NewTxOut // specified tx outputs (from payTo)
-	outputSum     CoinAmount // sum specified tx outputs (from payTo)
-	used          UTXOSet    // accumulated tx inputs (as a set)
-	source        UTXOSource // source of available UTXOs (cached on Account)
-	changeAddress Address    // change address for unspent portions of UTXOs
-	deductFee     bool       // payTo has DeductFeePercent specified
+	lib             L1           // L1 for MakeTransaction
+	account         Account      // Account for private key to sign transactions
+	inputs          []UTXO       // accumulated tx inputs (from addUTXOsUpToAmount)
+	outputs         []NewTxOut   // specified tx outputs (from payTo)
+	originalAmounts []CoinAmount // output amounts saved by addOutput (before fee deduction)
+	outputSum       CoinAmount   // sum specified tx outputs (from payTo)
+	used            UTXOSet      // accumulated tx inputs (as a set)
+	source          UTXOSource   // source of available UTXOs (cached on Account)
+	changeAddress   Address      // change address for unspent portions of UTXOs
+	deductFee       bool         // payTo has DeductFeePercent specified
 }
 
 func CreateTxn(payTo []PayTo, fixedFee CoinAmount, acc Account, source UTXOSource, lib L1) (NewTxn, error) {
@@ -72,17 +73,17 @@ func sumPayTo(payTo []PayTo) (CoinAmount, bool, error) {
 	for _, pay := range payTo {
 		total = total.Add(pay.Amount)
 		if pay.Amount.LessThan(TxnDustLimit) {
-			return ZeroCoins, false, NewErr(InvalidTxn, "amount is less than dust limit - transaction will be rejected: %s pay to %s", pay.Amount.String(), pay.PayTo)
+			return ZeroCoins, false, NewErr(InvalidTxn, "PayTo Amount cannot be less than the Dogecoin Dust Limit (%vƉ): The request was to pay %vƉ to %v", TxnDustLimit, pay.Amount, pay.PayTo)
 		}
 		if pay.DeductFeePercent.IsNegative() {
-			return ZeroCoins, false, NewErr(InvalidTxn, "deduct fee percent cannot be negative: %s pay to %s deduct %s", pay.Amount.String(), pay.PayTo, pay.DeductFeePercent.String())
+			return ZeroCoins, false, NewErr(InvalidTxn, "Deduct-Fee-Percent cannot be negative: The request was to deduct %v%% from a payment of %vƉ to %v", pay.DeductFeePercent, pay.Amount, pay.PayTo)
 		} else {
 			deduct = deduct.Add(pay.DeductFeePercent)
 		}
 	}
 	deductFee := !deduct.IsZero()
 	if deductFee && !deduct.Equals(oneHundred) {
-		return ZeroCoins, false, NewErr(InvalidTxn, "deduct fee percentages do not add up to 100")
+		return ZeroCoins, false, NewErr(InvalidTxn, "The requested Deduct-Fee-Percent values do not add up to 100")
 	}
 	return total, deductFee, nil
 }
@@ -113,14 +114,38 @@ func sumInputs(inputs []UTXO) CoinAmount {
 }
 
 func addOutput(payTo Address, amount CoinAmount, state *txState) error {
-	if payTo == "" || amount.LessThanOrEqual(ZeroCoins) {
-		return NewErr(InvalidTxn, "invalid transaction output")
+	if payTo == "" {
+		return NewErr(InvalidTxn, "Invalid transaction output: missing 'to' address in the request.")
+	}
+	if amount.LessThanOrEqual(ZeroCoins) {
+		return NewErr(InvalidTxn, "Invalid transaction output: the 'amount' is negative or zero.")
 	}
 	state.outputs = append(state.outputs, NewTxOut{
 		ScriptType:    ScriptTypeP2PKH,
 		Amount:        amount,
 		ScriptAddress: payTo,
 	})
+	// also save the amount in originalAmounts for fee calculations (calculateAndDeductFee)
+	state.originalAmounts = append(state.originalAmounts, amount)
+	return nil
+}
+
+// Adjust an output's amount by deducting a percentage of the fee.
+// This uses an array of originalAmounts captured by addOutput.
+func subtractFeeFromOutput(output int, fee decimal.Decimal, feePercent decimal.Decimal, state *txState) error {
+	feeAmount := fee.Mul(feePercent.Div(oneHundred))
+	if feeAmount.IsPositive() {
+		newAmount := state.originalAmounts[output].Sub(feeAmount)
+		if newAmount.LessThan(TxnDustLimit) {
+			// TODO: we may need to offer the option to drop outputs below the dust limit,
+			// i.e. skip the payment to a party whose fee contribution consumes the entire payment.
+			return NewErr(InvalidTxn,
+				"After subtracting the fee percentage, the PayTo Amount is less than the Dogecoin Dust Limit (%vƉ): The request was to pay %vƉ to %v subtracting %v%% of the fee %vƉ which leaves %vƉ remaining.",
+				TxnDustLimit, state.originalAmounts[output], state.outputs[output].ScriptAddress,
+				feePercent, fee, newAmount)
+		}
+		state.outputs[output].Amount = newAmount
+	}
 	return nil
 }
 
@@ -155,7 +180,7 @@ func calculateFee(fixedFee CoinAmount, state *txState) (NewTxn, error) {
 		// Override the minimum fee with the specified fee (if > 0)
 		if fixedFee.IsPositive() {
 			if fixedFee.LessThan(minFee) {
-				return NewTxn{}, NewErr(InvalidTxn, "specified fee %v is less than minimum fee %v", fixedFee, minFee)
+				return NewTxn{}, NewErr(InvalidTxn, "The explicit_fee specified (%vƉ) is less than minimum fee %v required by consensus rules for this transaction size", fixedFee, minFee)
 			}
 			minFee = fixedFee // override with the specified fee.
 		}
@@ -181,7 +206,7 @@ func calculateFee(fixedFee CoinAmount, state *txState) (NewTxn, error) {
 			numInputs = len(state.inputs)
 			attempt += 1
 			if attempt > 10 {
-				return NewTxn{}, NewErr(InvalidTxn, "too many attempts to find a stable fee")
+				return NewTxn{}, NewErr(InvalidTxn, "Too many attempts to find a stable fee (choosing a fee large enough to pay for the transaction size, and then making a transaction that includes that fee amount;) 10 attempts were made.")
 			}
 			continue
 		}
@@ -195,7 +220,6 @@ func calculateFee(fixedFee CoinAmount, state *txState) (NewTxn, error) {
 func calculateAndDeductFee(fixedFee CoinAmount, payTo []PayTo, state *txState) (NewTxn, error) {
 	fee := ZeroCoins
 	attempt := 0
-	outAmounts := copyOutputAmounts(payTo)
 	if fixedFee.IsPositive() { // if > 0
 		fee = fixedFee // start with the specified fee.
 	}
@@ -210,16 +234,18 @@ func calculateAndDeductFee(fixedFee CoinAmount, payTo []PayTo, state *txState) (
 		// Override the minimum fee with the specified fee (if > 0)
 		if fixedFee.IsPositive() {
 			if fixedFee.LessThan(minFee) {
-				return NewTxn{}, NewErr(InvalidTxn, "specified fee %v is less than minimum fee %v", fixedFee, minFee)
+				return NewTxn{}, NewErr(InvalidTxn, "The explicit_fee specified (%vƉ) is less than minimum fee %v required by consensus rules for this transaction size", fixedFee, minFee)
 			}
 			minFee = fixedFee // override with the specified fee.
 		}
-		// Deduct that fee from all outputs as per DeductFeePercent.
+		// Deduct that fee from all outputs as per DeductFeePercent (update state.outputs)
 		for i, pay := range payTo {
-			// ASSUMES 1:1 state.outputs and payTo (set up by caller)
-			state.outputs[i].Amount = outAmounts[i].Sub(minFee.Mul(pay.DeductFeePercent.Div(oneHundred)))
+			err := subtractFeeFromOutput(i, minFee, pay.DeductFeePercent, state)
+			if err != nil {
+				return NewTxn{}, err
+			}
 		}
-		// If the fee changed, it changes the "change" output (which can also change the size!)
+		// If the fee changed, it changes the "change" output (which can also change the transaction size!)
 		if !minFee.Equals(fee) {
 			// Prevent fee oscillation.
 			if minFee.LessThan(fee) {
@@ -232,18 +258,11 @@ func calculateAndDeductFee(fixedFee CoinAmount, payTo []PayTo, state *txState) (
 			fee = minFee
 			attempt += 1
 			if attempt > 10 {
-				return NewTxn{}, NewErr(InvalidTxn, "too many attempts to find a stable fee")
+				return NewTxn{}, NewErr(InvalidTxn, "Too many attempts to find a stable fee (choosing a fee large enough to pay for the transaction size, and then making a transaction that includes that fee amount;) 10 attempts were made.")
 			}
 			continue
 		}
 		// Done: current set of inputs covers the current fee.
 		return newTx, nil
 	}
-}
-
-func copyOutputAmounts(payTo []PayTo) (result []CoinAmount) {
-	for _, pay := range payTo {
-		result = append(result, pay.Amount)
-	}
-	return
 }
