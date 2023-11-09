@@ -10,7 +10,8 @@ type Payment struct {
 	ID               int64      // incrementing payment number, per account
 	AccountAddress   Address    // owner account (source of funds)
 	PayTo            []PayTo    // dogecoin addresses and amounts
-	Total            CoinAmount // total paid (excluding fees)
+	Total            CoinAmount // total paid to others (excluding fees and change)
+	Fee              CoinAmount // fee paid by the transaction
 	Created          time.Time  // when the payment was created
 	PaidTxID         string     // TXID of the Transaction that made the payment
 	PaidHeight       int64      // Block Height of the Transaction that made the payment

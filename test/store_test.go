@@ -106,7 +106,7 @@ func TestStore(t *testing.T) {
 				Account: addr1,
 				Created: time.Now(),
 				Items: []giga.Item{
-					giga.Item{
+					{
 						Type:     "item",
 						Name:     "foo",
 						Value:    pi,
@@ -149,7 +149,7 @@ func TestStore(t *testing.T) {
 					Account:  addr1,
 					Created:  time.Now(),
 					Items: []giga.Item{
-						giga.Item{
+						{
 							Type:     "item",
 							Name:     "foo",
 							Value:    pi,
@@ -188,6 +188,105 @@ func TestStore(t *testing.T) {
 			// should have 10 invoices
 			if len(invoices3) != 9 {
 				t.Fatal(n("Unexpected length of invoices"), len(invoices3))
+			}
+
+			// counter should be not 0
+			if counter3 != 0 {
+				t.Fatal(n("Counter should be non zero"), counter3)
+			}
+
+			err = tx.Commit()
+			if err != nil {
+				t.Fatal(n("commit transaction"), err)
+			}
+		})
+
+		t.Run(n("Payment"), func(t *testing.T) {
+			tx, err := store.Begin()
+			if err != nil {
+				t.Fatal(n("establish transaction"), err)
+			}
+
+			// Test Payment creation
+			payTo := []giga.PayTo{
+				{
+					Amount:           decimal.NewFromInt(100),
+					PayTo:            addr2,
+					DeductFeePercent: decimal.NewFromInt(100),
+				},
+			}
+			pay, err := tx.CreatePayment(addr1, payTo, decimal.NewFromInt(100), decimal.NewFromInt(1))
+			if err != nil {
+				t.Fatal(n("CreatePayment"), err)
+			}
+
+			// Test GetPayment
+			retrievedPayment, err := tx.GetPayment(addr1, pay.ID)
+			if err != nil {
+				t.Fatal(n("GetPayment"), err)
+			}
+			if retrievedPayment.AccountAddress != addr1 || len(retrievedPayment.PayTo) != 1 {
+				t.Fatal(n("GetPayment: wrong payment address or len"))
+			}
+			if !retrievedPayment.Total.Equals(decimal.NewFromInt(100)) || !retrievedPayment.Fee.Equals(decimal.NewFromInt(1)) {
+				t.Fatal(n("GetPayment: wrong payment values"))
+			}
+			paidTo := retrievedPayment.PayTo[0]
+			if !paidTo.Amount.Equals(decimal.NewFromInt(100)) || paidTo.PayTo != addr2 || !paidTo.DeductFeePercent.Equals(decimal.NewFromInt(100)) {
+				t.Fatal(n("GetPayment: wrong PayTo details"))
+			}
+
+			// Test ListPayments
+			payments, counter, err := tx.ListPayments(addr1, 0, 10)
+			if err != nil {
+				t.Fatal(n("ListInvoice"), err)
+			}
+
+			if len(payments) != 1 {
+				t.Fatal(n("Unexpected length of payments"), payments, counter)
+			}
+
+			// Create a bunch of payments to test pagination
+			for i := 0; i < 18; i++ {
+				// Test Payment creation
+				payTo := []giga.PayTo{
+					{
+						Amount:           decimal.NewFromInt(int64(i) + 1),
+						PayTo:            giga.Address(fmt.Sprintf("DHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%d", i)),
+						DeductFeePercent: decimal.Zero,
+					},
+				}
+				_, err := tx.CreatePayment(addr1, payTo, decimal.NewFromInt(100), decimal.NewFromInt(1))
+				if err != nil {
+					t.Fatal(n("CreatePayment"), err)
+				}
+			}
+
+			// iterate using the counter, should get next 10
+			payments2, counter2, err := tx.ListPayments(addr1, 0, 10)
+			if err != nil {
+				t.Fatal(n("ListPayments"), err)
+			}
+
+			// should have 10 payments
+			if len(payments2) != 10 {
+				t.Fatal(n("Unexpected length of payments"), payments2, counter2)
+			}
+
+			// counter should be not 0
+			if counter2 == 0 {
+				t.Fatal(n("Counter should be non zero"), counter)
+			}
+
+			// iterate using the counter, should get next 9
+			payments3, counter3, err := tx.ListPayments(addr1, counter2, 10)
+			if err != nil {
+				t.Fatal(n("ListPayments"), err)
+			}
+
+			// should have 9 payments
+			if len(payments3) != 9 {
+				t.Fatal(n("Unexpected length of payments"), len(payments3))
 			}
 
 			// counter should be not 0

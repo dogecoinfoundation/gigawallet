@@ -269,8 +269,8 @@ func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo 
 	if err != nil {
 		return
 	}
-	total := newTxn.TotalOut
-	fee := newTxn.FeeAmount
+	total := newTxn.TotalOut // total paid to addresses (excludes fee)
+	fee := newTxn.FeeAmount  // fee paid by the transaction
 	txHex := newTxn.TxnHex
 
 	// Create the Payment record up-front.
@@ -291,7 +291,7 @@ func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo 
 		return
 	}
 	// Create the `payment` row with no txid or paid_height.
-	payment, err := dbtx.CreatePayment(account.Address, total, payTo)
+	payment, err := dbtx.CreatePayment(account.Address, payTo, total, fee)
 	if err != nil {
 		dbtx.Rollback()
 		return
@@ -384,7 +384,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 		return
 	}
 	// Create the `payment` row with no txid or paid_height.
-	payment, err := tx.CreatePayment(account.Address, invoiceAmount, payTo)
+	payment, err := tx.CreatePayment(account.Address, payTo, invoiceAmount, fee)
 	if err != nil {
 		tx.Rollback()
 		return
