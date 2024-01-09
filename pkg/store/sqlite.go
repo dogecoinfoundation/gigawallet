@@ -889,10 +889,9 @@ func (t SQLiteStoreTransaction) MarkInvoiceEventSent(invoiceID giga.Address, eve
 
 // Prepare query for MarkInvoicesPaid.
 // Summing all UTXOs that payTo the Invoice Address that have been confirmed (spendable_height is non-null)
-// ConfirmUTXOs sets spendable_height when the UTXO has N confirmations, where N comes from the Invoice!
 var sum_utxos_for_invoice = "SELECT SUM(value) FROM utxo WHERE script_address=i.invoice_address AND spendable_height IS NOT NULL"
-var invoices_above_total = fmt.Sprintf("SELECT invoice_address FROM invoice i WHERE (%s) >= total", sum_utxos_for_invoice)
-var mark_invoices_paid = fmt.Sprintf("UPDATE invoice SET paid_height=$1, block_id=$2 WHERE invoice_address IN (%s) RETURNING account_address", invoices_above_total)
+var unpaid_invoices_above_total = fmt.Sprintf("SELECT invoice_address FROM invoice i WHERE paid_height IS NULL AND (%s) >= total", sum_utxos_for_invoice)
+var mark_invoices_paid = fmt.Sprintf("UPDATE invoice SET paid_height=$1, block_id=$2 WHERE invoice_address IN (%s) RETURNING account_address", unpaid_invoices_above_total)
 
 // Mark all invoices paid that have corresponding confirmed UTXOs [via ConfirmUTXOs]
 // that sum up to the invoice total, storing the given block-height. Returns the IDs
