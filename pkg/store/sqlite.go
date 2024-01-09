@@ -502,15 +502,17 @@ func (s SQLiteStore) listPaymentsCommon(tx Queryable, account giga.Address, curs
 		if err != nil {
 			return nil, 0, err // already s.dbErr
 		}
-		pay.PayTo, err = s.getPaymentOutputs(tx, pay.ID)
-		if err != nil {
-			return nil, 0, err // already s.dbErr
-		}
 		items = append(items, pay)
 		next_cursor = pay.ID + 1
 	}
 	if err = rows.Err(); err != nil { // docs say this check is required!
 		return nil, 0, s.dbErr(err, "ListPayments: querying invoices")
+	}
+	for _, pay := range items {
+		pay.PayTo, err = s.getPaymentOutputs(tx, pay.ID)
+		if err != nil {
+			return nil, 0, err // already s.dbErr
+		}
 	}
 	if len(items) < limit {
 		next_cursor = 0 // meaning "end of query results"

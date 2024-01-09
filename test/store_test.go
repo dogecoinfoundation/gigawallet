@@ -22,6 +22,7 @@ func TestStore(t *testing.T) {
 	stores := map[string]giga.Store{}
 
 	// set up the sqlite store
+	// :memory: or postgres://postgres:@localhost/testdb?sslmode=disable
 	s1, err := sqlite.NewSQLiteStore(":memory:")
 	if err != nil {
 		t.Fatal("Couldn't open sqlite DB")
