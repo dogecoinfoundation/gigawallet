@@ -154,6 +154,9 @@ func subtractFeeFromOutput(output int, fee decimal.Decimal, feePercent decimal.D
 func feeForSize(txHex string) CoinAmount {
 	numBytes := decimal.NewFromInt(int64(len(txHex) / 2))
 	fee := TxnFeePerByte.Mul(numBytes)
+	if fee.LessThan(TxnMinFee) {
+		fee = TxnMinFee
+	}
 	return fee
 }
 
