@@ -103,17 +103,17 @@ func TestWebAPI(t *testing.T) {
 	}
 
 	// Pay to Multiple Addresses with percentage split
-	request(t, admin, "/account/Pepper/pay", `{"pay":[{"amount":"2","to":"`+to_1+`","deduct_fee_percent":"80"},{"amount":"1","to":"`+to_2+`","deduct_fee_percent":"20"}]}`, &payTo)
+	request(t, admin, "/account/Pepper/pay", `{"pay":[{"amount":"2","to":"`+to_1+`","deduct_fee_percent":"80"},{"amount":"1","to":"`+to_2+`","deduct_fee_percent":"20"}],"explicit_fee":"0.1"}`, &payTo)
 	if payTo.TxId == "" {
 		t.Fatalf("Pay To Address 3: missing txid")
 	}
 	if !payTo.Total.Equals(decimal.RequireFromString("3")) {
 		t.Fatalf("Pay To Address 3: wrong total: %v", payTo.Total)
 	}
-	if !payTo.Fee.GreaterThanOrEqual(decimal.RequireFromString("0.00259")) {
+	if !payTo.Fee.Equals(decimal.RequireFromString("0.1")) {
 		t.Fatalf("Pay To Address 3: wrong fee: %v", payTo.Fee)
 	}
-	if !payTo.Paid.GreaterThanOrEqual(decimal.RequireFromString("2.9974")) {
+	if !payTo.Paid.Equals(decimal.RequireFromString("2.9")) {
 		t.Fatalf("Pay To Address 3: wrong paid: %v", payTo.Paid)
 	}
 }

@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -173,12 +174,12 @@ type estimatesmartfeeResponse struct {
 
 func (l L1CoreRPC) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
 	var res estimatesmartfeeResponse
-	err = l.request("estimatesmartfee", []any{confirmTarget, "ECONOMICAL"}, &res)
+	err = l.request("estimatesmartfee", []any{confirmTarget}, &res)
 	if len(res.Errors) > 0 {
-		return giga.ZeroCoins, fmt.Errorf("estimatesmartfee: %s", res.Errors[0].Str)
+		return giga.ZeroCoins, errors.New(res.Errors[0].Str)
 	}
 	if res.FeeRate < 0 {
-		return giga.ZeroCoins, fmt.Errorf("estimatesmartfee: no fee-rate available")
+		return giga.ZeroCoins, errors.New("fee-rate is negative")
 	}
 	feePerKB = decimal.NewFromInt(res.FeeRate)
 	return

@@ -62,5 +62,5 @@ func (l L1Mock) Send(txnHex string) (txid string, err error) {
 }
 
 func (l L1Mock) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
-	return decimal.NewFromString("1.0")
+	return decimal.NewFromString("0.67891013") // example from Core
 }

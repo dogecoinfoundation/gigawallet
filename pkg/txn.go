@@ -1,10 +1,13 @@
 package giga
 
 import (
+	"log"
+
 	"github.com/shopspring/decimal"
 )
 
 var oneHundred = decimal.NewFromInt(100)
+var oneThousand = decimal.NewFromInt(1000)
 
 // We may need to use addUTXOsUpToAmount during calculateFee (source, inputs, used)
 // and we need to generate the tx hex repeatedly (lib, acc, inputs, outputs, changeAddress)
@@ -21,7 +24,7 @@ type txState struct {
 	deductFee       bool         // payTo has DeductFeePercent specified
 }
 
-func CreateTxn(payTo []PayTo, fixedFee CoinAmount, acc Account, source UTXOSource, lib L1) (NewTxn, error) {
+func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Account, source UTXOSource, lib L1) (NewTxn, error) {
 	outputSum, deductFee, err := sumPayTo(payTo)
 	if err != nil {
 		return NewTxn{}, err
@@ -52,19 +55,22 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, acc Account, source UTXOSourc
 			return NewTxn{}, err
 		}
 	}
+
+	var fee CoinAmount
 	if deductFee {
-		newTx, err := calculateAndDeductFee(fixedFee, payTo, state)
+		fee, err = calculateAndDeductFee(fixedFee, maxFee, payTo, state)
 		if err != nil {
 			return NewTxn{}, err
 		}
-		return newTx, nil
 	} else {
-		newTx, err := calculateFee(fixedFee, state)
+		fee, err = calculateFee(fixedFee, maxFee, state)
 		if err != nil {
 			return NewTxn{}, err
 		}
-		return newTx, nil
 	}
+
+	// Build the transaction with the current inputs and fee.
+	return state.lib.MakeTransaction(state.inputs, state.outputs, fee, state.changeAddress, state.account.Privkey)
 }
 
 func sumPayTo(payTo []PayTo) (CoinAmount, bool, error) {
@@ -149,123 +155,80 @@ func subtractFeeFromOutput(output int, fee decimal.Decimal, feePercent decimal.D
 	return nil
 }
 
-// Calculate the minimum Fee payable to mine the transaction.
-// The fee is based on the transacion size (i.e. number of inputs and outputs)
-func feeForSize(txHex string) CoinAmount {
-	numBytes := decimal.NewFromInt(int64(len(txHex) / 2))
-	fee := TxnFeePerByte.Mul(numBytes)
-	if fee.LessThan(TxnMinFee) {
-		fee = TxnMinFee
-	}
-	return fee
+// Calculate the size of a P2PKH transaction.
+func sizeOfP2PKH(nIn int, nOut int) int64 {
+	// inspired by https://bitcoinops.org/en/tools/calc-size/
+	// max size for up to 252 inputs and outputs
+	return 10 + int64(nIn)*148 + int64(nOut)*34
 }
 
-// Calculate the Fee based on the size of the final signed transaction.
-// Make sure the UTXO Inputs cover that fee as well as all Outputs,
-// and add new UTXOs to cover the fee if necessary (if this happens,
-// the transaction size changes and we need to loop and go again.)
-func calculateFee(fixedFee CoinAmount, state *txState) (NewTxn, error) {
-	// Iterate until b.txn includes the final (stable) fee calculation.
-	fee := ZeroCoins
-	numInputs := len(state.inputs)
-	attempt := 0
-	if fixedFee.IsPositive() { // if > 0
-		fee = fixedFee // start with the specified fee.
+// Get fee estimate from Core `estimatesmartfee` if available,
+// otherwise use the base consensus TxnFeePerByte.
+func estimateFeePerByte(lib L1) CoinAmount {
+	feePerKB, err := lib.EstimateFee(6)
+	if err != nil {
+		log.Printf("feeForP2PKH: did not use estimatesmartfee due to error: %s", err.Error())
+	} else {
+		perByte := feePerKB.Div(oneThousand)
+		return decimal.Max(perByte, TxnFeePerByte)
 	}
+	return TxnFeePerByte
+}
+
+// Calculate fee based on transacion size, within fee limits.
+func feeForTxn(sizeBytes int64, feePerByte CoinAmount, fixedFee CoinAmount, maxFee CoinAmount) CoinAmount {
+	if fixedFee.IsPositive() {
+		return fixedFee // override with specified fee
+	}
+	feeForSize := feePerByte.Mul(decimal.NewFromInt(sizeBytes))
+	feeForSize = decimal.Max(feeForSize, TxnRecommendedMinFee) // at least minFee
+	return decimal.Min(feeForSize, maxFee)                     // limit to maxFee
+}
+
+// Calculate the Fee based on the size of the transaction.
+// Make sure the UTXO Inputs cover that fee as well as all Outputs:
+// add new UTXOs to cover the fee if necessary (and loop.)
+func calculateFee(fixedFee CoinAmount, maxFee CoinAmount, state *txState) (CoinAmount, error) {
+	attempt := 0
+	feePerByte := estimateFeePerByte(state.lib)
 	for {
-		// Build the transaction with the current inputs and fee.
-		newTx, err := state.lib.MakeTransaction(state.inputs, state.outputs, fee, state.changeAddress, state.account.Privkey)
-		if err != nil {
-			return NewTxn{}, err
-		}
-		// Calculate the fee required for the new transaction size.
-		minFee := feeForSize(newTx.TxnHex)
-		// Override the minimum fee with the specified fee (if > 0)
-		if fixedFee.IsPositive() {
-			if fixedFee.LessThan(minFee) {
-				return NewTxn{}, NewErr(InvalidTxn, "The explicit_fee specified (%vƉ) is less than minimum fee %v required by consensus rules for this transaction size", fixedFee, minFee)
-			}
-			minFee = fixedFee // override with the specified fee.
-		}
-		// Calculate the total required to cover that fee.
-		newTotal := state.outputSum.Add(minFee)
+		// Calculate the fee required for the transaction size.
+		sizeBytes := sizeOfP2PKH(len(state.inputs), len(state.outputs)+1) // +1 for Change output
+		fee := feeForTxn(sizeBytes, feePerByte, fixedFee, maxFee)
+		// Calculate the input total required to cover that fee.
+		newTotal := state.outputSum.Add(fee)
 		// Add new transaction inputs if necessary to cover the fee.
-		err = addUTXOsUpToAmount(newTotal, state)
+		prevInputs := len(state.inputs)
+		err := addUTXOsUpToAmount(newTotal, state)
 		if err != nil {
-			return NewTxn{}, err
+			return ZeroCoins, err
 		}
 		// If we added an input, it changes the size of the transaction.
-		// If the fee changed, it changes the "change" output (which can also change the size!)
-		if len(state.inputs) != numInputs || !minFee.Equals(fee) {
-			// Prevent fee oscillation.
-			if minFee.LessThan(fee) && len(state.inputs) == numInputs {
-				// Min fee got smaller (because the transction got slightly smaller) and the
-				// size will often oscillate if we change the fee again; go with the current
-				// fee and the current encoded transaction (which includes that fee)
-				return newTx, nil
-			}
-			// Loop again to rebuild the transaction with the new minFee.
-			fee = minFee
-			numInputs = len(state.inputs)
+		if len(state.inputs) > prevInputs {
 			attempt += 1
 			if attempt > 10 {
-				return NewTxn{}, NewErr(InvalidTxn, "Too many attempts to find a stable fee (choosing a fee large enough to pay for the transaction size, and then making a transaction that includes that fee amount;) 10 attempts were made.")
+				return ZeroCoins, NewErr(InvalidTxn, "Too many attempts to find a stable fee (adding inputs to pay for the transaction fee;) 10 attempts were made.")
 			}
 			continue
 		}
 		// Done: current set of inputs covers the current fee.
-		return newTx, nil
+		return fee, nil
 	}
 }
 
-// Calculate the Fee based on the size of the final signed transaction.
-// Then, subtract the fee from the outputs acccording to PayTo.DeductFeePercent
-func calculateAndDeductFee(fixedFee CoinAmount, payTo []PayTo, state *txState) (NewTxn, error) {
-	fee := ZeroCoins
-	attempt := 0
-	if fixedFee.IsPositive() { // if > 0
-		fee = fixedFee // start with the specified fee.
-	}
-	for {
-		// Build the transaction with the current inputs and fee.
-		newTx, err := state.lib.MakeTransaction(state.inputs, state.outputs, fee, state.changeAddress, state.account.Privkey)
+// Calculate the Fee based on the transaction size, then
+// subtract the fee from the outputs acccording to DeductFeePercent
+func calculateAndDeductFee(fixedFee CoinAmount, maxFee CoinAmount, payTo []PayTo, state *txState) (CoinAmount, error) {
+	// Calculate the fee required for the transaction size.
+	feePerByte := estimateFeePerByte(state.lib)
+	sizeBytes := sizeOfP2PKH(len(state.inputs), len(state.outputs)+1) // +1 for Change output
+	fee := feeForTxn(sizeBytes, feePerByte, fixedFee, maxFee)
+	// Deduct the fee from all outputs as per DeductFeePercent (update state.outputs)
+	for i, pay := range payTo {
+		err := subtractFeeFromOutput(i, fee, pay.DeductFeePercent, state)
 		if err != nil {
-			return NewTxn{}, err
+			return ZeroCoins, err
 		}
-		// Calculate the fee required for the new transaction size.
-		minFee := feeForSize(newTx.TxnHex)
-		// Override the minimum fee with the specified fee (if > 0)
-		if fixedFee.IsPositive() {
-			if fixedFee.LessThan(minFee) {
-				return NewTxn{}, NewErr(InvalidTxn, "The explicit_fee specified (%vƉ) is less than minimum fee %v required by consensus rules for this transaction size", fixedFee, minFee)
-			}
-			minFee = fixedFee // override with the specified fee.
-		}
-		// Deduct that fee from all outputs as per DeductFeePercent (update state.outputs)
-		for i, pay := range payTo {
-			err := subtractFeeFromOutput(i, minFee, pay.DeductFeePercent, state)
-			if err != nil {
-				return NewTxn{}, err
-			}
-		}
-		// If the fee changed, it changes the "change" output (which can also change the transaction size!)
-		if !minFee.Equals(fee) {
-			// Prevent fee oscillation.
-			if minFee.LessThan(fee) {
-				// Min fee got smaller (because the transction got slightly smaller) and the
-				// size will often oscillate if we change the fee again; go with the current
-				// fee and the current encoded transaction (which includes that fee)
-				return newTx, nil
-			}
-			// Loop again to rebuild the transaction with the new minFee.
-			fee = minFee
-			attempt += 1
-			if attempt > 10 {
-				return NewTxn{}, NewErr(InvalidTxn, "Too many attempts to find a stable fee (choosing a fee large enough to pay for the transaction size, and then making a transaction that includes that fee amount;) 10 attempts were made.")
-			}
-			continue
-		}
-		// Done: current set of inputs covers the current fee.
-		return newTx, nil
 	}
+	return fee, nil
 }

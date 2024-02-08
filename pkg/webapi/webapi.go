@@ -334,7 +334,8 @@ type ListInvoicesPublicResponse struct {
 type PayToAddressRequest struct {
 	Amount      giga.CoinAmount `json:"amount"`
 	PayTo       giga.Address    `json:"to"`
-	ExplicitFee giga.CoinAmount `json:"explicit_fee"` // optional fee amount
+	ExplicitFee giga.CoinAmount `json:"explicit_fee"` // optional fee override (missing or zero: calculate the fee)
+	MaxFee      giga.CoinAmount `json:"max_fee"`      // optional maximum fee (missing or zero: maximum is 1 DOGE)
 	Pay         []giga.PayTo    `json:"pay"`          // either Pay, or Amount and PayTo.
 }
 
@@ -357,10 +358,10 @@ func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httproute
 		return
 	}
 	if len(o.Pay) == 0 {
-		// treat the request as an array of one item.
+		// treat 'PayTo' request as an array of one item.
 		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
 	}
-	res, err := t.api.SendFundsToAddress(foreignID, o.ExplicitFee, o.Pay)
+	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee)
 	if err != nil {
 		sendError(w, "SendFundsToAddress", err)
 		return
