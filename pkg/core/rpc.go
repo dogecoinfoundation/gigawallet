@@ -10,6 +10,7 @@ import (
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
+	"github.com/shopspring/decimal"
 )
 
 // interface guard ensures L1CoreRPC implements giga.L1
@@ -158,5 +159,27 @@ func (l L1CoreRPC) Send(txnHex string) (txid string, err error) {
 	if txid != hash {
 		log.Printf("[!] sendrawtransaction: did not return the expected txid: %s vs %s", txid, hash)
 	}
+	return
+}
+
+type estimatesmartfeeError struct {
+	Str string `json:"str"`
+}
+type estimatesmartfeeResponse struct {
+	FeeRate int64                   `json:"feerate"`
+	Blocks  int64                   `json:"blocks"`
+	Errors  []estimatesmartfeeError `json:"errors"`
+}
+
+func (l L1CoreRPC) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
+	var res estimatesmartfeeResponse
+	err = l.request("estimatesmartfee", []any{confirmTarget, "ECONOMICAL"}, &res)
+	if len(res.Errors) > 0 {
+		return giga.ZeroCoins, fmt.Errorf("estimatesmartfee: %s", res.Errors[0].Str)
+	}
+	if res.FeeRate < 0 {
+		return giga.ZeroCoins, fmt.Errorf("estimatesmartfee: no fee-rate available")
+	}
+	feePerKB = decimal.NewFromInt(res.FeeRate)
 	return
 }

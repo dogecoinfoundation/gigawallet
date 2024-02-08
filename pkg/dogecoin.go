@@ -26,6 +26,7 @@ type L1 interface {
 	GetBlockCount() (int64, error)
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(txnHex string) (txid string, err error)
+	EstimateFee(confirmTarget int) (feePerKB CoinAmount, err error)
 	//SignMessage([]byte, Privkey) (string, error)
 }
 
