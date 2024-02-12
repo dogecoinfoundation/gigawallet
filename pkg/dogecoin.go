@@ -1,6 +1,7 @@
 package giga
 
 import (
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 	"github.com/shopspring/decimal"
 )
 
@@ -30,9 +31,10 @@ type L1 interface {
 	//SignMessage([]byte, Privkey) (string, error)
 }
 
-type Address string // Dogecoin address (base-58 public key hash aka PKH)
-type Privkey string // Extended Private Key for HD Wallet
+type Address = doge.Address // Dogecoin address (base-58 public key hash aka PKH)
+type Privkey string         // Extended Private Key for HD Wallet
 type CoinAmount = decimal.Decimal
+type ScriptType = doge.ScriptType
 
 var ZeroCoins = decimal.NewFromInt(0)                           // 0 DOGE
 var OneCoin = decimal.NewFromInt(1)                             // 1.0 DOGE
@@ -58,45 +60,29 @@ type NewTxOut struct {
 	ScriptAddress Address    // Dogecoin P2PKH Address to receive the funds
 }
 
-// Dogecoin Script Types enum.
-// Inferred from ScriptPubKey scripts by pattern-matching the code (script templates)
-type ScriptType string
-
-// ScriptType constants - stored in gigawallet database!
-const (
-	ScriptTypeP2PK     ScriptType = "p2pk"     // TX_PUBKEY (in Core)
-	ScriptTypeP2PKH    ScriptType = "p2pkh"    // TX_PUBKEYHASH
-	ScriptTypeP2PKHW   ScriptType = "p2wpkh"   // TX_WITNESS_V0_KEYHASH
-	ScriptTypeP2SH     ScriptType = "p2sh"     // TX_SCRIPTHASH
-	ScriptTypeP2SHW    ScriptType = "p2wsh"    // TX_WITNESS_V0_SCRIPTHASH
-	ScriptTypeMultiSig ScriptType = "multisig" // TX_MULTISIG
-	ScriptTypeNullData ScriptType = "nulldata" // TX_NULL_DATA
-	ScriptTypeCustom   ScriptType = "custom"   // TX_NONSTANDARD
-)
-
 // Decode the 'Type' from Core RPC to our ScriptType enum.
 // Core RPC uses completely different names, just to confuse everyone.
 // See: standard.cpp line 24 `GetTxnOutputType` in Core.
 func DecodeCoreRPCScriptType(coreRpcType string) ScriptType {
 	switch coreRpcType {
 	case "nonstandard":
-		return ScriptTypeCustom
+		return doge.ScriptTypeCustom
 	case "pubkey":
-		return ScriptTypeP2PK
+		return doge.ScriptTypeP2PK
 	case "pubkeyhash":
-		return ScriptTypeP2PKH
+		return doge.ScriptTypeP2PKH
 	case "scripthash":
-		return ScriptTypeP2SH
+		return doge.ScriptTypeP2SH
 	case "multisig":
-		return ScriptTypeMultiSig
+		return doge.ScriptTypeMultiSig
 	case "nulldata":
-		return ScriptTypeNullData
+		return doge.ScriptTypeNullData
 	case "witness_v0_keyhash":
-		return ScriptTypeP2PKHW
+		return doge.ScriptTypeP2PKHW
 	case "witness_v0_scripthash":
-		return ScriptTypeP2SHW
+		return doge.ScriptTypeP2SHW
 	default:
-		return ScriptTypeCustom
+		return doge.ScriptTypeCustom
 	}
 }
 

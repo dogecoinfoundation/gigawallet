@@ -147,7 +147,7 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 		if err != nil {
 			return giga.NewTxn{}, err
 		}
-		if p2pkh_address != string(utxo.ScriptAddress) {
+		if p2pkh_address != utxo.ScriptAddress {
 			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "HD Private Key doesn't match UTXO ScriptAddress: %v", utxo)
 		}
 

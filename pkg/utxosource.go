@@ -1,5 +1,7 @@
 package giga
 
+import "github.com/dogecoinfoundation/gigawallet/pkg/doge"
+
 // Store UTXO Source used to find UTXOs to spend.
 type StoreUTXOSource struct {
 	store     Store
@@ -45,7 +47,7 @@ func (s *StoreUTXOSource) fetchMoreUTXOs() error {
 func (s *StoreUTXOSource) NextUnspentUTXO(taken UTXOSet) (UTXO, error) {
 	for {
 		for _, utxo := range s.unspent {
-			if utxo.ScriptType == ScriptTypeP2PKH {
+			if utxo.ScriptType == doge.ScriptTypeP2PKH {
 				// Exclude UTXOs that have already been taken from the source.
 				if !taken.Includes(utxo.TxID, utxo.VOut) {
 					return utxo, nil // found matching UTXO.
@@ -66,7 +68,7 @@ func (s *StoreUTXOSource) NextUnspentUTXO(taken UTXOSet) (UTXO, error) {
 func (s *StoreUTXOSource) FindUTXOLargerThan(amount CoinAmount, taken UTXOSet) (UTXO, error) {
 	for {
 		for _, utxo := range s.unspent {
-			if utxo.ScriptType == ScriptTypeP2PKH {
+			if utxo.ScriptType == doge.ScriptTypeP2PKH {
 				// We can (presumably) spend this UTXO with one of our private keys,
 				// otherwise it wouldn't be in our account.
 				if utxo.Value.GreaterThanOrEqual(amount) {

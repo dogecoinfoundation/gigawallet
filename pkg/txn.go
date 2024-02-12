@@ -3,6 +3,7 @@ package giga
 import (
 	"log"
 
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 	"github.com/shopspring/decimal"
 )
 
@@ -127,7 +128,7 @@ func addOutput(payTo Address, amount CoinAmount, state *txState) error {
 		return NewErr(InvalidTxn, "Invalid transaction output: the 'amount' is negative or zero.")
 	}
 	state.outputs = append(state.outputs, NewTxOut{
-		ScriptType:    ScriptTypeP2PKH,
+		ScriptType:    doge.ScriptTypeP2PKH,
 		Amount:        amount,
 		ScriptAddress: payTo,
 	})

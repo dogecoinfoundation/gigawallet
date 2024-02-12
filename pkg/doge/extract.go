@@ -21,12 +21,12 @@ func ExtractECPrivKeyFromBip32(ext_key_wif string) (ec_privkey_wif string, err e
 	return EncodeECPrivKeyWIF(priv, chain), nil
 }
 
-func GenerateP2PKHFromECPrivKeyWIF(ec_priv_key_wif string) (p2pkh string, err error) {
+func GenerateP2PKHFromECPrivKeyWIF(ec_priv_key_wif string) (p2pkh Address, err error) {
 	ec_pk, chain, err := DecodeECPrivKeyWIF(ec_priv_key_wif, nil)
 	if err != nil {
 		return "", err
 	}
 	ec_pub := ECPubKeyFromECPrivKey(ec_pk)
 	clear(ec_pk) // clear key for security.
-	return PubKeyToP2PKH(ec_pub, chain), nil
+	return PubKeyToAddress(ec_pub, chain), nil
 }
