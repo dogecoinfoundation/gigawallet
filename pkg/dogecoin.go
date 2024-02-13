@@ -21,6 +21,7 @@ type L1 interface {
 	MakeTransaction(inputs []UTXO, outputs []NewTxOut, fee CoinAmount, change Address, private_key Privkey) (NewTxn, error)
 	DecodeTransaction(txnHex string) (RawTxn, error)
 	GetBlock(blockHash string) (RpcBlock, error)
+	GetBlockHex(blockHash string) (string, error)
 	GetBlockHeader(blockHash string) (RpcBlockHeader, error)
 	GetBlockHash(height int64) (string, error)
 	GetBestBlockHash() (string, error)

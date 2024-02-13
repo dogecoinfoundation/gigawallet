@@ -120,6 +120,12 @@ func (l L1CoreRPC) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
 	return
 }
 
+func (l L1CoreRPC) GetBlockHex(blockHash string) (hex string, err error) {
+	decode := false // to get back HEX
+	err = l.request("getblock", []any{blockHash, decode}, &hex)
+	return
+}
+
 func (l L1CoreRPC) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err error) {
 	decode := true // to get back JSON rather than HEX
 	err = l.request("getblockheader", []any{blockHash, decode}, &txn)
