@@ -28,5 +28,5 @@ func GenerateP2PKHFromECPrivKeyWIF(ec_priv_key_wif string) (p2pkh Address, err e
 	}
 	ec_pub := ECPubKeyFromECPrivKey(ec_pk)
 	clear(ec_pk) // clear key for security.
-	return PubKeyToAddress(ec_pub, chain), nil
+	return PubKeyToAddress(ec_pub, chain.p2pkh_address_prefix)
 }
