@@ -257,15 +257,18 @@ type SendFundsResult struct {
 	Fee   CoinAmount `json:"fee"`
 }
 
-func (a API) SendFundsToAddress(foreignID string, explicitFee CoinAmount, payTo []PayTo) (res SendFundsResult, err error) {
+func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee CoinAmount, maxFee CoinAmount) (res SendFundsResult, err error) {
 	account, err := a.Store.GetAccount(foreignID)
 	if err != nil {
 		return
 	}
+	if !maxFee.IsPositive() {
+		maxFee = TxnRecommendedMaxFee // default maximum fee
+	}
 
 	// Create the Dogecoin Transaction
 	source := NewUTXOSource(a.Store, account.Address)
-	newTxn, err := CreateTxn(payTo, explicitFee, account, source, a.L1)
+	newTxn, err := CreateTxn(payTo, explicitFee, maxFee, account, source, a.L1)
 	if err != nil {
 		return
 	}
@@ -359,7 +362,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 	// Make a Doge Txn to pay `invoiceAmount` from `account` to `payTo`
 	payTo := []PayTo{{PayTo: payToAddress, Amount: invoiceAmount}}
 	source := NewUTXOSource(a.Store, account.Address)
-	newTxn, err := CreateTxn(payTo, ZeroCoins, account, source, a.L1)
+	newTxn, err := CreateTxn(payTo, ZeroCoins, TxnRecommendedMaxFee, account, source, a.L1)
 	if err != nil {
 		return
 	}

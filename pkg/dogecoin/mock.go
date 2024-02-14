@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+	"github.com/shopspring/decimal"
 )
 
 // interface guard ensures L1Mock implements giga.L1
@@ -58,4 +59,8 @@ func (l L1Mock) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 
 func (l L1Mock) Send(txnHex string) (txid string, err error) {
 	return "FEED000000000000000000000000000000000000000000000000000000000000", nil
+}
+
+func (l L1Mock) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
+	return decimal.NewFromString("0.67891013") // example from Core
 }

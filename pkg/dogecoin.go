@@ -26,6 +26,7 @@ type L1 interface {
 	GetBlockCount() (int64, error)
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(txnHex string) (txid string, err error)
+	EstimateFee(confirmTarget int) (feePerKB CoinAmount, err error)
 	//SignMessage([]byte, Privkey) (string, error)
 }
 
@@ -33,11 +34,13 @@ type Address string // Dogecoin address (base-58 public key hash aka PKH)
 type Privkey string // Extended Private Key for HD Wallet
 type CoinAmount = decimal.Decimal
 
-var ZeroCoins = decimal.NewFromInt(0)                         // 0 DOGE
-var OneCoin = decimal.NewFromInt(1)                           // 1.0 DOGE
-var TxnFeePerKB = OneCoin.Div(decimal.NewFromInt(100))        // 0.01 DOGE
-var TxnFeePerByte = TxnFeePerKB.Div(decimal.NewFromInt(1000)) // since Core version 1.14.5
-var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))       // 0.01 DOGE
+var ZeroCoins = decimal.NewFromInt(0)                           // 0 DOGE
+var OneCoin = decimal.NewFromInt(1)                             // 1.0 DOGE
+var TxnRecommendedMinFee = OneCoin.Div(decimal.NewFromInt(100)) // 0.01 DOGE (RECOMMENDED_MIN_TX_FEE in Core)
+var TxnRecommendedMaxFee = OneCoin                              // 1 DOGE
+var TxnFeePerKB = OneCoin.Div(decimal.NewFromInt(100))          // 0.01 DOGE
+var TxnFeePerByte = TxnFeePerKB.Div(decimal.NewFromInt(1000))   // since Core version 1.14.5
+var TxnDustLimit = OneCoin.Div(decimal.NewFromInt(100))         // 0.01 DOGE
 
 // A new transaction (hex) from libdogecoin.
 type NewTxn struct {

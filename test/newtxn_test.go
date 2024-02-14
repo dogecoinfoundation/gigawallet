@@ -36,7 +36,7 @@ func TestNewTxn(t *testing.T) {
 			{Amount: dc("1"), PayTo: to_2, DeductFeePercent: dc("20")},
 		}
 		source := giga.NewArrayUTXOSource(testUTXOs)
-		txn, err := giga.CreateTxn(payTo, giga.ZeroCoins, acc, source, lib)
+		txn, err := giga.CreateTxn(payTo, giga.ZeroCoins, giga.OneCoin, acc, source, lib)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
@@ -52,6 +52,7 @@ func TestNewTxn(t *testing.T) {
 		if !txn.TotalOut.Equals(decimal.RequireFromString("3").Sub(txn.FeeAmount)) {
 			t.Fatalf("wrong total outputs: %v", txn.TotalOut)
 		}
+		t.Logf("DeductFeePercent: %v In => %v Out + %v Fee = %v + Change %v", txn.TotalIn, txn.TotalOut, txn.FeeAmount, txn.TotalOut.Add(txn.FeeAmount), txn.ChangeAmount)
 	})
 }
 

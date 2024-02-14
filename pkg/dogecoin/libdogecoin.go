@@ -219,3 +219,10 @@ func (l L1Libdogecoin) Send(txnHex string) (txid string, err error) {
 	}
 	return "", fmt.Errorf("not implemented")
 }
+
+func (l L1Libdogecoin) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
+	if l.fallback != nil {
+		return l.fallback.EstimateFee(confirmTarget)
+	}
+	return giga.ZeroCoins, fmt.Errorf("not implemented")
+}
