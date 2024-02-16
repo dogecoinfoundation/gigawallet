@@ -6,6 +6,7 @@ import (
 	"time"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 )
 
 const (
@@ -18,6 +19,7 @@ const (
 type ChainFollower struct {
 	l1               giga.L1
 	store            giga.Store
+	chain            *doge.ChainParams
 	tx               giga.StoreTransaction        // non-nil during a transaction (for cleanup)
 	ReceiveBestBlock chan string                  // receive from TipChaser.
 	Commands         chan any                     // receive ReSyncChainFollowerCmd etc.
@@ -48,6 +50,7 @@ func newChainFollower(conf giga.Config, l1 giga.L1, store giga.Store) (*ChainFol
 	result := &ChainFollower{
 		l1:               l1,
 		store:            store,
+		chain:            &doge.DogeMainNetChain,              // FIXME
 		ReceiveBestBlock: make(chan string, 1),                // signal that tip has changed.
 		Commands:         make(chan any, 10),                  // commands to the service.
 		confirmations:    conf.Gigawallet.ConfirmationsNeeded, // to confirm a txn (new UTXOs)
@@ -257,10 +260,10 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 	var changes []UTXOChange
 	for pos.NextBlockHash != "" {
 		//log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
-		block := c.fetchBlock(pos.NextBlockHash)
+		block := c.fetchBlockHeader(pos.NextBlockHash)
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
-			changes, txIDs = c.processBlock(block, changes, txIDs)
+			changes, txIDs = c.processBlock(block.Hash, block.Height, changes, txIDs)
 			// Progress has been made.
 			pos = ChainPos{block.Hash, block.Height, block.NextBlockHash, pos.NextSeq}
 			blockCount++
@@ -509,6 +512,7 @@ func (c *ChainFollower) applyUTXOChanges(dbtx giga.StoreTransaction, changes []U
 			accountID, keyIndex, isInternal, err := dbtx.FindAccountForAddress(utxo.ScriptAddress)
 			if err == nil {
 				// Account was found.
+				log.Println("CreateUTXO:", utxo.TxID, utxo.VOut, "=>", utxo.ScriptType, utxo.ScriptAddress, utxo.Value)
 				err = dbtx.CreateUTXO(giga.UTXO{
 					TxID:          utxo.TxID,
 					VOut:          utxo.VOut,
@@ -535,6 +539,7 @@ func (c *ChainFollower) applyUTXOChanges(dbtx giga.StoreTransaction, changes []U
 				}
 			}
 		case utxoTagSpent:
+			//log.Println("MarkUTXOSpent:", utxo.TxID, utxo.VOut, utxo.Height, utxo.SpendTxID)
 			accountID, _, err := dbtx.MarkUTXOSpent(utxo.TxID, utxo.VOut, utxo.Height, utxo.SpendTxID)
 			if err != nil {
 				log.Println("ChainFollower: MarkUTXOSpent:", err, utxo.TxID, utxo.VOut)
@@ -549,53 +554,48 @@ func (c *ChainFollower) applyUTXOChanges(dbtx giga.StoreTransaction, changes []U
 	return nil
 }
 
-func (c *ChainFollower) processBlock(block giga.RpcBlock, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
-	log.Println("ChainFollower: processing block", block.Hash, len(block.Tx), block.Height)
+func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
+	blockData := c.fetchBlockData(blockHash)
+	block := doge.DecodeBlock(blockData)
+	// c.verifyDecodedBlock(&block, blockHash)
+	log.Println("ChainFollower: processing block", blockHash, len(block.Tx), blockHeight)
 	// Insert entirely-new UTXOs that don't exist in the database.
-	for _, txn_id := range block.Tx {
-		txIDs = append(txIDs, txn_id)
-		txn := c.fetchTransaction(txn_id)
-		for _, vin := range txn.VIn {
+	for _, tx := range block.Tx {
+		txIDs = append(txIDs, tx.TxID)
+		for _, vin := range tx.VIn {
 			// Ignore coinbase inputs, which don't spend UTXOs.
-			if vin.TxID != "" && vin.VOut >= 0 {
+			if vin.VOut != doge.CoinbaseVOut {
 				// Mark this UTXO as spent (at this block height)
 				// • Note: a Txn cannot spend its own outputs (but it can spend outputs from previous Txns in the same block)
 				// • We only care about UTXOs that match a wallet (i.e. we know which wallet they belong to)
 				changes = append(changes, UTXOChange{
 					Tag:       utxoTagSpent,
-					TxID:      vin.TxID,
-					VOut:      vin.VOut,
-					Height:    block.Height,
-					SpendTxID: txn_id,
+					TxID:      doge.HexEncodeReversed(vin.TxID),
+					VOut:      int(vin.VOut),
+					Height:    blockHeight,
+					SpendTxID: tx.TxID,
 				})
 			}
 		}
-		for _, vout := range txn.VOut {
+		for n, vout := range tx.VOut {
 			// Ignore outputs that are not spendable.
-			if !vout.Value.IsPositive() {
-				// log.Println("ChainFollower: skipping zero-value vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
+			if vout.Value <= 0 {
 				continue
 			}
-			if len(vout.ScriptPubKey.Addresses) == 1 {
+			// Gigawallet only handles P2PKH (HD Wallet) Addresses.
+			scriptType, address := doge.ClassifyScript(vout.Script, &doge.DogeMainNetChain)
+			if scriptType == doge.ScriptTypeP2PK {
 				// Create a UTXO associated with the wallet that owns the address.
-				scriptType := giga.DecodeCoreRPCScriptType(vout.ScriptPubKey.Type)
-				// These script-types always contain a single address.
-				// TODO LATER: for p2pk [and p2sh?] encode as Addresses in a consistent DB format (we need this to match invoices/payments)
-				pkhAddress := giga.Address(vout.ScriptPubKey.Addresses[0])
 				changes = append(changes, UTXOChange{
 					Tag:           utxoTagNew,
-					TxID:          txn_id,
-					VOut:          vout.N,
-					Value:         vout.Value,
-					ScriptHex:     vout.ScriptPubKey.Hex,
+					TxID:          tx.TxID,
+					VOut:          n,
+					Value:         doge.KoinuToDecimal(vout.Value),
+					ScriptHex:     doge.HexEncode(vout.Script),
 					ScriptType:    scriptType,
-					ScriptAddress: pkhAddress,
-					Height:        block.Height,
+					ScriptAddress: address,
+					Height:        blockHeight,
 				})
-			} else if len(vout.ScriptPubKey.Addresses) < 1 {
-				log.Println("ChainFollower: skipping no-address vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
-			} else {
-				log.Println("ChainFollower: skipping multi-address vout:", txn_id, vout.N, vout.ScriptPubKey.Type)
 			}
 		}
 	}
@@ -631,14 +631,19 @@ func (c *ChainFollower) fetchChainState() giga.ChainState {
 	}
 }
 
-func (c *ChainFollower) fetchBlock(blockHash string) giga.RpcBlock {
+func (c *ChainFollower) fetchBlockData(blockHash string) []byte {
 	for {
-		block, err := c.l1.GetBlock(blockHash)
+		hex, err := c.l1.GetBlockHex(blockHash)
 		if err != nil {
 			log.Println("ChainFollower: error retrieving block (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
-			return block
+			bytes, err := doge.HexDecode(hex)
+			if err != nil {
+				log.Println("ChainFollower: invalid block hex (will retry):", err)
+				c.sleepForRetry(err, 0)
+			}
+			return bytes
 		}
 	}
 }
@@ -675,18 +680,6 @@ func (c *ChainFollower) fetchBlockCount() int64 {
 			c.sleepForRetry(err, 0)
 		} else {
 			return count
-		}
-	}
-}
-
-func (c *ChainFollower) fetchTransaction(txHash string) giga.RawTxn {
-	for {
-		txn, err := c.l1.GetTransaction(txHash)
-		if err != nil {
-			log.Println("ChainFollower: error retrieving transaction (will retry):", err)
-			c.sleepForRetry(err, 0)
-		} else {
-			return txn
 		}
 	}
 }
@@ -736,5 +729,95 @@ func (c *ChainFollower) checkShutdown() {
 		}
 	default:
 		return
+	}
+}
+
+// OLD code to fetch decoded transactions from Core RPC.
+// Now used to verify decoded blocks and scripts from doge.DecodeBlock and doge.ClassifyScript.
+
+func (c *ChainFollower) fetchBlock(blockHash string) giga.RpcBlock {
+	for {
+		block, err := c.l1.GetBlock(blockHash)
+		if err != nil {
+			log.Println("ChainFollower: error retrieving block (will retry):", err)
+			c.sleepForRetry(err, 0)
+		} else {
+			return block
+		}
+	}
+}
+
+func (c *ChainFollower) fetchTransaction(txHash string) giga.RawTxn {
+	for {
+		txn, err := c.l1.GetTransaction(txHash)
+		if err != nil {
+			log.Println("ChainFollower: error retrieving transaction (will retry):", err)
+			c.sleepForRetry(err, 0)
+		} else {
+			return txn
+		}
+	}
+}
+
+func (c *ChainFollower) verifyDecodedBlock(b *doge.Block, blockHash string) {
+	block := c.fetchBlock(blockHash)
+	if b.Header.Version != uint32(block.Version) ||
+		doge.HexEncodeReversed(b.Header.PrevBlock) != block.PreviousBlockHash ||
+		doge.HexEncodeReversed(b.Header.MerkleRoot) != block.MerkleRoot {
+		log.Fatalf("Bad header decode in: %v", blockHash)
+	}
+	for t, txn_id := range block.Tx {
+		bTx := &b.Tx[t]
+		if bTx.TxID != txn_id {
+			log.Fatalf("Wrong TxID: %v vs %v in %v", bTx.TxID, txn_id, blockHash)
+		}
+		txn := c.fetchTransaction(txn_id)
+		for i, vin := range txn.VIn {
+			bIn := &bTx.VIn[i]
+			hxTxID := doge.HexEncodeReversed(bIn.TxID)
+			if hxTxID == "0000000000000000000000000000000000000000000000000000000000000000" && vin.TxID == "" {
+				// Coinbase is special-cased in Core RPC: returns all empty strings.
+				if bIn.VOut != doge.CoinbaseVOut {
+					log.Fatalf("Bad Coinbase decode in: %v", blockHash)
+				}
+			} else {
+				if hxTxID != vin.TxID ||
+					bIn.VOut != uint32(vin.VOut) ||
+					doge.HexEncode(bIn.Script) != vin.ScriptSig.Hex ||
+					bIn.Sequence != uint32(vin.Sequence) {
+					log.Fatalf("Bad VIn decode in tx %v vin %v", txn_id, i)
+				}
+			}
+		}
+		for i, vout := range txn.VOut {
+			bOut := &bTx.VOut[i]
+			val := doge.KoinuToDecimal(bOut.Value)
+			hex := doge.HexEncode(bOut.Script)
+			if !val.Equals(vout.Value) {
+				log.Fatalf("Wrong out value: %v vs %v in tx %v vin %v", val, vout.Value, txn_id, i)
+			}
+			if hex != vout.ScriptPubKey.Hex {
+				log.Fatalf("Wrong script hex: %v vs %v in tx %v vin %v", hex, vout.ScriptPubKey.Hex, txn_id, i)
+			}
+			sType, address := doge.ClassifyScript(bOut.Script, &doge.DogeMainNetChain)
+			scriptType := giga.DecodeCoreRPCScriptType(vout.ScriptPubKey.Type)
+			if sType != scriptType {
+				log.Fatalf("Wrong script type: %v vs %v in tx %v vin %v", sType, scriptType, txn_id, i)
+			}
+			// Core incorrectly converts P2PK PubKeys to Base58 Addresses.
+			if scriptType == doge.ScriptTypeP2PK {
+				if address != "" {
+					log.Fatalf("Not expecting an address: %v in tx %v vin %v", address, txn_id, i)
+				}
+			} else {
+				va := vout.ScriptPubKey.Addresses
+				if len(va) > 0 && address == "" {
+					log.Fatalf("Wrong addresses length: expecting %v in tx %v vin %v", len(va), txn_id, i)
+				}
+				if len(va) > 0 && address != doge.Address(va[0]) {
+					log.Fatalf("Wrong address: %v vs %v in tx %v vin %v", va[0], address, txn_id, i)
+				}
+			}
+		}
 	}
 }

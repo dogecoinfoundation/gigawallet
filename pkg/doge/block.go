@@ -2,7 +2,10 @@ package doge
 
 const (
 	VersionAuxPoW = 256
+	CoinbaseVOut  = 0xffffffff
 )
+
+var CoinbaseTxID = [32]byte{}
 
 type Block struct {
 	Header BlockHeader
@@ -38,14 +41,15 @@ type MerkleBranch struct {
 
 type BlockTx struct {
 	Version  uint32
-	In       []BlockTxIn
-	Out      []BlockTxOut
+	VIn      []BlockTxIn
+	VOut     []BlockTxOut
 	LockTime uint32
+	TxID     string // hex, computed from tx data
 }
 
 type BlockTxIn struct {
-	OutHash  []byte // 32 bytes
-	OutIndex uint32
+	TxID     []byte // 32 bytes
+	VOut     uint32
 	Script   []byte // varied length
 	Sequence uint32
 }
@@ -55,13 +59,9 @@ type BlockTxOut struct {
 	Script []byte // varied length
 }
 
-func DecodeBlock(blkHex string) (Block, error) {
-	bytes, err := HexDecode(blkHex)
-	if err != nil {
-		return Block{}, err
-	}
-	s := &Stream{b: bytes}
-	return readBlock(s), nil
+func DecodeBlock(blockBytes []byte) Block {
+	s := &Stream{b: blockBytes}
+	return readBlock(s)
 }
 
 func readBlock(s *Stream) (b Block) {
@@ -106,22 +106,25 @@ func readMerkleBranch(s *Stream) (b MerkleBranch) {
 }
 
 func readTx(s *Stream) (tx BlockTx) {
+	start := s.p
 	tx.Version = s.uint32le()
 	tx_in := s.var_uint()
 	for i := uint64(0); i < tx_in; i++ {
-		tx.In = append(tx.In, readTxIn(s))
+		tx.VIn = append(tx.VIn, readTxIn(s))
 	}
 	tx_out := s.var_uint()
 	for i := uint64(0); i < tx_out; i++ {
-		tx.Out = append(tx.Out, readTxOut(s))
+		tx.VOut = append(tx.VOut, readTxOut(s))
 	}
 	tx.LockTime = s.uint32le()
+	// Compute TX hash from transaction bytes.
+	tx.TxID = TxHashHex(s.b[start:s.p])
 	return
 }
 
 func readTxIn(s *Stream) (in BlockTxIn) {
-	in.OutHash = s.bytes(32)
-	in.OutIndex = s.uint32le()
+	in.TxID = s.bytes(32)
+	in.VOut = s.uint32le()
 	script_len := s.var_uint()
 	in.Script = s.bytes(script_len)
 	in.Sequence = s.uint32le()

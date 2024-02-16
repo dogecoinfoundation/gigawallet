@@ -30,10 +30,7 @@ func TestBlock(t *testing.T) {
 		1000000000,
 		1045842885,
 	}
-	b, err := DecodeBlock(hex)
-	if err != nil {
-		t.Errorf("TestBlock: %v", err)
-	}
+	b := DecodeBlock(hx2b(hex))
 	log.Printf("Block: ver %x prev %v merkel %v ntx %v", b.Header.Version, revhex(b.Header.PrevBlock), revhex(b.Header.MerkleRoot), len(b.Tx))
 	if len(b.Tx) != expectTxs {
 		t.Errorf("TestBlock: wrong number of transactions: %d vs %d", len(b.Tx), expectTxs)
@@ -46,7 +43,7 @@ func TestBlock(t *testing.T) {
 
 func collectOutVals(b *Block) (outVals []int64) {
 	for _, tx := range b.Tx {
-		for _, out := range tx.Out {
+		for _, out := range tx.VOut {
 			outVals = append(outVals, out.Value)
 		}
 	}
