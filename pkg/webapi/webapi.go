@@ -75,7 +75,7 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// GET /account:foreignID/Balance -> { AccountBalance    Get the account balance
 	adminMux.GET("/account/:foreignID/balance", t.getAccountBalance)
 
-	// POST {invoice} /account/:foreignID/invoice/ -> { invoice } create new invoice
+	// POST {invoice} /account/:foreignID/invoice -> { invoice } create new invoice
 	adminMux.POST("/account/:foreignID/invoice", t.createInvoice)
 
 	// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
