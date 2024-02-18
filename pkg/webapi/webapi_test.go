@@ -48,7 +48,7 @@ func TestWebAPI(t *testing.T) {
 
 	// Create an Invoice for 10 doge
 	var inv1 giga.PublicInvoice
-	request(t, admin, "/account/Pepper/invoice/", `{"items":[{"type":"item","name":"Pants","sku":"P-001","description":"Nice pants","value":"10","quantity":1}],"confirmations":6}`, &inv1)
+	request(t, admin, "/account/Pepper/invoice", `{"items":[{"type":"item","name":"Pants","sku":"P-001","description":"Nice pants","value":"10","quantity":1}],"confirmations":6}`, &inv1)
 	if !doge.ValidateP2PKH(string(inv1.ID), &doge.DogeTestNetChain) {
 		t.Fatalf("Create Invoice generated an invalid Address: %v", inv1.ID)
 	}
