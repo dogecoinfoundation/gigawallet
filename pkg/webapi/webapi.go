@@ -77,6 +77,7 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 
 	// POST {invoice} /account/:foreignID/invoice -> { invoice } create new invoice
 	adminMux.POST("/account/:foreignID/invoice", t.createInvoice)
+	adminMux.POST("/account/:foreignID/invoice/", t.createInvoice) // deprecated: prior bug
 
 	// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
 	adminMux.GET("/account/:foreignID/invoices", t.listInvoices)
