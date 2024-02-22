@@ -1,7 +1,10 @@
 package doge
 
+import "errors"
+
 type ChainParams struct {
 	ChainName                string
+	GenesisBlock             string
 	p2pkh_address_prefix     byte
 	p2sh_address_prefix      byte
 	pkey_prefix              byte
@@ -13,6 +16,7 @@ type ChainParams struct {
 
 var DogeMainNetChain ChainParams = ChainParams{
 	ChainName:                "doge_main",
+	GenesisBlock:             "1a91e3dace36e2be3bf030a65679fe821aa1d6ef92e7c9902eb318182c355691",
 	p2pkh_address_prefix:     0x1e,       // D
 	p2sh_address_prefix:      0x16,       // 9 or A
 	pkey_prefix:              0x9e,       // Q or 6
@@ -24,6 +28,7 @@ var DogeMainNetChain ChainParams = ChainParams{
 
 var DogeTestNetChain ChainParams = ChainParams{
 	ChainName:                "doge_test",
+	GenesisBlock:             "bb0a78264637406b6360aad926284d544d7049f45189db5664f3c4d07350559e",
 	p2pkh_address_prefix:     0x71,       // n
 	p2sh_address_prefix:      0xc4,       // 2
 	pkey_prefix:              0xf1,       // 9 or c
@@ -35,6 +40,7 @@ var DogeTestNetChain ChainParams = ChainParams{
 
 var DogeRegTestChain ChainParams = ChainParams{
 	ChainName:                "doge_regtest",
+	GenesisBlock:             "3d2160a3b5dc4a9d62e7e66a295f70313ac808440ef7400d6c0772171ce973a5",
 	p2pkh_address_prefix:     0x6f,       // n
 	p2sh_address_prefix:      0xc4,       // 2
 	pkey_prefix:              0xef,       //
@@ -44,8 +50,10 @@ var DogeRegTestChain ChainParams = ChainParams{
 	Bip32_WIF_PubKey_Prefix:  "tpub",
 }
 
+// Used in tests only.
 var BitcoinMainChain ChainParams = ChainParams{
 	ChainName:                "btc_main",
+	GenesisBlock:             "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f",
 	p2pkh_address_prefix:     0x00,       // 1
 	p2sh_address_prefix:      0x05,       // 3
 	pkey_prefix:              0x80,       // 5H,5J,5K
@@ -145,4 +153,17 @@ func ChainFromBip32Version(version uint32, allowNonDoge bool) *ChainParams {
 		}
 	}
 	return &DogeTestNetChain // fallback
+}
+
+func ChainFromGenesisHash(hash string) (*ChainParams, error) {
+	if hash == DogeMainNetChain.GenesisBlock {
+		return &DogeMainNetChain, nil
+	}
+	if hash == DogeTestNetChain.GenesisBlock {
+		return &DogeTestNetChain, nil
+	}
+	if hash == DogeRegTestChain.GenesisBlock {
+		return &DogeRegTestChain, nil
+	}
+	return nil, errors.New("ChainFromGenesisHash: unrecognised chain: " + hash)
 }

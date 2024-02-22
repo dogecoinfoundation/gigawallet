@@ -50,7 +50,7 @@ func newChainFollower(conf giga.Config, l1 giga.L1, store giga.Store) (*ChainFol
 	result := &ChainFollower{
 		l1:               l1,
 		store:            store,
-		chain:            &doge.DogeMainNetChain,              // FIXME
+		chain:            &doge.DogeRegTestChain,              // detected in fetchStartingPos()
 		ReceiveBestBlock: make(chan string, 1),                // signal that tip has changed.
 		Commands:         make(chan any, 10),                  // commands to the service.
 		confirmations:    conf.Gigawallet.ConfirmationsNeeded, // to confirm a txn (new UTXOs)
@@ -143,17 +143,27 @@ func (c *ChainFollower) fetchStartingPos() ChainPos {
 	// Retry loop for transaction error or wrong-chain error.
 	for {
 		state := c.fetchChainState()
-		rootBlock := c.fetchBlockHash(1)
+		genesisHash := c.fetchBlockHash(0)
+		chain, err := doge.ChainFromGenesisHash(genesisHash)
+		if err != nil {
+			log.Println("ChainFollower: UNRECOGNISED CHAIN!")
+			log.Println("ChainFollower: Block#0 on Core Node:", genesisHash)
+			log.Println("ChainFollower: The Genesis block does not match any of our ChainParams")
+			log.Println("ChainFollower: Please connect to a Dogecoin Core Node")
+			c.sleepForRetry(nil, WRONG_CHAIN_DELAY)
+			continue
+		}
+		c.chain = chain
 		if state.BestBlockHash != "" {
 			// Resume sync.
 			// Make sure we're syncing the same blockchain as before.
-			if state.RootHash == rootBlock {
+			if state.RootHash == genesisHash {
 				log.Println("ChainFollower: RESUME SYNC :", state.BestBlockHeight)
 				return ChainPos{state.BestBlockHash, state.BestBlockHeight, "", state.NextSeq}
 			} else {
 				log.Println("ChainFollower: WRONG CHAIN!")
-				log.Println("ChainFollower: Block#1 we have in DB:", state.RootHash)
-				log.Println("ChainFollower: Block#1 on Core Node:", rootBlock)
+				log.Println("ChainFollower: Block#0 we have in DB:", state.RootHash)
+				log.Println("ChainFollower: Block#0 on Core Node:", genesisHash)
 				log.Println("ChainFollower: Please re-connect to a Core Node running the same blockchain we have in the database, or reset your database tables (please see manual for help)")
 				c.sleepForRetry(nil, WRONG_CHAIN_DELAY)
 			}
@@ -161,19 +171,21 @@ func (c *ChainFollower) fetchStartingPos() ChainPos {
 			// Initial sync.
 			// Start at least 100 blocks back from the current Tip,
 			// so we're working with a well-confirmed starting block.
-			firstHeight := c.fetchBlockCount() - 100
-			if firstHeight < 1 {
-				firstHeight = 1
+			firstHeight := c.fetchBlockCount()
+			if firstHeight > 100 {
+				firstHeight -= 100
+			} else {
+				firstHeight = 0
 			}
 			firstBlockHash := c.fetchBlockHash(firstHeight)
 			log.Println("ChainFollower: INITIAL SYNC")
-			log.Println("ChainFollower: Block#1 on Core Node:", rootBlock)
+			log.Println("ChainFollower: Block#0 on Core Node:", genesisHash)
 			log.Println("ChainFollower: Initial Block Height:", firstHeight)
 			// Commit the initial start position to the database.
 			// Wrap the following in a transaction with retry.
 			dbtx := c.beginStoreTxn()
 			err := dbtx.UpdateChainState(giga.ChainState{
-				RootHash:        rootBlock,
+				RootHash:        genesisHash,
 				FirstHeight:     firstHeight,
 				BestBlockHash:   firstBlockHash,
 				BestBlockHeight: firstHeight,
@@ -626,6 +638,10 @@ func (c *ChainFollower) fetchChainState() giga.ChainState {
 			log.Println("ChainFollower: error retrieving best block (will retry):", err)
 			c.sleepForRetry(err, 0)
 		} else {
+			// Deprecated: previously started with block #1 instead of #0
+			if state.RootHash == "82bc68038f6034c0596b6e313729793a887fded6e92a31fbdf70863f89d9bea2" {
+				state.RootHash = "1a91e3dace36e2be3bf030a65679fe821aa1d6ef92e7c9902eb318182c355691"
+			}
 			return state
 		}
 	}
