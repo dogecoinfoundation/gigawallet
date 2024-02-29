@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -92,4 +93,23 @@ func postURL(url string, body interface{}) error {
 	}
 
 	return nil
+}
+
+func getURL(url string) (string, error) {
+	response, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("HTTP GET request failed:", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP request failed with status code: %d", response.StatusCode)
+	}
+
+	data, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return "", fmt.Errorf("Error reading response body:", err)
+	}
+
+	return string(data), nil
 }
