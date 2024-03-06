@@ -71,28 +71,30 @@ func (l *L1CoreRPC) request(method string, params []any, result any) error {
 	if err != nil {
 		return fmt.Errorf("json-rpc read response: %v", err)
 	}
-	if res.StatusCode != 200 {
-		return fmt.Errorf("json-rpc status code: %s", res.Status)
-	}
 	// cannot use json.NewDecoder: "The decoder introduces its own buffering
 	// and may read data from r beyond the JSON values requested."
 	var rpcres rpcResponse
 	err = json.Unmarshal(res_bytes, &rpcres)
 	if err != nil {
-		return fmt.Errorf("json-rpc unmarshal response: %v", err)
+		return fmt.Errorf("json-rpc unmarshal response: %v | %v", err, string(res_bytes))
 	}
 	if rpcres.Id != body.Id {
 		return fmt.Errorf("json-rpc wrong ID returned: %v vs %v", rpcres.Id, body.Id)
 	}
 	if rpcres.Error != nil {
-		return fmt.Errorf("json-rpc error returned: %v", rpcres.Error)
+		enc, err := json.Marshal(rpcres.Error)
+		if err == nil {
+			return fmt.Errorf("json-rpc: error from Core Node: %v", string(enc))
+		} else {
+			return fmt.Errorf("json-rpc: error from Core Node: %v", rpcres.Error)
+		}
 	}
 	if rpcres.Result == nil {
-		return fmt.Errorf("json-rpc missing result")
+		return fmt.Errorf("json-rpc no result or error was returned")
 	}
 	err = json.Unmarshal(*rpcres.Result, result)
 	if err != nil {
-		return fmt.Errorf("json-rpc unmarshal result: %v | %v", err, string(*rpcres.Result))
+		return fmt.Errorf("json-rpc unmarshal error: %v | %v", err, string(*rpcres.Result))
 	}
 	return nil
 }
@@ -154,17 +156,24 @@ func (l *L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) 
 }
 
 func (l *L1CoreRPC) Send(txnHex string) (txid string, err error) {
+	log.Printf("SEND Tx: %v", txnHex)
 	txn, err := doge.HexDecode(txnHex)
 	if err != nil {
 		return "", fmt.Errorf("sendrawtransaction: could not decode txnHex")
 	}
 	err = l.request("sendrawtransaction", []any{txnHex}, &txid)
+	if err != nil {
+		return "", fmt.Errorf("sendrawtransaction: %v", err)
+	}
 	if len(txid) != 64 || !doge.IsValidHex(txid) {
-		return "", fmt.Errorf("sendrawtransaction: did not return txid")
+		if len(txid) < 1 {
+			txid = "(nothing returned)"
+		}
+		return "", fmt.Errorf("sendrawtransaction: Core Node did not return txid: %v", txid)
 	}
 	hash := doge.TxHashHex(txn)
 	if txid != hash {
-		log.Printf("[!] sendrawtransaction: did not return the expected txid: %s vs %s", txid, hash)
+		log.Printf("[!] sendrawtransaction: Core Node did not return the expected txid: %s vs %s", txid, hash)
 	}
 	return
 }
