@@ -2,6 +2,7 @@ package giga
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -275,6 +276,8 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 	total := newTxn.TotalOut // total paid to addresses (excludes fee)
 	fee := newTxn.FeeAmount  // fee paid by the transaction
 	txHex := newTxn.TxnHex
+
+	log.Printf("New Tx: total %v fee %v change %v", newTxn.TotalOut, newTxn.FeeAmount, newTxn.ChangeAmount)
 
 	// Create the Payment record up-front.
 	// Save changes to the Account (NextInternalKey) and address pool.
