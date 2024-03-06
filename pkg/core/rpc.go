@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync/atomic"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
@@ -15,22 +16,21 @@ import (
 )
 
 // interface guard ensures L1CoreRPC implements giga.L1
-var _ giga.L1 = L1CoreRPC{}
+var _ giga.L1 = &L1CoreRPC{}
 
 // NewDogecoinCoreRPC returns a giga.L1 implementor that uses dogecoin-core's RPC
-func NewDogecoinCoreRPC(config giga.Config) (L1CoreRPC, error) {
+func NewDogecoinCoreRPC(config giga.Config) (*L1CoreRPC, error) {
 	addr := fmt.Sprintf("http://%s:%d", config.Core.RPCHost, config.Core.RPCPort)
 	user := config.Core.RPCUser
 	pass := config.Core.RPCPass
-	var id uint64 = 1
-	return L1CoreRPC{addr, user, pass, &id}, nil
+	return &L1CoreRPC{url: addr, user: user, pass: pass}, nil
 }
 
 type L1CoreRPC struct {
 	url  string
 	user string
 	pass string
-	id   *uint64
+	id   atomic.Uint64 // next unique request id
 }
 
 type rpcRequest struct {
@@ -44,13 +44,13 @@ type rpcResponse struct {
 	Error  any              `json:"error"`
 }
 
-func (l L1CoreRPC) request(method string, params []any, result any) error {
+func (l *L1CoreRPC) request(method string, params []any, result any) error {
+	id := l.id.Add(1) // each request should use a unique ID
 	body := rpcRequest{
 		Method: method,
 		Params: params,
-		Id:     *l.id,
+		Id:     id,
 	}
-	*l.id += 1 // each request should use a unique ID
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("json-rpc marshal request: %v", err)
@@ -97,63 +97,63 @@ func (l L1CoreRPC) request(method string, params []any, result any) error {
 	return nil
 }
 
-func (l L1CoreRPC) MakeAddress(isTestNet bool) (giga.Address, giga.Privkey, error) {
+func (l *L1CoreRPC) MakeAddress(isTestNet bool) (giga.Address, giga.Privkey, error) {
 	return "", "", fmt.Errorf("not implemented")
 }
 
-func (l L1CoreRPC) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
+func (l *L1CoreRPC) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
 	return "", fmt.Errorf("not implemented")
 }
 
-func (l L1CoreRPC) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.NewTxn, error) {
+func (l *L1CoreRPC) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.NewTxn, error) {
 	return giga.NewTxn{}, fmt.Errorf("not implemented")
 }
 
-func (l L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.RawTxn, err error) {
+func (l *L1CoreRPC) DecodeTransaction(txn_hex string) (txn giga.RawTxn, err error) {
 	err = l.request("decoderawtransaction", []any{txn_hex}, &txn)
 	return
 }
 
-func (l L1CoreRPC) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
+func (l *L1CoreRPC) GetBlock(blockHash string) (txn giga.RpcBlock, err error) {
 	decode := true // to get back JSON rather than HEX
 	err = l.request("getblock", []any{blockHash, decode}, &txn)
 	return
 }
 
-func (l L1CoreRPC) GetBlockHex(blockHash string) (hex string, err error) {
+func (l *L1CoreRPC) GetBlockHex(blockHash string) (hex string, err error) {
 	decode := false // to get back HEX
 	err = l.request("getblock", []any{blockHash, decode}, &hex)
 	return
 }
 
-func (l L1CoreRPC) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err error) {
+func (l *L1CoreRPC) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err error) {
 	decode := true // to get back JSON rather than HEX
 	err = l.request("getblockheader", []any{blockHash, decode}, &txn)
 	return
 }
 
-func (l L1CoreRPC) GetBlockHash(height int64) (hash string, err error) {
+func (l *L1CoreRPC) GetBlockHash(height int64) (hash string, err error) {
 	err = l.request("getblockhash", []any{height}, &hash)
 	return
 }
 
-func (l L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
+func (l *L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
 	err = l.request("getbestblockhash", []any{}, &blockHash)
 	return
 }
 
-func (l L1CoreRPC) GetBlockCount() (blockCount int64, err error) {
+func (l *L1CoreRPC) GetBlockCount() (blockCount int64, err error) {
 	err = l.request("getblockcount", []any{}, &blockCount)
 	return
 }
 
-func (l L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
+func (l *L1CoreRPC) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	decode := true // to get back JSON rather than HEX
 	err = l.request("getrawtransaction", []any{txnHash, decode}, &txn)
 	return
 }
 
-func (l L1CoreRPC) Send(txnHex string) (txid string, err error) {
+func (l *L1CoreRPC) Send(txnHex string) (txid string, err error) {
 	txn, err := doge.HexDecode(txnHex)
 	if err != nil {
 		return "", fmt.Errorf("sendrawtransaction: could not decode txnHex")
