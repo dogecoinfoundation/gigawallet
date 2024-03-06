@@ -596,7 +596,7 @@ func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, change
 			}
 			// Gigawallet only handles P2PKH (HD Wallet) Addresses.
 			scriptType, address := doge.ClassifyScript(vout.Script, &doge.DogeMainNetChain)
-			if scriptType == doge.ScriptTypeP2PK {
+			if scriptType == doge.ScriptTypeP2PKH {
 				// Create a UTXO associated with the wallet that owns the address.
 				changes = append(changes, UTXOChange{
 					Tag:           utxoTagNew,
