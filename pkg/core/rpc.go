@@ -178,24 +178,12 @@ func (l *L1CoreRPC) Send(txnHex string) (txid string, err error) {
 	return
 }
 
-type estimatesmartfeeError struct {
-	Str string `json:"str"`
-}
-type estimatesmartfeeResponse struct {
-	FeeRate int64                   `json:"feerate"`
-	Blocks  int64                   `json:"blocks"`
-	Errors  []estimatesmartfeeError `json:"errors"`
-}
-
-func (l L1CoreRPC) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
-	var res estimatesmartfeeResponse
-	err = l.request("estimatesmartfee", []any{confirmTarget}, &res)
-	if len(res.Errors) > 0 {
-		return giga.ZeroCoins, errors.New(res.Errors[0].Str)
-	}
-	if res.FeeRate < 0 {
+func (l *L1CoreRPC) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
+	var res float64
+	err = l.request("estimatefee", []any{confirmTarget}, &res)
+	if res < 0 {
 		return giga.ZeroCoins, errors.New("fee-rate is negative")
 	}
-	feePerKB = decimal.NewFromInt(res.FeeRate)
+	feePerKB = decimal.NewFromFloat(res)
 	return
 }
