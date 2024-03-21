@@ -13,16 +13,15 @@ var oneThousand = decimal.NewFromInt(1000)
 // We may need to use addUTXOsUpToAmount during calculateFee (source, inputs, used)
 // and we need to generate the tx hex repeatedly (lib, acc, inputs, outputs, changeAddress)
 type txState struct {
-	lib             L1           // L1 for MakeTransaction
-	account         Account      // Account for private key to sign transactions
-	inputs          []UTXO       // accumulated tx inputs (from addUTXOsUpToAmount)
-	outputs         []NewTxOut   // specified tx outputs (from payTo)
-	originalAmounts []CoinAmount // output amounts saved by addOutput (before fee deduction)
-	outputSum       CoinAmount   // sum specified tx outputs (from payTo)
-	used            UTXOSet      // accumulated tx inputs (as a set)
-	source          UTXOSource   // source of available UTXOs (cached on Account)
-	changeAddress   Address      // change address for unspent portions of UTXOs
-	deductFee       bool         // payTo has DeductFeePercent specified
+	lib           L1         // L1 for MakeTransaction
+	account       Account    // Account for private key to sign transactions
+	inputs        []UTXO     // accumulated tx inputs (from addUTXOsUpToAmount)
+	outputs       []NewTxOut // specified tx outputs (from payTo)
+	outputSum     CoinAmount // sum specified tx outputs (from payTo)
+	used          UTXOSet    // accumulated tx inputs (as a set)
+	source        UTXOSource // source of available UTXOs (cached on Account)
+	changeAddress Address    // change address for unspent portions of UTXOs
+	deductFee     bool       // payTo has DeductFeePercent specified
 }
 
 func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Account, source UTXOSource, lib L1) (NewTxn, error) {
@@ -71,13 +70,34 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Accoun
 	}
 
 	// Build the transaction with the current inputs and fee.
-	return state.lib.MakeTransaction(state.inputs, state.outputs, fee, state.changeAddress, state.account.Privkey)
+	newTx, err := state.lib.MakeTransaction(state.inputs, state.outputs, fee, state.changeAddress, state.account.Privkey)
+	if err != nil {
+		return NewTxn{}, err
+	}
+
+	// Check all outputs are >= TxnDustLimit
+	txHex, err := doge.HexDecode(newTx.TxnHex)
+	if err != nil {
+		return NewTxn{}, err
+	}
+	dTx := doge.DecodeTx(txHex)
+	for n, out := range dTx.VOut {
+		if out.Value < TxnDustLimit_64 {
+			return NewTxn{}, NewErr(InvalidTxn, "BUG: Tx Output cannot be less than the Dogecoin Dust Limit (%vƉ): tx output %v is %v koinu", TxnDustLimit.String(), n, doge.KoinuToDecimal(out.Value).String())
+		}
+	}
+
+	return newTx, nil
 }
 
 func sumPayTo(payTo []PayTo) (CoinAmount, bool, error) {
 	total := decimal.Zero
 	deduct := decimal.Zero
 	for _, pay := range payTo {
+		// Round the parsed decimal towards -infinity so a split payment using
+		// floating point doesn't round to a sum greater than the account balance.
+		// This only applies if more than 8 Koinu digits are provided.
+		pay.Amount = pay.Amount.RoundFloor(NumKoinuDigits) // round to whole Koinu
 		total = total.Add(pay.Amount)
 		if pay.Amount.LessThan(TxnDustLimit) {
 			return ZeroCoins, false, NewErr(InvalidTxn, "PayTo Amount cannot be less than the Dogecoin Dust Limit (%vƉ): The request was to pay %vƉ to %v", TxnDustLimit, pay.Amount, pay.PayTo)
@@ -132,28 +152,29 @@ func addOutput(payTo Address, amount CoinAmount, state *txState) error {
 		Amount:        amount,
 		ScriptAddress: payTo,
 	})
-	// also save the amount in originalAmounts for fee calculations (calculateAndDeductFee)
-	state.originalAmounts = append(state.originalAmounts, amount)
 	return nil
 }
 
 // Adjust an output's amount by deducting a percentage of the fee.
 // This uses an array of originalAmounts captured by addOutput.
-func subtractFeeFromOutput(output int, fee decimal.Decimal, feePercent decimal.Decimal, state *txState) error {
-	feeAmount := fee.Mul(feePercent.Div(oneHundred))
+func subtractFeeFromOutput(output int, fee decimal.Decimal, feePercent decimal.Decimal, state *txState) (CoinAmount, error) {
+	// Round the fee to a whole number of Koinu (so the Output is also rounded)
+	// any rounded-off excess goes to fee because it's not included in any output.
+	feeAmount := fee.Mul(feePercent.Div(oneHundred)).Round(NumKoinuDigits)
 	if feeAmount.IsPositive() {
-		newAmount := state.originalAmounts[output].Sub(feeAmount)
+		outAmt := state.outputs[output].Amount
+		newAmount := outAmt.Sub(feeAmount)
 		if newAmount.LessThan(TxnDustLimit) {
 			// TODO: we may need to offer the option to drop outputs below the dust limit,
 			// i.e. skip the payment to a party whose fee contribution consumes the entire payment.
-			return NewErr(InvalidTxn,
+			return ZeroCoins, NewErr(InvalidTxn,
 				"After subtracting the fee percentage, the PayTo Amount is less than the Dogecoin Dust Limit (%vƉ): The request was to pay %vƉ to %v subtracting %v%% of the fee %vƉ which leaves %vƉ remaining.",
-				TxnDustLimit, state.originalAmounts[output], state.outputs[output].ScriptAddress,
+				TxnDustLimit, outAmt, state.outputs[output].ScriptAddress,
 				feePercent, fee, newAmount)
 		}
 		state.outputs[output].Amount = newAmount
 	}
-	return nil
+	return feeAmount, nil
 }
 
 // Calculate the size of a P2PKH transaction.
@@ -179,11 +200,11 @@ func estimateFeePerByte(lib L1) CoinAmount {
 // Calculate fee based on transacion size, within fee limits.
 func feeForTxn(sizeBytes int64, feePerByte CoinAmount, fixedFee CoinAmount, maxFee CoinAmount) CoinAmount {
 	if fixedFee.IsPositive() {
-		return fixedFee // override with specified fee
+		return fixedFee.Round(NumKoinuDigits) // override with specified fee
 	}
 	feeForSize := feePerByte.Mul(decimal.NewFromInt(sizeBytes))
-	feeForSize = decimal.Max(feeForSize, TxnRecommendedMinFee) // at least minFee
-	return decimal.Min(feeForSize, maxFee)                     // limit to maxFee
+	feeForSize = decimal.Max(feeForSize, TxnRecommendedMinFee)   // at least minFee
+	return decimal.Min(feeForSize, maxFee).Round(NumKoinuDigits) // limit to maxFee, round to Koinu
 }
 
 // Calculate the Fee based on the size of the transaction.
@@ -225,11 +246,13 @@ func calculateAndDeductFee(fixedFee CoinAmount, maxFee CoinAmount, payTo []PayTo
 	sizeBytes := sizeOfP2PKH(len(state.inputs), len(state.outputs)+1) // +1 for Change output
 	fee := feeForTxn(sizeBytes, feePerByte, fixedFee, maxFee)
 	// Deduct the fee from all outputs as per DeductFeePercent (update state.outputs)
+	deductedFee := ZeroCoins
 	for i, pay := range payTo {
-		err := subtractFeeFromOutput(i, fee, pay.DeductFeePercent, state)
+		amt, err := subtractFeeFromOutput(i, fee, pay.DeductFeePercent, state)
 		if err != nil {
 			return ZeroCoins, err
 		}
+		deductedFee = deductedFee.Add(amt)
 	}
-	return fee, nil
+	return deductedFee, nil
 }
