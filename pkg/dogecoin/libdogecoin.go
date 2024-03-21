@@ -147,7 +147,7 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 		if err != nil {
 			return giga.NewTxn{}, err
 		}
-		if p2pkh_address != string(utxo.ScriptAddress) {
+		if p2pkh_address != utxo.ScriptAddress {
 			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "HD Private Key doesn't match UTXO ScriptAddress: %v", utxo)
 		}
 
@@ -176,6 +176,13 @@ func (l L1Libdogecoin) GetBlock(blockHash string) (txn giga.RpcBlock, err error)
 		return l.fallback.GetBlock(blockHash)
 	}
 	return giga.RpcBlock{}, fmt.Errorf("not implemented")
+}
+
+func (l L1Libdogecoin) GetBlockHex(blockHash string) (hex string, err error) {
+	if l.fallback != nil {
+		return l.fallback.GetBlockHex(blockHash)
+	}
+	return "", fmt.Errorf("not implemented")
 }
 
 func (l L1Libdogecoin) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err error) {

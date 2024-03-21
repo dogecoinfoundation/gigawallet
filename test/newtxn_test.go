@@ -95,7 +95,7 @@ func makeUTXO(t *testing.T, vout int, val string, acc *giga.Account, lib giga.L1
 		VOut:          vout,
 		Value:         dc(val),
 		ScriptHex:     p2pkhScriptHex(t, payTo),
-		ScriptType:    giga.ScriptTypeP2PKH,
+		ScriptType:    doge.ScriptTypeP2PKH,
 		ScriptAddress: payTo,
 		AccountID:     acc.Address,
 		KeyIndex:      keyIndex,

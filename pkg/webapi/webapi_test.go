@@ -24,7 +24,7 @@ func TestWebAPI(t *testing.T) {
 	if pepper.ForeignID != "Pepper" {
 		t.Fatalf("Create Account did not round-trip foreignID: %s", pepper.ForeignID)
 	}
-	if !doge.ValidateP2PKH(string(pepper.Address), &doge.DogeTestNetChain) {
+	if !doge.ValidateP2PKH(pepper.Address, &doge.DogeTestNetChain) {
 		t.Fatalf("Create Account generated an invalid account ID: %v", pepper.Address)
 	}
 
@@ -49,7 +49,7 @@ func TestWebAPI(t *testing.T) {
 	// Create an Invoice for 10 doge
 	var inv1 giga.PublicInvoice
 	request(t, admin, "/account/Pepper/invoice", `{"items":[{"type":"item","name":"Pants","sku":"P-001","description":"Nice pants","value":"10","quantity":1}],"confirmations":6}`, &inv1)
-	if !doge.ValidateP2PKH(string(inv1.ID), &doge.DogeTestNetChain) {
+	if !doge.ValidateP2PKH(inv1.ID, &doge.DogeTestNetChain) {
 		t.Fatalf("Create Invoice generated an invalid Address: %v", inv1.ID)
 	}
 
@@ -191,7 +191,7 @@ func addFundsToAccount(t *testing.T, store giga.Store, l1 giga.L1, foreignID str
 			VOut:          vout,
 			Value:         decimal.NewFromInt(10),
 			ScriptHex:     p2pkhScriptHex(t, payTo),
-			ScriptType:    giga.ScriptTypeP2PKH,
+			ScriptType:    doge.ScriptTypeP2PKH,
 			ScriptAddress: payTo,
 			AccountID:     acc.Address,
 			KeyIndex:      keyIndex,
