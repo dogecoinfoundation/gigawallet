@@ -7,6 +7,7 @@ import (
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
+	"github.com/shopspring/decimal"
 )
 
 const (
@@ -602,7 +603,7 @@ func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, change
 					Tag:           utxoTagNew,
 					TxID:          tx.TxID,
 					VOut:          n,
-					Value:         doge.KoinuToDecimal(vout.Value),
+					Value:         doge.CoinAmount(vout.Value),
 					ScriptHex:     doge.HexEncode(vout.Script),
 					ScriptType:    scriptType,
 					ScriptAddress: address,
@@ -807,9 +808,10 @@ func (c *ChainFollower) verifyDecodedBlock(b *doge.Block, blockHash string) {
 		}
 		for i, vout := range txn.VOut {
 			bOut := &bTx.VOut[i]
-			val := doge.KoinuToDecimal(bOut.Value)
+			val := doge.CoinAmount(bOut.Value)
 			hex := doge.HexEncode(bOut.Script)
-			if !val.Equals(vout.Value) {
+			dec, err := decimal.NewFromString(val.ToString())
+			if err != nil || !dec.Equals(vout.Value) {
 				log.Fatalf("Wrong out value: %v vs %v in tx %v vin %v", val, vout.Value, txn_id, i)
 			}
 			if hex != vout.ScriptPubKey.Hex {

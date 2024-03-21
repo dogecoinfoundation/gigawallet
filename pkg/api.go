@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/shopspring/decimal"
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 )
 
 type API struct {
@@ -225,7 +225,7 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 		case "PayoutAddress":
 			acc.PayoutAddress = v.(Address)
 		case "PayoutThreshold":
-			acc.PayoutThreshold, err = decimal.NewFromString(v.(string))
+			acc.PayoutThreshold, err = doge.ParseCoinAmount(v.(string))
 			if err != nil {
 				return AccountPublic{}, err
 			}
@@ -277,6 +277,8 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 	fee := newTxn.FeeAmount  // fee paid by the transaction
 	txHex := newTxn.TxnHex
 
+	// FIXME: out fee calculation may not round to the nearest Koinu,
+	// leading to libdogecoin doing the rounding when it parses the `fee string` argument.
 	log.Printf("New Tx: total %v fee %v change %v", newTxn.TotalOut, newTxn.FeeAmount, newTxn.ChangeAmount)
 
 	// Create the Payment record up-front.

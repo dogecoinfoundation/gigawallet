@@ -2,8 +2,6 @@ package giga
 
 import (
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 type Payment struct {
@@ -24,7 +22,7 @@ type Payment struct {
 // Pay an amount to an address
 // optional DeductFeePercent deducts a percentage of required fees from each PayTo (should sum to 100)
 type PayTo struct {
-	Amount           CoinAmount      `json:"amount"`
-	PayTo            Address         `json:"to"`
-	DeductFeePercent decimal.Decimal `json:"deduct_fee_percent"`
+	Amount           CoinAmount `json:"amount"`
+	PayTo            Address    `json:"to"`
+	DeductFeePercent CoinAmount `json:"deduct_fee_percent"`
 }

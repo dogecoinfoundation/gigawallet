@@ -2,9 +2,10 @@ package giga
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
-	"github.com/shopspring/decimal"
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 )
 
 // Invoice is a request for payment created by Gigawallet.
@@ -29,9 +30,9 @@ type Invoice struct {
 
 // CalcTotal sums up the Items listed on the Invoice.
 func (i *Invoice) CalcTotal() CoinAmount {
-	total := ZeroCoins
+	total := doge.ZeroCoins
 	for _, item := range i.Items {
-		total = total.Add(decimal.NewFromInt(int64(item.Quantity)).Mul(item.Value))
+		total = total.Add(item.Value.Mul(uint64(item.Quantity))) // Quantity > 0
 	}
 	return total
 }
@@ -71,18 +72,23 @@ func (i *Invoice) Validate() error {
 
 		// Value should be greater than zero, unless type is discount
 		if item.Type == "discount" {
-			if item.Value.GreaterThanOrEqual(decimal.Zero) {
+			if item.Value >= 0 {
 				return errors.New("Discount value should be less than zero")
 			}
 		} else {
-			if item.Value.LessThanOrEqual(decimal.Zero) {
+			if item.Value <= 0 {
 				return errors.New("Item value should be greater than zero")
 			}
 		}
 
 		// validate that the total is more than zero
-		if i.CalcTotal().LessThanOrEqual(decimal.Zero) {
+		if !i.CalcTotal().IsPositive() {
 			return errors.New("The total must be greater than zero")
+		}
+
+		// validate that the total is less than max money
+		if i.CalcTotal().IsValid() {
+			return fmt.Errorf("The total must be no more than MaxMoney (%v)", doge.MaxMoney.ToString())
 		}
 
 		// Validate item type
@@ -117,11 +123,11 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		Estimate:       0,
 	}
 
-	if i.LastIncomingAmount.IsPositive() {
+	if i.LastIncomingAmount > 0 {
 		pub.PartDetected = true
 	}
 
-	if i.LastIncomingAmount.GreaterThanOrEqual(i.Total) {
+	if i.LastIncomingAmount >= i.Total {
 		pub.TotalDetected = true
 	}
 

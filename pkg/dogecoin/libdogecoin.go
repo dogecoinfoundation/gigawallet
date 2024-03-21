@@ -93,7 +93,7 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 	// add transaction outputs: P2PKH paid to ScriptAddress.
 	var anyOutputAddress string
 	for _, out := range outputs {
-		if libdogecoin.W_add_output(tx, string(out.ScriptAddress), out.Amount.String()) != 1 {
+		if libdogecoin.W_add_output(tx, string(out.ScriptAddress), out.Amount.ToString()) != 1 {
 			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot add transaction output: %v", out)
 		}
 		anyOutputAddress = string(out.ScriptAddress)
@@ -102,7 +102,7 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 	// finalize the transaction: adds a change output if necessary.
 	// the first address (destination_address) is only used to determine main-net or test-net.
 	// the final argument is the change_address which will be used to add a txn output if there is any change.
-	tx_hex := libdogecoin.W_finalize_transaction(tx, anyOutputAddress, fee.String(), totalIn.String(), string(change))
+	tx_hex := libdogecoin.W_finalize_transaction(tx, anyOutputAddress, fee.ToString(), totalIn.ToString(), string(change))
 	if tx_hex == "" {
 		return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot finalize_transaction")
 	}

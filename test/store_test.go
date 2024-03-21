@@ -6,6 +6,7 @@ import (
 	"time"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 	sqlite "github.com/dogecoinfoundation/gigawallet/pkg/store"
 	"github.com/shopspring/decimal"
 )
@@ -252,12 +253,12 @@ func TestStore(t *testing.T) {
 				// Test Payment creation
 				payTo := []giga.PayTo{
 					{
-						Amount:           decimal.NewFromInt(int64(i) + 1),
+						Amount:           doge.CoinAmount(int64(i+1)) * doge.OneDoge,
 						PayTo:            giga.Address(fmt.Sprintf("DHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%d", i)),
-						DeductFeePercent: decimal.Zero,
+						DeductFeePercent: 0,
 					},
 				}
-				_, err := tx.CreatePayment(addr1, payTo, decimal.NewFromInt(100), decimal.NewFromInt(1))
+				_, err := tx.CreatePayment(addr1, payTo, 100*doge.OneDoge, doge.OneDoge)
 				if err != nil {
 					t.Fatal(n("CreatePayment"), err)
 				}

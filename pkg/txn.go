@@ -7,9 +7,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-var oneHundred = decimal.NewFromInt(100)
-var oneThousand = decimal.NewFromInt(1000)
-
 // We may need to use addUTXOsUpToAmount during calculateFee (source, inputs, used)
 // and we need to generate the tx hex repeatedly (lib, acc, inputs, outputs, changeAddress)
 type txState struct {
@@ -75,36 +72,35 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Accoun
 }
 
 func sumPayTo(payTo []PayTo) (CoinAmount, bool, error) {
-	total := decimal.Zero
-	deduct := decimal.Zero
+	total := ZeroCoins
+	deduct := ZeroCoins
 	for _, pay := range payTo {
-		total = total.Add(pay.Amount)
-		if pay.Amount.LessThan(TxnDustLimit) {
+		total += pay.Amount
+		if pay.Amount < TxnDustLimit {
 			return ZeroCoins, false, NewErr(InvalidTxn, "PayTo Amount cannot be less than the Dogecoin Dust Limit (%vƉ): The request was to pay %vƉ to %v", TxnDustLimit, pay.Amount, pay.PayTo)
 		}
-		if pay.DeductFeePercent.IsNegative() {
+		if pay.DeductFeePercent < 0 {
 			return ZeroCoins, false, NewErr(InvalidTxn, "Deduct-Fee-Percent cannot be negative: The request was to deduct %v%% from a payment of %vƉ to %v", pay.DeductFeePercent, pay.Amount, pay.PayTo)
 		} else {
-			deduct = deduct.Add(pay.DeductFeePercent)
+			deduct += pay.DeductFeePercent
 		}
 	}
-	deductFee := !deduct.IsZero()
-	if deductFee && !deduct.Equals(oneHundred) {
+	if deduct != 0 && deduct != 100 {
 		return ZeroCoins, false, NewErr(InvalidTxn, "The requested Deduct-Fee-Percent values do not add up to 100")
 	}
-	return total, deductFee, nil
+	return total, deduct != 0, nil
 }
 
 func addUTXOsUpToAmount(amount CoinAmount, state *txState) error {
 	current := sumInputs(state.inputs)
-	for current.LessThan(amount) {
+	for current < amount {
 		utxo, err := state.source.NextUnspentUTXO(state.used)
 		if err == nil {
 			// add input
 			state.inputs = append(state.inputs, utxo)
 			state.used.Add(utxo.TxID, utxo.VOut)
 			// update current total
-			current = current.Add(utxo.Value)
+			current += utxo.Value
 		} else {
 			return err
 		}
@@ -115,7 +111,7 @@ func addUTXOsUpToAmount(amount CoinAmount, state *txState) error {
 func sumInputs(inputs []UTXO) CoinAmount {
 	total := ZeroCoins
 	for _, utxo := range inputs {
-		total = total.Add(utxo.Value)
+		total += utxo.Value
 	}
 	return total
 }
@@ -124,7 +120,7 @@ func addOutput(payTo Address, amount CoinAmount, state *txState) error {
 	if payTo == "" {
 		return NewErr(InvalidTxn, "Invalid transaction output: missing 'to' address in the request.")
 	}
-	if amount.LessThanOrEqual(ZeroCoins) {
+	if amount <= ZeroCoins {
 		return NewErr(InvalidTxn, "Invalid transaction output: the 'amount' is negative or zero.")
 	}
 	state.outputs = append(state.outputs, NewTxOut{
@@ -139,11 +135,11 @@ func addOutput(payTo Address, amount CoinAmount, state *txState) error {
 
 // Adjust an output's amount by deducting a percentage of the fee.
 // This uses an array of originalAmounts captured by addOutput.
-func subtractFeeFromOutput(output int, fee decimal.Decimal, feePercent decimal.Decimal, state *txState) error {
-	feeAmount := fee.Mul(feePercent.Div(oneHundred))
-	if feeAmount.IsPositive() {
-		newAmount := state.originalAmounts[output].Sub(feeAmount)
-		if newAmount.LessThan(TxnDustLimit) {
+func subtractFeeFromOutput(output int, fee CoinAmount, feePercent CoinAmount, state *txState) error {
+	feeAmount := fee * (feePercent / 100) // NB. (feePercent/100) <= 1.0
+	if feeAmount > 0 {
+		newAmount := state.originalAmounts[output] - feeAmount
+		if newAmount < TxnDustLimit {
 			// TODO: we may need to offer the option to drop outputs below the dust limit,
 			// i.e. skip the payment to a party whose fee contribution consumes the entire payment.
 			return NewErr(InvalidTxn,
@@ -163,25 +159,28 @@ func sizeOfP2PKH(nIn int, nOut int) int64 {
 	return 10 + int64(nIn)*148 + int64(nOut)*34
 }
 
-// Get fee estimate from Core `estimatesmartfee` if available,
+// Get fee estimate from Core `estimatefee` if available,
 // otherwise use the base consensus TxnFeePerByte.
 func estimateFeePerByte(lib L1) CoinAmount {
 	feePerKB, err := lib.EstimateFee(6)
 	if err != nil {
-		log.Printf("feeForP2PKH: did not use estimatesmartfee due to error: %s", err.Error())
+		log.Printf("feeForP2PKH: did not use estimatefee due to error: %s", err.Error())
 	} else {
-		perByte := feePerKB.Div(oneThousand)
-		return decimal.Max(perByte, TxnFeePerByte)
+		perByte := feePerKB / 1000
+		if perByte < TxnFeePerByte {
+			perByte = TxnFeePerByte
+		}
+		return perByte
 	}
 	return TxnFeePerByte
 }
 
 // Calculate fee based on transacion size, within fee limits.
 func feeForTxn(sizeBytes int64, feePerByte CoinAmount, fixedFee CoinAmount, maxFee CoinAmount) CoinAmount {
-	if fixedFee.IsPositive() {
+	if fixedFee > 0 {
 		return fixedFee // override with specified fee
 	}
-	feeForSize := feePerByte.Mul(decimal.NewFromInt(sizeBytes))
+	feeForSize := feePerByte * sizeBytes
 	feeForSize = decimal.Max(feeForSize, TxnRecommendedMinFee) // at least minFee
 	return decimal.Min(feeForSize, maxFee)                     // limit to maxFee
 }

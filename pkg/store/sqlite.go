@@ -49,8 +49,6 @@ CREATE TABLE IF NOT EXISTS invoice (
 	key_index INTEGER NOT NULL,
 	confirmations INTEGER NOT NULL,
 	created DATETIME NOT NULL,
-	incoming_amount NUMERIC(18,8),
-	paid_amount NUMERIC(18,8),
 	last_incoming NUMERIC(18,8),
 	last_paid NUMERIC(18,8),
 	paid_height INTEGER,
