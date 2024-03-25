@@ -37,6 +37,10 @@ type Privkey string         // Extended Private Key for HD Wallet
 type CoinAmount = decimal.Decimal
 type ScriptType = doge.ScriptType
 
+const OneCoin_64 = 100_000_000           // 1 DOGE
+const TxnDustLimit_64 = OneCoin_64 / 100 // 0.01 DOGE
+const NumKoinuDigits = 8                 // Maximum Koinu digits (after decimal point)
+
 var ZeroCoins = decimal.NewFromInt(0)                           // 0 DOGE
 var OneCoin = decimal.NewFromInt(1)                             // 1.0 DOGE
 var TxnRecommendedMinFee = OneCoin.Div(decimal.NewFromInt(100)) // 0.01 DOGE (RECOMMENDED_MIN_TX_FEE in Core)

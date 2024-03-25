@@ -105,6 +105,11 @@ func readMerkleBranch(s *Stream) (b MerkleBranch) {
 	return
 }
 
+func DecodeTx(txBytes []byte) BlockTx {
+	s := &Stream{b: txBytes}
+	return readTx(s)
+}
+
 func readTx(s *Stream) (tx BlockTx) {
 	start := s.p
 	tx.Version = s.uint32le()
