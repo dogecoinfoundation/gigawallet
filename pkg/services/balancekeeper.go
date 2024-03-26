@@ -42,6 +42,7 @@ func (b BalanceKeeper) Run(started, stopped chan bool, stop chan context.Context
 		defer func() {
 			if r := recover(); r != nil {
 				log.Println("BalanceKeeper: panic received:", r)
+				stopped <- true
 			}
 			if b.tx != nil {
 				// shutdown during a transaction.
