@@ -213,6 +213,13 @@ func (l L1Libdogecoin) GetBlockCount() (blockCount int64, err error) {
 	return 0, fmt.Errorf("not implemented")
 }
 
+func (l L1Libdogecoin) GetBlockchainInfo() (info giga.RpcBlockchainInfo, err error) {
+	if l.fallback != nil {
+		return l.fallback.GetBlockchainInfo()
+	}
+	return giga.RpcBlockchainInfo{}, fmt.Errorf("not implemented")
+}
+
 func (l L1Libdogecoin) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	if l.fallback != nil {
 		return l.fallback.GetTransaction(txnHash)

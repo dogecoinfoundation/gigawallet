@@ -26,6 +26,7 @@ type L1 interface {
 	GetBlockHash(height int64) (string, error)
 	GetBestBlockHash() (string, error)
 	GetBlockCount() (int64, error)
+	GetBlockchainInfo() (RpcBlockchainInfo, error)
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(txnHex string) (txid string, err error)
 	EstimateFee(confirmTarget int) (feePerKB CoinAmount, err error)
@@ -170,4 +171,23 @@ type RpcBlockHeader struct {
 	ChainWork         string          `json:"chainwork"`         // (string) Expected number of hashes required to produce the chain up to this block (hex)
 	PreviousBlockHash string          `json:"previousblockhash"` // (string) The hash of the previous block (hex)
 	NextBlockHash     string          `json:"nextblockhash"`     // (string) The hash of the next block (hex)
+}
+
+// RpcBlockchainInfo from Core
+type RpcBlockchainInfo struct {
+	Chain                string  `json:"chain"`                // (string) current network name (main, test, regtest)
+	Blocks               int64   `json:"blocks"`               // (numeric) the height of the most-work fully-validated chain. The genesis block has height 0
+	Headers              int64   `json:"headers"`              // (numeric) the current number of headers we have validated
+	BestBlockHash        string  `json:"bestblockhash"`        // (string) the hash of the currently best block
+	Difficulty           float64 `json:"difficulty"`           // (numeric) the current difficulty
+	MedianTime           int64   `json:"mediantime"`           // (numeric) median time for the current best block
+	VerificationProgress float64 `json:"verificationprogress"` // (numeric) estimate of verification progress [0..1]
+	InitialBlockDownload bool    `json:"initialblockdownload"` // (boolean) (debug information) estimate of whether this node is in Initial Block Download mode
+	ChainWord            string  `json:"chainwork"`            // (string) total amount of work in active chain, in hexadecimal
+	SizeOnDisk           int64   `json:"size_on_disk"`         // (numeric) the estimated size of the block and undo files on disk
+	Pruned               bool    `json:"pruned"`               // (boolean) if the blocks are subject to pruning
+	PruneHeight          int64   `json:"pruneheight"`          // (numeric) lowest-height complete block stored (only present if pruning is enabled)
+	AutomaticPruning     bool    `json:"automatic_pruning"`    // (boolean) whether automatic pruning is enabled (only present if pruning is enabled)
+	PruneTargetSize      int64   `json:"prune_target_size"`    // (numeric) the target size used by pruning (only present if automatic pruning is enabled)
+
 }
