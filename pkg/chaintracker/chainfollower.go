@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	RETRY_DELAY       = 5 * time.Second        // for RPC and Database errors.
-	WRONG_CHAIN_DELAY = 5 * time.Minute        // for "Wrong Chain" error (essentially stop)
-	CONFLICT_DELAY    = 250 * time.Millisecond // for Database conflicts (concurrent transactions)
-	BLOCKS_PER_COMMIT = 10                     // number of blocks per database commit.
+	RETRY_DELAY        = 5 * time.Second        // for RPC and Database errors.
+	WRONG_CHAIN_DELAY  = 5 * time.Minute        // for "Wrong Chain" error (essentially stop)
+	WAIT_INITIAL_BLOCK = 30 * time.Second       // for Initial Block Download
+	CONFLICT_DELAY     = 250 * time.Millisecond // for Database conflicts (concurrent transactions)
+	BLOCKS_PER_COMMIT  = 10                     // number of blocks per database commit.
 )
 
 type ChainFollower struct {
@@ -154,6 +155,14 @@ func (c *ChainFollower) fetchStartingPos() ChainPos {
 			continue
 		}
 		c.chain = chain
+		// Wait for Core to be fully synced, otherwise fetchBlockCount will give
+		// us an early block and we'll follow the whole chain.
+		info := c.fetchBlockchainInfo()
+		if info.InitialBlockDownload {
+			log.Println("ChainFollower: waiting for Core initial block download")
+			c.sleepForRetry(nil, WAIT_INITIAL_BLOCK)
+			continue
+		}
 		if state.BestBlockHash != "" {
 			// Resume sync.
 			// Make sure we're syncing the same blockchain as before.
@@ -684,6 +693,18 @@ func (c *ChainFollower) fetchBlockHash(height int64) string {
 			c.sleepForRetry(err, 0)
 		} else {
 			return hash
+		}
+	}
+}
+
+func (c *ChainFollower) fetchBlockchainInfo() giga.RpcBlockchainInfo {
+	for {
+		info, err := c.l1.GetBlockchainInfo()
+		if err != nil {
+			log.Println("ChainFollower: error retrieving blockchain info (will retry):", err)
+			c.sleepForRetry(err, 0)
+		} else {
+			return info
 		}
 	}
 }

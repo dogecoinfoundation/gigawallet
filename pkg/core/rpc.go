@@ -71,6 +71,10 @@ func (l *L1CoreRPC) request(method string, params []any, result any) error {
 	if err != nil {
 		return fmt.Errorf("json-rpc read response: %v", err)
 	}
+	// check for error response
+	if res.StatusCode != 200 {
+		return fmt.Errorf("json-rpc error status: %v", res.StatusCode)
+	}
 	// cannot use json.NewDecoder: "The decoder introduces its own buffering
 	// and may read data from r beyond the JSON values requested."
 	var rpcres rpcResponse
@@ -146,6 +150,11 @@ func (l *L1CoreRPC) GetBestBlockHash() (blockHash string, err error) {
 
 func (l *L1CoreRPC) GetBlockCount() (blockCount int64, err error) {
 	err = l.request("getblockcount", []any{}, &blockCount)
+	return
+}
+
+func (l *L1CoreRPC) GetBlockchainInfo() (info giga.RpcBlockchainInfo, err error) {
+	err = l.request("getblockchaininfo", []any{}, &info)
 	return
 }
 

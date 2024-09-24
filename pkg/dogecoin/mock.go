@@ -57,6 +57,10 @@ func (l L1Mock) GetBlockCount() (blockCount int64, err error) {
 	return 100, nil
 }
 
+func (l L1Mock) GetBlockchainInfo() (info giga.RpcBlockchainInfo, err error) {
+	return giga.RpcBlockchainInfo{}, fmt.Errorf("not implemented")
+}
+
 func (l L1Mock) GetTransaction(txnHash string) (txn giga.RawTxn, err error) {
 	return giga.RawTxn{}, nil
 }
