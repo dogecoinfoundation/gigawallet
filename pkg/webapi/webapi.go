@@ -88,6 +88,9 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
 	adminMux.POST("/account/:foreignID/pay", t.payToAddress)
 
+	// POST /account/:foreignID/paytx { "pay": [{ "amount":"1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" }] } -> { tx }
+	adminMux.POST("/account/:foreignID/paytx", t.payTransaction)
+
 	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
 
@@ -362,9 +365,37 @@ func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httproute
 		// treat 'PayTo' request as an array of one item.
 		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
 	}
-	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee)
+	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee, true)
 	if err != nil {
 		sendError(w, "SendFundsToAddress", err)
+		return
+	}
+	sendResponse(w, res)
+}
+
+// Create and sign a transaction to pay out funds from the account.
+// POST /account/:foreignID/paytx { "pay":[{ "amount": "1.0", "to": "DPeT…" }] } -> { tx:"…hex" }
+// or { "explicit_fee": "0.2", "pay": [ "amount": "1.0", "to": "DPeT…", "deduct_fee_percent": "100" ] }
+func (t WebAPI) payTransaction(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the foreignID is a 3rd-party ID for the account
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	var o PayToAddressRequest
+	err := json.NewDecoder(r.Body).Decode(&o)
+	if err != nil {
+		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
+		return
+	}
+	if len(o.Pay) == 0 {
+		// treat 'PayTo' request as an array of one item.
+		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
+	}
+	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee, false)
+	if err != nil {
+		sendError(w, "PayTransaction", err)
 		return
 	}
 	sendResponse(w, res)

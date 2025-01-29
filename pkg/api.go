@@ -1,10 +1,12 @@
 package giga
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
 
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 	"github.com/shopspring/decimal"
 )
 
@@ -252,13 +254,14 @@ func (a API) UpdateAccountSettings(foreignID string, update map[string]interface
 }
 
 type SendFundsResult struct {
-	TxId  string     `json:"hex"`
-	Total CoinAmount `json:"total"`
-	Paid  CoinAmount `json:"paid"`
-	Fee   CoinAmount `json:"fee"`
+	TxId   string     `json:"hex"`   // hash of the transaction (must be unique on-chain)
+	Total  CoinAmount `json:"total"` // total amount spent, including fee
+	Paid   CoinAmount `json:"paid"`  // amount paid to recipient, excluding fee
+	Fee    CoinAmount `json:"fee"`   // fee paid
+	TxData string     `json:"tx"`    // transaction data, hex-encoded
 }
 
-func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee CoinAmount, maxFee CoinAmount) (res SendFundsResult, err error) {
+func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee CoinAmount, maxFee CoinAmount, sendTx bool) (res SendFundsResult, err error) {
 	account, err := a.Store.GetAccount(foreignID)
 	if err != nil {
 		return
@@ -313,9 +316,21 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 	}
 
 	// Submit the transaction to core.
-	txid, err := a.L1.Send(txHex)
-	if err != nil {
-		return
+	txid := ""
+	if sendTx {
+		// Submit tx to the network.
+		txid, err = a.L1.Send(txHex)
+		if err != nil {
+			return
+		}
+	} else {
+		// Don't submit: compute the tx hash.
+		txData, e := hex.DecodeString(txHex)
+		if e != nil {
+			err = e
+			return
+		}
+		txid = doge.TxHashHex(txData)
 	}
 
 	// Update the Payment with the txid,
@@ -334,17 +349,19 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 		return
 	}
 
-	msg := PaymentEvent{
-		PaymentID: payment.ID,
-		ForeignID: account.ForeignID,
-		AccountID: account.Address,
-		PayTo:     payTo,
-		Total:     total,
-		TxID:      txid,
+	if sendTx {
+		msg := PaymentEvent{
+			PaymentID: payment.ID,
+			ForeignID: account.ForeignID,
+			AccountID: account.Address,
+			PayTo:     payTo,
+			Total:     total,
+			TxID:      txid,
+		}
+		a.bus.Send(PAYMENT_SENT, msg)
 	}
-	a.bus.Send(PAYMENT_SENT, msg)
 
-	return SendFundsResult{TxId: txid, Total: total.Add(fee), Paid: total, Fee: fee}, nil
+	return SendFundsResult{TxId: txid, Total: total.Add(fee), Paid: total, Fee: fee, TxData: txHex}, nil
 }
 
 func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res SendFundsResult, err error) {
