@@ -120,6 +120,17 @@ CREATE TABLE IF NOT EXISTS services (
 	cursor INTEGER NOT NULL
 );
 `
+const SQL_MIGRATION_v2 = `
+ALTER TABLE utxo ADD COLUMN spend_payment INTEGER;
+`
+
+var MIGRATIONS = []struct {
+	ver   int
+	query string
+}{
+	{1, SETUP_SQL},
+	{2, SQL_MIGRATION_v2},
+}
 
 /****************** SQLiteStore implements giga.Store ********************/
 var _ giga.Store = SQLiteStore{}
@@ -149,26 +160,63 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "opening database")
 	}
-	setup_sql := SETUP_SQL
 	if backend == "sqlite3" {
 		// limit concurrent access until we figure out a way to start transactions
 		// with the BEGIN CONCURRENT statement in Go.
 		db.SetMaxOpenConns(1)
-		// WAL mode provides more concurrency, although not necessary with above.
-		// _, err = db.Exec("PRAGMA journal_mode=WAL")
-		// if err != nil {
-		// 	return SQLiteStore{}, store.dbErr(err, "creating database schema")
-		// }
-	} else {
-		setup_sql = strings.ReplaceAll(setup_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
-		setup_sql = strings.ReplaceAll(setup_sql, "DATETIME", "TIMESTAMP WITH TIME ZONE")
 	}
 	// init tables / indexes
-	_, err = db.Exec(setup_sql)
+	err = store.initSchema(backend)
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "creating database schema")
 	}
 	return store, nil
+}
+
+func (s *SQLiteStore) initSchema(backend string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return s.dbErr(err, "begin transaction")
+	}
+	// set up version table (idempotent)
+	version := 0
+	err = tx.QueryRow("SELECT version FROM migration LIMIT 1").Scan(&version)
+	if err != nil {
+		_, err = tx.Exec("CREATE TABLE migration (version INTEGER NOT NULL)")
+		if err != nil {
+			return s.dbErr(err, "creating migration table")
+		}
+		_, err = tx.Exec("INSERT INTO migration (version) VALUES (?)", version)
+		if err != nil {
+			return s.dbErr(err, "querying schema version")
+		}
+	}
+	initVer := version
+	for _, m := range MIGRATIONS {
+		if version < m.ver {
+			do_sql := m.query
+			if backend == "postgres" {
+				do_sql = strings.ReplaceAll(do_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
+				do_sql = strings.ReplaceAll(do_sql, "DATETIME", "TIMESTAMP WITH TIME ZONE")
+			}
+			_, err = tx.Exec(do_sql)
+			if err != nil {
+				return s.dbErr(err, fmt.Sprintf("applying migration: %v", m.ver))
+			}
+			version = m.ver
+		}
+	}
+	if version != initVer {
+		_, err = tx.Exec("UPDATE migration SET version=?", version)
+		if err != nil {
+			return s.dbErr(err, "updating schema version")
+		}
+	}
+	err = tx.Commit()
+	if err != nil {
+		return s.dbErr(err, "commit schema")
+	}
+	return err
 }
 
 // Defer this until shutdown
