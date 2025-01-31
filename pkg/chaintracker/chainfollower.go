@@ -642,7 +642,8 @@ func (c *ChainFollower) fetchChainState() giga.ChainState {
 		state, err := c.store.GetChainState()
 		if err != nil {
 			if giga.IsNotFoundError(err) {
-				return giga.ChainState{} // empty chainstate.
+				// fix: NextSeq must start from 1 because service cursors start from 0.
+				return giga.ChainState{NextSeq: 1} // empty chainstate.
 			}
 			log.Println("ChainFollower: error retrieving best block (will retry):", err)
 			c.sleepForRetry(err, 0)

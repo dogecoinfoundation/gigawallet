@@ -227,6 +227,10 @@ func (s SQLiteStore) getChainStateCommon(tx Queryable) (giga.ChainState, error) 
 	if err != nil {
 		return giga.ChainState{}, s.dbErr(err, "GetChainState: row.Scan")
 	}
+	if state.NextSeq < 1 {
+		// fix: NextSeq must start from 1 because service cursors start from 0.
+		state.NextSeq = 1
+	}
 	return state, nil
 }
 
