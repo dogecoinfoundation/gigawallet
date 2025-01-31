@@ -798,17 +798,22 @@ func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 	return nil
 }
 
+func (t SQLiteStoreTransaction) MarkUTXOReserved(txID string, vOut int, paymentID int64) error {
+	_, err := t.tx.Exec("UPDATE utxo SET spend_payment=$1 WHERE txn_id=$2 AND vout=$3", paymentID, txID, vOut)
+	if err != nil {
+		return t.store.dbErr(err, "MarkUTXOReserved: executing update")
+	}
+	return nil
+}
+
 func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight int64, spendTxID string) (id string, scriptAddress giga.Address, err error) {
 	row := t.tx.QueryRow("UPDATE utxo SET spending_height=$1, spend_txid=$2 WHERE txn_id=$3 AND vout=$4 RETURNING account_address, script_address", blockHeight, spendTxID, txID, vOut)
-	if err != nil {
-		return "", "", t.store.dbErr(err, "MarkUTXOSpent: executing update")
-	}
 	err = row.Scan(&id, &scriptAddress)
 	if err == sql.ErrNoRows {
 		return "", "", nil // commonly called for UTXOs we don't have in the DB.
 	}
 	if err != nil {
-		return "", "", t.store.dbErr(err, "MarkUTXOSpent: scanning row")
+		return "", "", t.store.dbErr(err, "MarkUTXOSpent: executing update")
 	}
 	return
 }

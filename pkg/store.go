@@ -134,6 +134,11 @@ type StoreTransaction interface {
 	// Create a new Unspent Transaction Output in the database.
 	CreateUTXO(utxo UTXO) error
 
+	// Mark a UTXO as reserved for an outgoing payment (storing the given txid)
+	// This prevents Gigawallet trying to double-spend the UTXO before MarkPaymentsOnChain.
+	// Reserved UTXOs are counted as "outgoing" for balance purposes.
+	MarkUTXOReserved(txID string, vOut int, paymentID int64) error
+
 	// Mark an Unspent Transaction Output as spent (storing the given block-height and txid)
 	// Returns the ID of the Account that owns this UTXO, if known to Gigawallet.
 	MarkUTXOSpent(txID string, vOut int, spentHeight int64, spendTxID string) (accountId string, scriptAddress Address, err error)

@@ -272,7 +272,7 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 
 	// Create the Dogecoin Transaction
 	source := NewUTXOSource(a.Store, account.Address)
-	newTxn, err := CreateTxn(payTo, explicitFee, maxFee, account, source, a.L1)
+	newTxn, spentUTXOs, err := CreateTxn(payTo, explicitFee, maxFee, account, source, a.L1)
 	if err != nil {
 		return
 	}
@@ -305,15 +305,21 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 		dbtx.Rollback()
 		return
 	}
-	// err = tx.ReserveUTXOsForPayment(payId, builder.GetUTXOs()) // TODO
-	// if err != nil {
-	//  tx.Rollback()
-	// 	return
-	// }
+	// Reserve the UTXOs we're spending so they can't be double-spent.
+	for _, utxo := range spentUTXOs {
+		err = dbtx.MarkUTXOReserved(utxo.TxID, utxo.VOut, payment.ID)
+		if err != nil {
+			dbtx.Rollback()
+			return
+		}
+	}
 	err = dbtx.Commit()
 	if err != nil {
 		return
 	}
+
+	// BEYOND THIS POINT: if we fail to submit the tx, user must void the payment
+	// manually which will clear the reserved lock on the UTXOs being spent.
 
 	// Submit the transaction to core.
 	txid := ""
@@ -382,7 +388,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 	// Make a Doge Txn to pay `invoiceAmount` from `account` to `payTo`
 	payTo := []PayTo{{PayTo: payToAddress, Amount: invoiceAmount}}
 	source := NewUTXOSource(a.Store, account.Address)
-	newTxn, err := CreateTxn(payTo, ZeroCoins, TxnRecommendedMaxFee, account, source, a.L1)
+	newTxn, spentUTXOs, err := CreateTxn(payTo, ZeroCoins, TxnRecommendedMaxFee, account, source, a.L1)
 	if err != nil {
 		return
 	}
@@ -412,11 +418,14 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 		tx.Rollback()
 		return
 	}
-	// err = tx.ReserveUTXOsForPayment(payId, builder.GetUTXOs()) // TODO
-	// if err != nil {
-	//  tx.Rollback()
-	// 	return
-	// }
+	// Reserve the UTXOs we're spending so they can't be double-spent.
+	for _, utxo := range spentUTXOs {
+		err = tx.MarkUTXOReserved(utxo.TxID, utxo.VOut, payment.ID)
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+	}
 	err = tx.Commit()
 	if err != nil {
 		return

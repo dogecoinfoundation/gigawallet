@@ -24,14 +24,14 @@ type txState struct {
 	deductFee     bool       // payTo has DeductFeePercent specified
 }
 
-func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Account, source UTXOSource, lib L1) (NewTxn, error) {
+func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Account, source UTXOSource, lib L1) (tx NewTxn, inputs []UTXO, e error) {
 	outputSum, deductFee, err := sumPayTo(payTo)
 	if err != nil {
-		return NewTxn{}, err
+		return NewTxn{}, nil, err
 	}
 	changeAddress, err := acc.NextChangeAddress(lib)
 	if err != nil {
-		return NewTxn{}, err
+		return NewTxn{}, nil, err
 	}
 	state := &txState{
 		lib:           lib,
@@ -47,12 +47,12 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Accoun
 
 	err = addUTXOsUpToAmount(outputSum, state)
 	if err != nil {
-		return NewTxn{}, err
+		return NewTxn{}, nil, err
 	}
 	for _, pay := range payTo {
 		err = addOutput(pay.PayTo, pay.Amount, state)
 		if err != nil {
-			return NewTxn{}, err
+			return NewTxn{}, nil, err
 		}
 	}
 
@@ -60,34 +60,34 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Accoun
 	if deductFee {
 		fee, err = calculateAndDeductFee(fixedFee, maxFee, payTo, state)
 		if err != nil {
-			return NewTxn{}, err
+			return NewTxn{}, nil, err
 		}
 	} else {
 		fee, err = calculateFee(fixedFee, maxFee, state)
 		if err != nil {
-			return NewTxn{}, err
+			return NewTxn{}, nil, err
 		}
 	}
 
 	// Build the transaction with the current inputs and fee.
 	newTx, err := state.lib.MakeTransaction(state.inputs, state.outputs, fee, state.changeAddress, state.account.Privkey)
 	if err != nil {
-		return NewTxn{}, err
+		return NewTxn{}, nil, err
 	}
 
 	// Check all outputs are >= TxnDustLimit
 	txHex, err := doge.HexDecode(newTx.TxnHex)
 	if err != nil {
-		return NewTxn{}, err
+		return NewTxn{}, nil, err
 	}
 	dTx := doge.DecodeTx(txHex)
 	for n, out := range dTx.VOut {
 		if out.Value < TxnDustLimit_64 {
-			return NewTxn{}, NewErr(InvalidTxn, "BUG: Tx Output cannot be less than the Dogecoin Dust Limit (%vƉ): tx output %v is %v koinu", TxnDustLimit.String(), n, doge.KoinuToDecimal(out.Value).String())
+			return NewTxn{}, nil, NewErr(InvalidTxn, "BUG: Tx Output cannot be less than the Dogecoin Dust Limit (%vƉ): tx output %v is %v koinu", TxnDustLimit.String(), n, doge.KoinuToDecimal(out.Value).String())
 		}
 	}
 
-	return newTx, nil
+	return newTx, state.inputs, nil
 }
 
 func sumPayTo(payTo []PayTo) (CoinAmount, bool, error) {
