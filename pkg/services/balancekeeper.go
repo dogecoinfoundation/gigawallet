@@ -117,6 +117,7 @@ func (b BalanceKeeper) updateAccountBalance(tx giga.StoreTransaction, id giga.Ad
 		log.Printf("BalanceKeeper: CalculateBalance '%s': %v\n", id, err)
 		return err
 	}
+	log.Printf("BalanceKeeper: account balance '%s': in %v bal %v out %v\n", id, bal.IncomingBalance, bal.CurrentBalance, bal.OutgoingBalance)
 	if !(bal.CurrentBalance.Equals(acc.CurrentBalance) &&
 		bal.IncomingBalance.Equals(acc.IncomingBalance) &&
 		bal.OutgoingBalance.Equals(acc.OutgoingBalance)) {

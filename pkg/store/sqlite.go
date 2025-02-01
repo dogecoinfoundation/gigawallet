@@ -320,14 +320,16 @@ func (s SQLiteStore) getAccountCommon(tx Queryable, accountKey string, isForeign
 }
 
 func (s SQLiteStore) calculateBalanceCommon(tx Queryable, accountID giga.Address) (bal giga.AccountBalance, err error) {
+	// policy: change (is_internal) is never 'incoming' or 'outgoing', only 'current' until spent.
+	// incoming: utxo: !is_internal && added_height && !spendable_height
+	// current: utxo: (is_internal || spendable_height) && (!spending_height && !spend_payment)
+	// outgoing: payment.total where !confirmed_height (until confirmed)
+	// this query uses the index on (account_address)
 	row := tx.QueryRow(`
-SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address=$1),0),
-COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address=$1),0),
-COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address=$1),0)`, accountID)
+SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE account_address=$1 AND is_internal=0 AND added_height IS NOT NULL AND spendable_height IS NULL),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE account_address=$1 AND (is_internal=1 OR spendable_height IS NOT NULL) AND spending_height IS NULL AND spend_payment IS NULL),0),
+COALESCE((SELECT SUM(total) FROM payment WHERE account_address=$1 AND confirmed_height IS NULL),0)`, accountID)
 	err = row.Scan(&bal.IncomingBalance, &bal.CurrentBalance, &bal.OutgoingBalance)
-	if err != nil {
-		return giga.AccountBalance{}, s.dbErr(err, "CalculateBalance: row.Scan")
-	}
 	return
 }
 
