@@ -120,6 +120,17 @@ CREATE TABLE IF NOT EXISTS services (
 	cursor INTEGER NOT NULL
 );
 `
+const SQL_MIGRATION_v2 = `
+ALTER TABLE utxo ADD COLUMN spend_payment INTEGER;
+`
+
+var MIGRATIONS = []struct {
+	ver   int
+	query string
+}{
+	{1, SETUP_SQL},
+	{2, SQL_MIGRATION_v2},
+}
 
 /****************** SQLiteStore implements giga.Store ********************/
 var _ giga.Store = SQLiteStore{}
@@ -149,26 +160,63 @@ func NewSQLiteStore(fileName string) (giga.Store, error) {
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "opening database")
 	}
-	setup_sql := SETUP_SQL
 	if backend == "sqlite3" {
 		// limit concurrent access until we figure out a way to start transactions
 		// with the BEGIN CONCURRENT statement in Go.
 		db.SetMaxOpenConns(1)
-		// WAL mode provides more concurrency, although not necessary with above.
-		// _, err = db.Exec("PRAGMA journal_mode=WAL")
-		// if err != nil {
-		// 	return SQLiteStore{}, store.dbErr(err, "creating database schema")
-		// }
-	} else {
-		setup_sql = strings.ReplaceAll(setup_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
-		setup_sql = strings.ReplaceAll(setup_sql, "DATETIME", "TIMESTAMP WITH TIME ZONE")
 	}
 	// init tables / indexes
-	_, err = db.Exec(setup_sql)
+	err = store.initSchema(backend)
 	if err != nil {
 		return SQLiteStore{}, store.dbErr(err, "creating database schema")
 	}
 	return store, nil
+}
+
+func (s *SQLiteStore) initSchema(backend string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return s.dbErr(err, "begin transaction")
+	}
+	// set up version table (idempotent)
+	version := 0
+	err = tx.QueryRow("SELECT version FROM migration LIMIT 1").Scan(&version)
+	if err != nil {
+		_, err = tx.Exec("CREATE TABLE migration (version INTEGER NOT NULL)")
+		if err != nil {
+			return s.dbErr(err, "creating migration table")
+		}
+		_, err = tx.Exec("INSERT INTO migration (version) VALUES (?)", version)
+		if err != nil {
+			return s.dbErr(err, "querying schema version")
+		}
+	}
+	initVer := version
+	for _, m := range MIGRATIONS {
+		if version < m.ver {
+			do_sql := m.query
+			if backend == "postgres" {
+				do_sql = strings.ReplaceAll(do_sql, "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL")
+				do_sql = strings.ReplaceAll(do_sql, "DATETIME", "TIMESTAMP WITH TIME ZONE")
+			}
+			_, err = tx.Exec(do_sql)
+			if err != nil {
+				return s.dbErr(err, fmt.Sprintf("applying migration: %v", m.ver))
+			}
+			version = m.ver
+		}
+	}
+	if version != initVer {
+		_, err = tx.Exec("UPDATE migration SET version=?", version)
+		if err != nil {
+			return s.dbErr(err, "updating schema version")
+		}
+	}
+	err = tx.Commit()
+	if err != nil {
+		return s.dbErr(err, "commit schema")
+	}
+	return err
 }
 
 // Defer this until shutdown
@@ -227,6 +275,10 @@ func (s SQLiteStore) getChainStateCommon(tx Queryable) (giga.ChainState, error) 
 	if err != nil {
 		return giga.ChainState{}, s.dbErr(err, "GetChainState: row.Scan")
 	}
+	if state.NextSeq < 1 {
+		// fix: NextSeq must start from 1 because service cursors start from 0.
+		state.NextSeq = 1
+	}
 	return state, nil
 }
 
@@ -268,14 +320,16 @@ func (s SQLiteStore) getAccountCommon(tx Queryable, accountKey string, isForeign
 }
 
 func (s SQLiteStore) calculateBalanceCommon(tx Queryable, accountID giga.Address) (bal giga.AccountBalance, err error) {
+	// policy: change (is_internal) is never 'incoming' or 'outgoing', only 'current' until spent.
+	// incoming: utxo: !is_internal && added_height && !spendable_height
+	// current: utxo: (is_internal || spendable_height) && (!spending_height && !spend_payment)
+	// outgoing: payment.total where !confirmed_height (until confirmed)
+	// this query uses the index on (account_address)
 	row := tx.QueryRow(`
-SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND spendable_height IS NULL AND account_address=$1),0),
-COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND spending_height IS NULL AND account_address=$1),0),
-COALESCE((SELECT SUM(value) FROM utxo WHERE spending_height IS NOT NULL AND spent_height IS NULL AND account_address=$1),0)`, accountID)
+SELECT COALESCE((SELECT SUM(value) FROM utxo WHERE account_address=$1 AND is_internal=0 AND added_height IS NOT NULL AND spendable_height IS NULL),0),
+COALESCE((SELECT SUM(value) FROM utxo WHERE account_address=$1 AND (is_internal=1 OR spendable_height IS NOT NULL) AND spending_height IS NULL AND spend_payment IS NULL),0),
+COALESCE((SELECT SUM(total) FROM payment WHERE account_address=$1 AND confirmed_height IS NULL),0)`, accountID)
 	err = row.Scan(&bal.IncomingBalance, &bal.CurrentBalance, &bal.OutgoingBalance)
-	if err != nil {
-		return giga.AccountBalance{}, s.dbErr(err, "CalculateBalance: row.Scan")
-	}
 	return
 }
 
@@ -508,8 +562,8 @@ func (s SQLiteStore) listPaymentsCommon(tx Queryable, account giga.Address, curs
 	if err = rows.Err(); err != nil { // docs say this check is required!
 		return nil, 0, s.dbErr(err, "ListPayments: querying invoices")
 	}
-	for _, pay := range items {
-		pay.PayTo, err = s.getPaymentOutputs(tx, pay.ID)
+	for i, pay := range items {
+		items[i].PayTo, err = s.getPaymentOutputs(tx, pay.ID)
 		if err != nil {
 			return nil, 0, err // already s.dbErr
 		}
@@ -522,9 +576,13 @@ func (s SQLiteStore) listPaymentsCommon(tx Queryable, account giga.Address, curs
 
 func (s SQLiteStore) getAllUnreservedUTXOsCommon(tx Queryable, account giga.Address) (result []giga.UTXO, err error) {
 	// • spendable_height > 0    –– the UTXO Txn has been "confirmed" (included in CurrentBalance)
-	// • spending_height IS NULL –– the UTXO has not already been spent (not yet in OutgoingBalance)
+	// • or is_internal          –– the UTXO is change generated by Gigawallet (included in CurrentBalance)
+	// • spending_height IS NULL –– the UTXO is not spent on-chain (not yet in OutgoingBalance)
+	// • spend_payment IS NULL   –– the UTXO is not reserved for spending (not yet in OutgoingBalance)
+	// order by: all external UTXOs sorted oldest to newest; all internal 'change' UTXOs sorted oldest to newest.
+	// nulls last orders confirmed 'change' UTXOs before any new unconfirmed 'change' UTXOs.
 	rows_found := 0
-	rows, err := tx.Query("SELECT txn_id, vout, value, script, script_type, script_address, key_index, is_internal FROM utxo WHERE account_address = $1 AND spendable_height > 0 AND spending_height IS NULL", account)
+	rows, err := tx.Query("SELECT txn_id, vout, value, script, script_type, script_address, key_index, is_internal, spendable_height FROM utxo WHERE account_address = $1 AND (spendable_height > 0 OR is_internal) AND spending_height IS NULL AND spend_payment IS NULL ORDER BY is_internal, spendable_height NULLS LAST", account)
 	if err != nil {
 		return nil, s.dbErr(err, "GetAllUnreservedUTXOs: querying UTXOs")
 	}
@@ -532,10 +590,12 @@ func (s SQLiteStore) getAllUnreservedUTXOsCommon(tx Queryable, account giga.Addr
 	for rows.Next() {
 		utxo := giga.UTXO{AccountID: account}
 		// var value string
-		err := rows.Scan(&utxo.TxID, &utxo.VOut, &utxo.Value, &utxo.ScriptHex, &utxo.ScriptType, &utxo.ScriptAddress, &utxo.KeyIndex, &utxo.IsInternal)
+		var spendableHeight sql.NullInt64
+		err := rows.Scan(&utxo.TxID, &utxo.VOut, &utxo.Value, &utxo.ScriptHex, &utxo.ScriptType, &utxo.ScriptAddress, &utxo.KeyIndex, &utxo.IsInternal, &spendableHeight)
 		if err != nil {
 			return nil, s.dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
 		}
+		utxo.BlockHeight = spendableHeight.Int64 // zero if NULL
 		result = append(result, utxo)
 		rows_found++
 	}
@@ -709,7 +769,7 @@ func (t SQLiteStoreTransaction) checkRowsAffected(res sql.Result, err error, wha
 	}
 	if num_rows < 1 {
 		// MUST detect this error to fulfil the API contract.
-		return giga.NewErr(giga.NotFound, fmt.Sprintf("%s not found: %s", what, id))
+		return giga.NewErr(giga.NotFound, "%s not found: %s", what, id)
 	}
 	return nil
 }
@@ -794,17 +854,22 @@ func (t SQLiteStoreTransaction) CreateUTXO(utxo giga.UTXO) error {
 	return nil
 }
 
+func (t SQLiteStoreTransaction) MarkUTXOReserved(txID string, vOut int, paymentID int64) error {
+	_, err := t.tx.Exec("UPDATE utxo SET spend_payment=$1 WHERE txn_id=$2 AND vout=$3", paymentID, txID, vOut)
+	if err != nil {
+		return t.store.dbErr(err, "MarkUTXOReserved: executing update")
+	}
+	return nil
+}
+
 func (t SQLiteStoreTransaction) MarkUTXOSpent(txID string, vOut int, blockHeight int64, spendTxID string) (id string, scriptAddress giga.Address, err error) {
 	row := t.tx.QueryRow("UPDATE utxo SET spending_height=$1, spend_txid=$2 WHERE txn_id=$3 AND vout=$4 RETURNING account_address, script_address", blockHeight, spendTxID, txID, vOut)
-	if err != nil {
-		return "", "", t.store.dbErr(err, "MarkUTXOSpent: executing update")
-	}
 	err = row.Scan(&id, &scriptAddress)
 	if err == sql.ErrNoRows {
 		return "", "", nil // commonly called for UTXOs we don't have in the DB.
 	}
 	if err != nil {
-		return "", "", t.store.dbErr(err, "MarkUTXOSpent: scanning row")
+		return "", "", t.store.dbErr(err, "MarkUTXOSpent: executing update")
 	}
 	return
 }
@@ -843,6 +908,9 @@ func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight i
 var confirm_spendable_sql = `UPDATE utxo SET spendable_height = added_height +
 	COALESCE((SELECT confirmations FROM invoice WHERE invoice_address = utxo.script_address),$1) WHERE added_height +
 	COALESCE((SELECT confirmations FROM invoice WHERE invoice_address = utxo.script_address),$2) <= $3 AND spendable_height IS NULL RETURNING account_address`
+
+// There is an index on (spending_height, spent_height) for this query.
+// This marks UTXOs as spent once an outgoing payment transaction is confirmed.
 var confirm_spent_sql = "UPDATE utxo SET spent_height = spending_height + $1 WHERE spending_height + $2 <= $3 AND spent_height IS NULL RETURNING account_address"
 
 func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAccounts []string, err error) {

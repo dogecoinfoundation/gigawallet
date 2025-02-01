@@ -172,11 +172,11 @@ func addFundsToAccount(t *testing.T, store giga.Store, l1 giga.L1, foreignID str
 	if err != nil {
 		t.Fatalf("tx.GetAccount: %v", err)
 	}
-	to_1, err := acc.NextChangeAddress(l1)
+	to_1, _, err := acc.NextChangeAddress(l1)
 	if err != nil {
 		t.Fatalf("NextChangeAddress: %v", err)
 	}
-	to_2, err := acc.NextChangeAddress(l1)
+	to_2, _, err := acc.NextChangeAddress(l1)
 	if err != nil {
 		t.Fatalf("NextChangeAddress: %v", err)
 	}

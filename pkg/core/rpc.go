@@ -182,7 +182,7 @@ func (l *L1CoreRPC) Send(txnHex string) (txid string, err error) {
 	}
 	hash := doge.TxHashHex(txn)
 	if txid != hash {
-		log.Printf("[!] sendrawtransaction: Core Node did not return the expected txid: %s vs %s", txid, hash)
+		log.Printf("[!] sendrawtransaction: Core Node did not return the expected txid: %s (expecting %s)", txid, hash)
 	}
 	return
 }

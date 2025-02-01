@@ -1,6 +1,10 @@
 package giga
 
-import "github.com/dogecoinfoundation/gigawallet/pkg/doge"
+import (
+	"log"
+
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
+)
 
 // Store UTXO Source used to find UTXOs to spend.
 type StoreUTXOSource struct {
@@ -38,6 +42,14 @@ func (s *StoreUTXOSource) fetchMoreUTXOs() error {
 	// but UTXOSource is designed to fetch a few UTXOs at a time.
 	s.noMore = true
 	s.unspent = append(s.unspent, utxos...)
+	log.Printf("fetchMoreUTXOs:\n")
+	for _, u := range utxos {
+		if u.IsInternal {
+			log.Printf("utxo: %v:%v change (spendable_height %v)\n", u.TxID, u.VOut, u.BlockHeight)
+		} else {
+			log.Printf("utxo: %v:%v external (spendable_height %v)\n", u.TxID, u.VOut, u.BlockHeight)
+		}
+	}
 	if len(utxos) < 1 {
 		s.noMore = true // no more UTXOs in account.
 	}
