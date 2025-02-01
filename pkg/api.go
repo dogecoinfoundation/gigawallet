@@ -1,12 +1,10 @@
 package giga
 
 import (
-	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 	"github.com/shopspring/decimal"
 )
 
@@ -272,7 +270,7 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 
 	// Create the Dogecoin Transaction
 	source := NewUTXOSource(a.Store, account.Address)
-	newTxn, spentUTXOs, err := CreateTxn(payTo, explicitFee, maxFee, account, source, a.L1)
+	newTxn, changeUTXO, spentUTXOs, txid, err := CreateTxn(payTo, explicitFee, maxFee, account, source, a.L1)
 	if err != nil {
 		return
 	}
@@ -313,6 +311,14 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 			return
 		}
 	}
+	// Create the 'change' UTXO now, so the change can be spent immediately.
+	if !changeUTXO.Value.IsZero() {
+		err = dbtx.CreateUTXO(changeUTXO)
+		if err != nil {
+			dbtx.Rollback()
+			return
+		}
+	}
 	err = dbtx.Commit()
 	if err != nil {
 		return
@@ -322,21 +328,16 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 	// manually which will clear the reserved lock on the UTXOs being spent.
 
 	// Submit the transaction to core.
-	txid := ""
 	if sendTx {
 		// Submit tx to the network.
-		txid, err = a.L1.Send(txHex)
-		if err != nil {
-			return
-		}
-	} else {
-		// Don't submit: compute the tx hash.
-		txData, e := hex.DecodeString(txHex)
+		coreTxid, e := a.L1.Send(txHex)
 		if e != nil {
 			err = e
 			return
 		}
-		txid = doge.TxHashHex(txData)
+		if coreTxid != txid {
+			log.Printf("[!] sendrawtransaction: Core Node did not return the precomputed txid: %s (expecting %s)", coreTxid, txid)
+		}
 	}
 
 	// Update the Payment with the txid,
@@ -388,7 +389,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 	// Make a Doge Txn to pay `invoiceAmount` from `account` to `payTo`
 	payTo := []PayTo{{PayTo: payToAddress, Amount: invoiceAmount}}
 	source := NewUTXOSource(a.Store, account.Address)
-	newTxn, spentUTXOs, err := CreateTxn(payTo, ZeroCoins, TxnRecommendedMaxFee, account, source, a.L1)
+	newTxn, changeUTXO, spentUTXOs, txid, err := CreateTxn(payTo, ZeroCoins, TxnRecommendedMaxFee, account, source, a.L1)
 	if err != nil {
 		return
 	}
@@ -426,15 +427,26 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 			return
 		}
 	}
+	// Create the 'change' UTXO now, so the change can be spent immediately.
+	if !changeUTXO.Value.IsZero() {
+		err = tx.CreateUTXO(changeUTXO)
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+	}
 	err = tx.Commit()
 	if err != nil {
 		return
 	}
 
 	// Submit the transaction to core.
-	txid, err := a.L1.Send(txHex)
+	coreTxid, err := a.L1.Send(txHex)
 	if err != nil {
 		return
+	}
+	if coreTxid != txid {
+		log.Printf("[!] sendrawtransaction: Core Node did not return the precomputed txid: %s (expecting %s)", coreTxid, txid)
 	}
 
 	// Update the Payment with the txid,

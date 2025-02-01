@@ -1,6 +1,7 @@
 package giga
 
 import (
+	"encoding/hex"
 	"log"
 
 	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
@@ -13,46 +14,44 @@ var oneThousand = decimal.NewFromInt(1000)
 // We may need to use addUTXOsUpToAmount during calculateFee (source, inputs, used)
 // and we need to generate the tx hex repeatedly (lib, acc, inputs, outputs, changeAddress)
 type txState struct {
-	lib           L1         // L1 for MakeTransaction
-	account       Account    // Account for private key to sign transactions
-	inputs        []UTXO     // accumulated tx inputs (from addUTXOsUpToAmount)
-	outputs       []NewTxOut // specified tx outputs (from payTo)
-	outputSum     CoinAmount // sum specified tx outputs (from payTo)
-	used          UTXOSet    // accumulated tx inputs (as a set)
-	source        UTXOSource // source of available UTXOs (cached on Account)
-	changeAddress Address    // change address for unspent portions of UTXOs
-	deductFee     bool       // payTo has DeductFeePercent specified
+	lib       L1         // L1 for MakeTransaction
+	account   Account    // Account for private key to sign transactions
+	inputs    []UTXO     // accumulated tx inputs (from addUTXOsUpToAmount)
+	outputs   []NewTxOut // specified tx outputs (from payTo)
+	outputSum CoinAmount // sum specified tx outputs (from payTo)
+	used      UTXOSet    // accumulated tx inputs (as a set)
+	source    UTXOSource // source of available UTXOs (cached on Account)
+	deductFee bool       // payTo has DeductFeePercent specified
 }
 
-func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Account, source UTXOSource, lib L1) (tx NewTxn, inputs []UTXO, e error) {
+func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Account, source UTXOSource, lib L1) (newTx NewTxn, change UTXO, inputs []UTXO, txid string, err error) {
 	outputSum, deductFee, err := sumPayTo(payTo)
 	if err != nil {
-		return NewTxn{}, nil, err
+		return
 	}
-	changeAddress, err := acc.NextChangeAddress(lib)
+	changeAddress, changeIndex, err := acc.NextChangeAddress(lib)
 	if err != nil {
-		return NewTxn{}, nil, err
+		return
 	}
 	state := &txState{
-		lib:           lib,
-		account:       acc,
-		inputs:        []UTXO{},
-		outputs:       []NewTxOut{},
-		outputSum:     outputSum,
-		used:          NewUTXOSet(),
-		source:        source,
-		changeAddress: changeAddress,
-		deductFee:     deductFee,
+		lib:       lib,
+		account:   acc,
+		inputs:    []UTXO{},
+		outputs:   []NewTxOut{},
+		outputSum: outputSum,
+		used:      NewUTXOSet(),
+		source:    source,
+		deductFee: deductFee,
 	}
 
 	err = addUTXOsUpToAmount(outputSum, state)
 	if err != nil {
-		return NewTxn{}, nil, err
+		return
 	}
 	for _, pay := range payTo {
 		err = addOutput(pay.PayTo, pay.Amount, state)
 		if err != nil {
-			return NewTxn{}, nil, err
+			return
 		}
 	}
 
@@ -60,34 +59,55 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Accoun
 	if deductFee {
 		fee, err = calculateAndDeductFee(fixedFee, maxFee, payTo, state)
 		if err != nil {
-			return NewTxn{}, nil, err
+			return
 		}
 	} else {
 		fee, err = calculateFee(fixedFee, maxFee, state)
 		if err != nil {
-			return NewTxn{}, nil, err
+			return
 		}
 	}
 
 	// Build the transaction with the current inputs and fee.
-	newTx, err := state.lib.MakeTransaction(state.inputs, state.outputs, fee, state.changeAddress, state.account.Privkey)
+	newTx, err = state.lib.MakeTransaction(state.inputs, state.outputs, fee, changeAddress, state.account.Privkey)
 	if err != nil {
-		return NewTxn{}, nil, err
+		return
 	}
 
 	// Check all outputs are >= TxnDustLimit
-	txHex, err := doge.HexDecode(newTx.TxnHex)
+	txData, err := doge.HexDecode(newTx.TxnHex)
 	if err != nil {
-		return NewTxn{}, nil, err
+		return
 	}
-	dTx := doge.DecodeTx(txHex)
+	txid = doge.TxHashHex(txData)
+	dTx := doge.DecodeTx(txData)
+	chain := doge.ChainFromWIFString(string(acc.Address))
 	for n, out := range dTx.VOut {
-		if out.Value < TxnDustLimit_64 {
-			return NewTxn{}, nil, NewErr(InvalidTxn, "BUG: Tx Output cannot be less than the Dogecoin Dust Limit (%vƉ): tx output %v is %v koinu", TxnDustLimit.String(), n, doge.KoinuToDecimal(out.Value).String())
+		// This should be caught before now, e.g. in subtractFeeFromOutput.
+		stype, addr := doge.ClassifyScript(out.Script, chain)
+		if stype == doge.ScriptTypeP2PKH && addr == changeAddress {
+			if out.Value < TxnDustLimit_64 {
+				err = NewErr(InvalidTxn, "BUG: Tx Change Output cannot be less than the Dogecoin Dust Limit (%vƉ): tx output %v is %v koinu", TxnDustLimit.String(), n, doge.KoinuToDecimal(out.Value).String())
+				return
+			}
+			change = UTXO{
+				TxID:          txid,
+				VOut:          n,
+				Value:         doge.KoinuToDecimal(out.Value),
+				ScriptHex:     hex.EncodeToString(out.Script),
+				ScriptType:    stype,
+				ScriptAddress: addr,
+				AccountID:     acc.Address,
+				KeyIndex:      changeIndex,
+				IsInternal:    true,
+			}
+		} else if out.Value < TxnDustLimit_64 {
+			err = NewErr(InvalidTxn, "BUG: Tx Output cannot be less than the Dogecoin Dust Limit (%vƉ): tx output %v is %v koinu", TxnDustLimit.String(), n, doge.KoinuToDecimal(out.Value).String())
+			return
 		}
 	}
 
-	return newTx, state.inputs, nil
+	return newTx, change, state.inputs, txid, nil
 }
 
 func sumPayTo(payTo []PayTo) (CoinAmount, bool, error) {

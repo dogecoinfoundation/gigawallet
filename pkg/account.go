@@ -107,14 +107,14 @@ func (a *Account) NextPayToAddress(lib L1) (Address, uint32, error) {
 // in the Account's HD-Wallet keyspace. NOTE: since callers don't run
 // inside a transaction, concurrent requests can end up paying to the
 // same change address (we accept this risk)
-func (a *Account) NextChangeAddress(lib L1) (Address, error) {
+func (a *Account) NextChangeAddress(lib L1) (addr Address, index uint32, e error) {
 	keyIndex := a.NextInternalKey
 	address, err := lib.MakeChildAddress(a.Privkey, keyIndex, true)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	a.NextInternalKey += 1 // "use" the key index.
-	return address, nil
+	return address, keyIndex, nil
 }
 
 // GetPublicInfo gets those parts of the Account that are safe
