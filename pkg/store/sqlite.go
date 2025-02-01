@@ -560,8 +560,8 @@ func (s SQLiteStore) listPaymentsCommon(tx Queryable, account giga.Address, curs
 	if err = rows.Err(); err != nil { // docs say this check is required!
 		return nil, 0, s.dbErr(err, "ListPayments: querying invoices")
 	}
-	for _, pay := range items {
-		pay.PayTo, err = s.getPaymentOutputs(tx, pay.ID)
+	for i, pay := range items {
+		items[i].PayTo, err = s.getPaymentOutputs(tx, pay.ID)
 		if err != nil {
 			return nil, 0, err // already s.dbErr
 		}
@@ -767,7 +767,7 @@ func (t SQLiteStoreTransaction) checkRowsAffected(res sql.Result, err error, wha
 	}
 	if num_rows < 1 {
 		// MUST detect this error to fulfil the API contract.
-		return giga.NewErr(giga.NotFound, fmt.Sprintf("%s not found: %s", what, id))
+		return giga.NewErr(giga.NotFound, "%s not found: %s", what, id)
 	}
 	return nil
 }
@@ -906,6 +906,9 @@ func (t SQLiteStoreTransaction) ConfirmPayments(confirmations int, blockHeight i
 var confirm_spendable_sql = `UPDATE utxo SET spendable_height = added_height +
 	COALESCE((SELECT confirmations FROM invoice WHERE invoice_address = utxo.script_address),$1) WHERE added_height +
 	COALESCE((SELECT confirmations FROM invoice WHERE invoice_address = utxo.script_address),$2) <= $3 AND spendable_height IS NULL RETURNING account_address`
+
+// There is an index on (spending_height, spent_height) for this query.
+// This marks UTXOs as spent once an outgoing payment transaction is confirmed.
 var confirm_spent_sql = "UPDATE utxo SET spent_height = spending_height + $1 WHERE spending_height + $2 <= $3 AND spent_height IS NULL RETURNING account_address"
 
 func (t SQLiteStoreTransaction) ConfirmUTXOs(confirmations int, blockHeight int64) (affectedAccounts []string, err error) {
