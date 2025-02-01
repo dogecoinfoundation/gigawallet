@@ -588,10 +588,12 @@ func (s SQLiteStore) getAllUnreservedUTXOsCommon(tx Queryable, account giga.Addr
 	for rows.Next() {
 		utxo := giga.UTXO{AccountID: account}
 		// var value string
-		err := rows.Scan(&utxo.TxID, &utxo.VOut, &utxo.Value, &utxo.ScriptHex, &utxo.ScriptType, &utxo.ScriptAddress, &utxo.KeyIndex, &utxo.IsInternal, &utxo.BlockHeight)
+		var spendableHeight sql.NullInt64
+		err := rows.Scan(&utxo.TxID, &utxo.VOut, &utxo.Value, &utxo.ScriptHex, &utxo.ScriptType, &utxo.ScriptAddress, &utxo.KeyIndex, &utxo.IsInternal, &spendableHeight)
 		if err != nil {
 			return nil, s.dbErr(err, "GetAllUnreservedUTXOs: scanning UTXO row")
 		}
+		utxo.BlockHeight = spendableHeight.Int64 // zero if NULL
 		result = append(result, utxo)
 		rows_found++
 	}
