@@ -3,6 +3,9 @@ package receivers
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,20 +15,22 @@ import (
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
 )
 
-func NewCallbackSender(path string, bus giga.MessageBus) CallbackSender {
+func NewCallbackSender(config giga.CallbackConfig, bus giga.MessageBus) CallbackSender {
 	// create a MessageLogger
 	return CallbackSender{
 		make(chan giga.Message, 1000),
-		path,
+		config.Path,
+		config.HMACSecret,
 		bus,
 	}
 }
 
 type CallbackSender struct {
 	// incomming msgs
-	Rec  chan giga.Message
-	Path string
-	Bus  giga.MessageBus
+	Rec        chan giga.Message
+	Path       string
+	HMACSecret string
+	Bus        giga.MessageBus
 }
 
 // Implements giga.MessageSubscriber
@@ -45,7 +50,7 @@ func (s CallbackSender) Run(started, stopped chan bool, stop chan context.Contex
 				close(stopped)
 				return
 			case msg := <-s.Rec:
-				err := postWithRetry(s.Path, msg, s.Bus)
+				err := postWithRetry(s, msg)
 				if err != nil {
 					s.Bus.Send(giga.SYS_ERR, fmt.Sprintf("CallbackSender: %v", msg))
 				}
@@ -58,7 +63,7 @@ func (s CallbackSender) Run(started, stopped chan bool, stop chan context.Contex
 // Reads config and sets up any configured callbacks
 func SetupCallbacks(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Config) {
 	for name, c := range conf.Callbacks {
-		s := NewCallbackSender(c.Path, bus)
+		s := NewCallbackSender(c, bus)
 		cond.Service(fmt.Sprintf("Callback sender for: %s", c.Path), s)
 
 		types := []giga.EventType{}
@@ -78,7 +83,19 @@ func SetupCallbacks(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Co
 	}
 }
 
-func postWithRetry(path string, msg giga.Message, bus giga.MessageBus) error {
+func generateSha256HMAC(payload []byte, secret string) string {
+	if secret == "" {
+		return ""
+	}
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write(payload)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func postWithRetry(sender CallbackSender, msg giga.Message) error {
+	path := sender.Path
+	bus := sender.Bus
+
 	maxRetries := 6
 	initialDelay := 1 * time.Second
 	maxDelay := 32 * time.Second
@@ -98,6 +115,12 @@ func postWithRetry(path string, msg giga.Message, bus giga.MessageBus) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	go func() {
+		if sender.HMACSecret != "" {
+			signature := generateSha256HMAC(objJSON, sender.HMACSecret)
+			req.Header.Set("X-Giga-Signature", fmt.Sprintf("sha256=%s", signature))
+			req.Header.Set("X-Giga-Timestamp", fmt.Sprintf("%d", time.Now().Unix()))
+		}
+
 		retryCount := 0
 		delay := initialDelay
 
