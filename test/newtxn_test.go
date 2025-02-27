@@ -20,11 +20,11 @@ func TestNewTxn(t *testing.T) {
 	}
 
 	// Setup: generate a couple of destination addresses.
-	to_1, err := acc.NextChangeAddress(lib)
+	to_1, _, err := acc.NextChangeAddress(lib)
 	if err != nil {
 		t.Fatalf("NextChangeAddress: %v", err)
 	}
-	to_2, err := acc.NextChangeAddress(lib)
+	to_2, _, err := acc.NextChangeAddress(lib)
 	if err != nil {
 		t.Fatalf("NextChangeAddress: %v", err)
 	}
@@ -36,7 +36,8 @@ func TestNewTxn(t *testing.T) {
 			{Amount: dc("1"), PayTo: to_2, DeductFeePercent: dc("20")},
 		}
 		source := giga.NewArrayUTXOSource(testUTXOs)
-		txn, err := giga.CreateTxn(payTo, giga.ZeroCoins, giga.OneCoin, acc, source, lib)
+		// NewTxn, change UTXO, inputs []UTXO, txid, error
+		txn, _, _, _, err := giga.CreateTxn(payTo, giga.ZeroCoins, giga.OneCoin, acc, source, lib)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
