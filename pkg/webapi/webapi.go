@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -124,9 +123,6 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.authMiddleware(t.payInvoiceFromInternal))
 
-	// POST /decode-txn -> test decoding
-	adminMux.POST("/decode-txn", t.authMiddleware(t.decodeTxn))
-
 	// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
 
 	// POST { amount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
@@ -138,17 +134,22 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 
 	pubMux.GET("/invoice/:invoiceID/qr.png", t.getInvoiceQR)
 
-	pubMux.GET("/invoice/:invoiceID/connect", t.getInvoiceConnect)
+	// DEPRECATED, use /dc/:invoiceID (this URL needs to be short)
+	pubMux.GET("/invoice/:invoiceID/connect", t.dcGetEnvelope)
 
 	// GET /invoice/:invoiceID/connect -> { dogeConnect json } get the dogeConnect JSON for an invoice
-
 	// GET /invoice/:invoiceID/status -> { status } get status of an invoice
-
 	// GET /invoice/:invoiceID/poll -> { status } long-poll invoice waiting for status change
-
 	// GET /invoice/:invoiceID/splash -> html page that tries to launch dogeconnect:// with QRcode fallback
-
 	// POST { dogeConnect payment } /invoice/:invoiceID/pay -> { status } pay an invoice with a dogeConnect response
+
+	// External DogeConnect APIs
+
+	pubMux.GET("/dc/:invoiceID", t.dcGetEnvelope)
+
+	pubMux.POST("/dc/:invoiceID/pay", t.dcPayInvoice)
+
+	pubMux.POST("/dc/:invoiceID/status", t.dcPayStatus)
 
 	return
 }
@@ -237,35 +238,6 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 	sendResponse(w, invoice)
 }
 
-func (t WebAPI) getInvoiceConnect(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	// the invoiceID is the address of the invoice
-	id := p.ByName("invoiceID")
-	if id == "" {
-		sendBadRequest(w, "missing invoice ID")
-		return
-	}
-	invoice, err := t.api.GetInvoice(giga.Address(id))
-	if err != nil {
-		sendErrorResponse(w, 404, giga.NotFound, "no such invoice")
-		return
-	}
-
-	envelope, err := giga.InvoiceToConnectRequestEnvelope(invoice, t.config)
-	if err != nil {
-		sendError(w, "ConnectEnvelopCreate", err)
-		return
-	}
-	w.Header().Set("Content-Type", "text/json")
-	//  Maxage 900 (15 minutes) is because this image should not
-	//  change at all for a given invoice and we expect most invoices
-	// to be complete in far less time than 15 min.. but 15 min allows
-	// us room to upgrade the format between releases if needed..
-	w.Header().Set("Cache-Control", "max-age:=900, immutable")
-	//w.Header().Set("Cache-Control", "no-cache")
-
-	sendResponse(w, envelope)
-}
-
 func (t WebAPI) getInvoiceQR(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the foreignID is a 3rd-party ID for the account
 	// the invoiceID is the address of the invoice
@@ -280,21 +252,24 @@ func (t WebAPI) getInvoiceQR(w http.ResponseWriter, r *http.Request, p httproute
 		return
 	}
 
+	uri, err := t.api.GetInvoiceConnectURL(invoice, t.config.WebAPI.PubAPIRootURL)
+	if err != nil {
+		sendErrorResponse(w, 404, giga.UnknownError, err.Error())
+		return
+	}
+
 	qs := r.URL.Query()
 	fg := qs.Get("fg")
 	bg := qs.Get("bg")
-	connectURL := fmt.Sprintf("%s/invoice/%s/connect", t.config.WebAPI.PubAPIRootURL, id)
-	qr, _ := GenerateQRCodePNG(fmt.Sprintf("dogecoin:%s?amount=%v&cxt=%s", string(invoice.ID), invoice.CalcTotal().String(), url.QueryEscape(connectURL)), 512, fg, bg)
-	w.Header().Set("Content-Type", "image/png")
+	qr, _ := GenerateQRCodePNG(uri, 512, fg, bg)
+
 	//  Maxage 900 (15 minutes) is because this image should not
 	//  change at all for a given invoice and we expect most invoices
 	// to be complete in far less time than 15 min.. but 15 min allows
 	// us room to upgrade the format between releases if needed..
 	w.Header().Set("Cache-Control", "max-age:=900, immutable")
-	//w.Header().Set("Cache-Control", "no-cache")
-
+	w.Header().Set("Content-Type", "image/png")
 	w.Write(qr)
-
 }
 
 // getInvoice is responsible for returning the current status of an invoice with the invoiceID in the URL
@@ -504,21 +479,37 @@ func (t WebAPI) getAccountBalance(w http.ResponseWriter, r *http.Request, p http
 	sendResponse(w, bal)
 }
 
-type DecodeTxnRequest struct {
-	Hex string `json:"hex"`
+// DogeConnect APIs
+
+func (t WebAPI) dcGetEnvelope(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the invoiceID is the address of the invoice
+	id := p.ByName("invoiceID")
+	if id == "" {
+		sendBadRequest(w, "missing invoice ID")
+		return
+	}
+	invoice, err := t.api.GetInvoice(giga.Address(id))
+	if err != nil {
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice")
+		return
+	}
+
+	envelope, err := t.api.GetInvoiceConnectEnvelope(invoice, t.config.WebAPI.PubAPIRootURL)
+	if err != nil {
+		sendErrorResponse(w, 500, giga.UnknownError, err.Error())
+		return
+	}
+
+	// Maxage 900 (15 minutes) is because this envelope should not
+	// change at all for a given invoice and we expect most invoices
+	// to be complete in far less time than 15 min.. but 15 min allows
+	// us room to upgrade the format between releases if needed..
+	w.Header().Set("Cache-Control", "max-age:=900, immutable")
+	sendResponse(w, envelope)
 }
 
-func (t WebAPI) decodeTxn(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	var o DecodeTxnRequest
-	err := json.NewDecoder(r.Body).Decode(&o)
-	if err != nil {
-		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
-		return
-	}
-	rawTxn, err := t.api.L1.DecodeTransaction(o.Hex)
-	if err != nil {
-		sendBadRequest(w, fmt.Sprintf("error decoding transaction: %v", err))
-		return
-	}
-	sendResponse(w, rawTxn)
+func (t WebAPI) dcPayInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+}
+
+func (t WebAPI) dcPayStatus(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 }

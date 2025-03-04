@@ -1,90 +1,55 @@
 package giga
 
 import (
-	"encoding/base64"
-	"encoding/json"
+	"fmt"
 	"time"
 
+	connect "github.com/dogeorg/dogeconnect-go"
 	"github.com/shopspring/decimal"
 )
 
-// ConnectEnvelope is a wrapper for a ConnectRequest.
-// The Payload is a base64 encoded JSON string containing
-// a ConnectRequest
-type ConnectEnvelope struct {
-	Version        string `json:"version"`
-	ServiceName    string `json:"service_name"`
-	ServiceIconURL string `json:"service_icon_url"`
-	ServiceDomain  string `json:"service_domain"`
-	ServiceKeyHash string `json:"service_key_hash"`
-	Payload        string `json:"payload"` // the json package will automatically base64 encode and decode this
-	Hash           string `json:"hash"`
-}
+func InvoiceToConnectPaymentRequest(i Invoice, rootURL string, privKey []byte) (connect.ConnectEnvelope, error) {
 
-// A payload within an envelope that represents an invoice for
-// a list of items that need to be paid
-type ConnectInvoice struct {
-	Type       string          `json:"type"` // invoice
-	ID         string          `json:"request_id"`
-	Address    string          `json:"address"`
-	Total      decimal.Decimal `json:"Total"`
-	Initiated  time.Time       `json:"initiated"`
-	TimeoutSec int             `json:"timeout_sec"`
-	Items      []ConnectItem   `json:"items"`
-}
-
-// an item within an invoice
-type ConnectItem struct {
-	Type        string          `json:"type"`
-	ID          string          `json:"item_id"`
-	Thumb       string          `json:"thumb"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	UnitCount   int             `json:"unit_count"`
-	UnitCost    decimal.Decimal `json:"unit_cost"`
-}
-
-func InvoiceToConnectRequestEnvelope(i Invoice, conf Config) (ConnectEnvelope, error) {
-
-	// build a connect Invoice
-	r := ConnectInvoice{
-		Type:       "invoice",
-		ID:         string(i.ID),
-		Address:    string(i.ID),
-		Total:      i.CalcTotal(),
-		Initiated:  time.Now(),
-		TimeoutSec: 60 * 30, // TODO should come from the invoice
-		Items:      []ConnectItem{},
+	// Build a DogeConnect Payment Request
+	totalAmount := i.CalcTotal().String()
+	relayURL := fmt.Sprintf("%s/dc/%s", rootURL, i.ID)
+	r := connect.ConnectPayment{
+		Type:          connect.PaymentRequestType,      // MUST be PaymentRequestType
+		ID:            string(i.ID),                    // Gateway unique payment-request ID
+		Issued:        time.Now().Format(time.RFC3339), // RFC 3339 Timestamp (2006-01-02T15:04:05-07:00)
+		Timeout:       300,                             // Seconds; do not submit payment Tx after this time (Issued+Timeout)
+		Relay:         relayURL,                        // Payment Relay URL, https://example.com/dc
+		VendorIcon:    "",                              // vendor icon URL, SHOULD be https:// JPG or PNG
+		VendorName:    "",                              // vendor display name
+		VendorAddress: "",                              // vendor business address (optional)
+		Total:         totalAmount,                     // Total amount including fees and taxes, DECMIAL string
+		Fees:          "0.0",                           // Fee subtotal, DECMIAL string
+		Taxes:         "0.0",                           // Taxes subtotal, DECMIAL string
+		FiatTotal:     "",                              // Total amount in fiat currency (optional)
+		FiatCurrency:  "",                              // ISO 4217 currency code (required with fiat_total)
 	}
 
 	for _, item := range i.Items {
-		r.Items = append(r.Items, ConnectItem{
+		r.Items = append(r.Items, connect.ConnectItem{
 			Type:        "item",
-			ID:          "TODO",
-			Thumb:       item.ImageLink,
+			Icon:        item.ImageLink,
 			Name:        item.Name,
 			Description: "Description",
 			UnitCount:   item.Quantity,
-			UnitCost:    item.Value,
+			UnitCost:    item.Value.String(),
+			Total:       decimal.NewFromInt(int64(item.Quantity)).Mul(item.Value).String(),
 		})
 	}
-	// serialise to JSON then base64 the request
 
-	payloadJson, _ := json.Marshal(r)
-	payload := base64.StdEncoding.EncodeToString(payloadJson)
+	r.Outputs = append(r.Outputs, connect.ConnectOutput{
+		Address: string(i.ID),
+		Amount:  totalAmount,
+	})
 
-	// sign the request with the service key
-	hash := "TODO"
-
-	// build a connect envelope
-	env := ConnectEnvelope{
-		Version:        "0.1",
-		ServiceName:    conf.Gigawallet.ServiceName,
-		ServiceIconURL: conf.Gigawallet.ServiceIconURL,
-		ServiceDomain:  conf.Gigawallet.ServiceDomain,
-		ServiceKeyHash: conf.Gigawallet.ServiceKeyHash,
-		Payload:        payload,
-		Hash:           hash,
+	// Encode and sign the payload
+	env, err := connect.SignPaymentRequest(r, privKey[:])
+	if err != nil {
+		return connect.ConnectEnvelope{}, err
 	}
 
 	return env, nil

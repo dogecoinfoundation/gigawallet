@@ -35,7 +35,9 @@ func sendResponse(w http.ResponseWriter, payload any) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store") // do not cache (Browsers cache GET forever by default)
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-store") // do not cache (Browsers cache GET forever by default)
+	}
 	w.Write(b)
 }
 
