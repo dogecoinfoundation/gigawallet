@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
+	connect "github.com/dogeorg/dogeconnect-go"
 	"github.com/shopspring/decimal"
 )
 
@@ -91,6 +93,73 @@ func (a API) GetInvoice(id Address) (Invoice, error) {
 		return Invoice{}, err
 	}
 	return inv, nil
+}
+
+func (a API) GetInvoiceConnectURL(invoice Invoice, rootURL string) (string, error) {
+	// Get the Account by its internal ID, rather than by foreign id.
+	tx, err := a.Store.Begin()
+	if err != nil {
+		return "", fmt.Errorf("begin transaction: %w", err)
+	}
+	acc, err := tx.GetAccountByID(invoice.Account)
+	if err != nil {
+		return "", fmt.Errorf("bad account: %w", err)
+	}
+	err = tx.Commit()
+	if err != nil {
+		return "", fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// XXX should be a per-Giga DogeConnect signing key?
+	// The key in the account is an Extended BIP32 Privkey.
+	privKey, err := doge.DecodeBip32WIF(string(acc.Privkey), nil)
+	if err != nil {
+		return "", fmt.Errorf("bad key in account: %w", err)
+	}
+	defer privKey.Clear()
+	pubBytes := privKey.GetECPubKey()[1:] // X-only Public Key
+	defer clear(pubBytes)
+
+	connectURL := fmt.Sprintf("%s/dc/%s", rootURL, invoice.ID)
+	uri := connect.DogecoinURI(string(invoice.ID), invoice.CalcTotal().String(), connectURL, pubBytes)
+
+	return uri, nil
+}
+
+func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (connect.ConnectEnvelope, error) {
+	// Get the Account by its internal ID, rather than by foreign id.
+	tx, err := a.Store.Begin()
+	if err != nil {
+		return connect.ConnectEnvelope{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	acc, err := tx.GetAccountByID(invoice.Account)
+	if err != nil {
+		return connect.ConnectEnvelope{}, fmt.Errorf("bad account: %w", err)
+	}
+	err = tx.Commit()
+	if err != nil {
+		return connect.ConnectEnvelope{}, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// XXX should be a per-Giga DogeConnect signing key?
+	// The key in the account is an Extended BIP32 Privkey.
+	privKey, err := doge.DecodeBip32WIF(string(acc.Privkey), nil)
+	if err != nil {
+		return connect.ConnectEnvelope{}, fmt.Errorf("bad key in account: %w", err)
+	}
+	defer privKey.Clear()
+	privBytes, err := privKey.GetECPrivKey()
+	if err != nil {
+		return connect.ConnectEnvelope{}, fmt.Errorf("bad key in account: %w", err)
+	}
+	defer clear(privBytes)
+
+	// Create and sign the Payment Request.
+	envelope, err := InvoiceToConnectPaymentRequest(invoice, rootURL, privBytes)
+	if err != nil {
+		return connect.ConnectEnvelope{}, fmt.Errorf("signing envelope: %w", err)
+	}
+	return envelope, nil
 }
 
 type ListInvoicesResponse struct {
