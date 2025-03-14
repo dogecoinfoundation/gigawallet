@@ -23,7 +23,7 @@ var _ giga.L1 = L1Libdogecoin{}
 
 // NewL1Libdogecoin returns a giga.L1 implementor that uses libdogecoin
 // Allows (non-implemented) functions to delegate to another L1 implementation.
-func NewL1Libdogecoin(config giga.Config, fallback giga.L1) (L1Libdogecoin, error) {
+func NewL1Libdogecoin(config giga.Config, fallback giga.L1) (giga.L1, error) {
 	return L1Libdogecoin{fallback: fallback}, nil
 }
 

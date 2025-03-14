@@ -12,17 +12,22 @@ var _ giga.L1 = L1Mock{}
 
 // NewL1Mock returns a mocked giga.L1 implementor
 func NewL1Mock(config giga.Config) (L1Mock, error) {
-	return L1Mock{}, nil
+	lib, err := NewL1Libdogecoin(giga.Config{}, nil)
+	return L1Mock{
+		lib: lib,
+	}, err
 }
 
-type L1Mock struct{}
+type L1Mock struct {
+	lib giga.L1
+}
 
 func (l L1Mock) MakeAddress(isTestNet bool) (giga.Address, giga.Privkey, error) {
-	return "mockAddress", "mockPrivkey", nil
+	return l.lib.MakeAddress(isTestNet)
 }
 
 func (l L1Mock) MakeChildAddress(privkey giga.Privkey, addressIndex uint32, isInternal bool) (giga.Address, error) {
-	return "mockChildAddress", nil
+	return l.lib.MakeChildAddress(privkey, addressIndex, isInternal)
 }
 
 func (l L1Mock) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxOut, fee giga.CoinAmount, change giga.Address, private_key giga.Privkey) (giga.NewTxn, error) {
