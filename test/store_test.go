@@ -43,6 +43,7 @@ func TestStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(n("establish transaction"), err)
 			}
+			defer tx.Rollback()
 
 			// Test Account creation
 			account := giga.Account{
@@ -70,10 +71,11 @@ func TestStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(n("establish transaction"), err)
 			}
+			defer tx.Rollback()
 
 			updatedAccount := retrievedAccount
 			updatedAccount.PayoutAddress = addr2
-			err = tx.UpdateAccount(updatedAccount)
+			err = tx.UpdateAccountConfig(updatedAccount)
 			if err != nil {
 				t.Fatal(n("UpdateAccount"), err)
 			}
@@ -100,6 +102,7 @@ func TestStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(n("establish transaction"), err)
 			}
+			defer tx.Rollback()
 
 			// Test Invoice creation
 			invoice := giga.Invoice{
@@ -207,6 +210,7 @@ func TestStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(n("establish transaction"), err)
 			}
+			defer tx.Rollback()
 
 			// Test Payment creation
 			payTo := []giga.PayTo{

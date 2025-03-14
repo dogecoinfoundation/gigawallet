@@ -202,7 +202,7 @@ func addFundsToAccount(t *testing.T, store giga.Store, l1 giga.L1, foreignID str
 			t.Fatalf("tx.CreateUTXO: %v", err)
 		}
 	}
-	err = tx.UpdateAccount(acc)
+	err = tx.UpdateAccountKeys(acc)
 	if err != nil {
 		t.Fatalf("tx.UpdateAccount: %v", err)
 	}
