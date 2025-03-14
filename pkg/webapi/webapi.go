@@ -426,7 +426,16 @@ func (t WebAPI) payInvoiceFromInternal(w http.ResponseWriter, r *http.Request, p
 	sendResponse(w, res)
 }
 
-// upsertAccount returns the address of the new account with the foreignID in the URL
+// upsertAccount creates or updates an account by foreignID
+//
+// The following fields can be set/updated (if present in the payload):
+//
+//	"payout_address": configure auto-payout
+//	"payout_threshold": decimal dogecoin amount
+//	"payout_frequency": format not yet specified
+//	"vendor_name": vendor display name
+//	"vendor_icon": vendor thumbnail https:// URL
+//	"vendor_address": vendor street address (optional)
 func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 	// the foreignID is a 3rd-party ID for the account
 	foreignID := p.ByName("foreignID")
@@ -434,7 +443,7 @@ func (t WebAPI) upsertAccount(w http.ResponseWriter, r *http.Request, p httprout
 		sendBadRequest(w, "missing account ID in URL")
 		return
 	}
-	o := giga.AccountCreateRequest{}
+	o := map[string]any{}
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))

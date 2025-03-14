@@ -8,7 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func InvoiceToConnectPaymentRequest(i Invoice, rootURL string, privKey []byte) (connect.ConnectEnvelope, error) {
+func InvoiceToConnectPaymentRequest(i Invoice, acc Account, rootURL string, privKey []byte) (connect.ConnectEnvelope, error) {
 
 	// Build a DogeConnect Payment Request
 	totalAmount := i.CalcTotal().String()
@@ -19,9 +19,9 @@ func InvoiceToConnectPaymentRequest(i Invoice, rootURL string, privKey []byte) (
 		Issued:        time.Now().Format(time.RFC3339), // RFC 3339 Timestamp (2006-01-02T15:04:05-07:00)
 		Timeout:       300,                             // Seconds; do not submit payment Tx after this time (Issued+Timeout)
 		Relay:         relayURL,                        // Payment Relay URL, https://example.com/dc
-		VendorIcon:    "",                              // vendor icon URL, SHOULD be https:// JPG or PNG
-		VendorName:    "",                              // vendor display name
-		VendorAddress: "",                              // vendor business address (optional)
+		VendorIcon:    acc.VendorIcon,                  // vendor icon URL, SHOULD be https:// JPG or PNG
+		VendorName:    acc.VendorName,                  // vendor display name
+		VendorAddress: acc.VendorAddress,               // vendor business address (optional)
 		Total:         totalAmount,                     // Total amount including fees and taxes, DECMIAL string
 		Fees:          "0.0",                           // Fee subtotal, DECMIAL string
 		Taxes:         "0.0",                           // Taxes subtotal, DECMIAL string
