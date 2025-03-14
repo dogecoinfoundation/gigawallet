@@ -72,7 +72,7 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 	if err != nil {
 		return Invoice{}, err
 	}
-	err = dbtx.UpdateAccount(acc)
+	err = dbtx.UpdateAccountKeys(acc)
 	if err != nil {
 		return Invoice{}, err
 	}
@@ -110,7 +110,7 @@ func (a API) GetInvoiceConnectURL(invoice Invoice, rootURL string) (string, erro
 		return "", fmt.Errorf("commit transaction: %w", err)
 	}
 
-	// XXX should be a per-Giga DogeConnect signing key?
+	// The DogeConnect Envelope is signed using the account key.
 	// The key in the account is an Extended BIP32 Privkey.
 	privKey, err := doge.DecodeBip32WIF(string(acc.Privkey), nil)
 	if err != nil {
@@ -141,7 +141,7 @@ func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (connect
 		return connect.ConnectEnvelope{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	// XXX should be a per-Giga DogeConnect signing key?
+	// Sign the DogeConnect Envelope using the account key.
 	// The key in the account is an Extended BIP32 Privkey.
 	privKey, err := doge.DecodeBip32WIF(string(acc.Privkey), nil)
 	if err != nil {
@@ -155,7 +155,7 @@ func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (connect
 	defer clear(privBytes)
 
 	// Create and sign the Payment Request.
-	envelope, err := InvoiceToConnectPaymentRequest(invoice, rootURL, privBytes)
+	envelope, err := InvoiceToConnectPaymentRequest(invoice, acc, rootURL, privBytes)
 	if err != nil {
 		return connect.ConnectEnvelope{}, fmt.Errorf("signing envelope: %w", err)
 	}
@@ -186,13 +186,7 @@ func (a API) ListInvoices(foreignID string, cursor int, limit int) (ListInvoices
 	return r, nil
 }
 
-type AccountCreateRequest struct {
-	PayoutAddress   Address    `json:"payout_address"`
-	PayoutThreshold CoinAmount `json:"payout_threshold"`
-	PayoutFrequency string     `json:"payout_frequency"`
-}
-
-func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upsert bool) (AccountPublic, error) {
+func (a API) CreateAccount(request map[string]any, foreignID string, upsert bool) (AccountPublic, error) {
 	// Transaction retry loop.
 	for {
 		txn, err := a.Store.Begin()
@@ -204,8 +198,16 @@ func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upser
 
 		acc, err := txn.GetAccount(foreignID)
 		if err == nil {
-			// Account already exists.
+			// Account already exists, apply updates.
 			if upsert {
+				acc, err := a.applyAccountSettings(acc, request)
+				if err != nil {
+					return AccountPublic{}, NewErr(BadRequest, err.Error())
+				}
+				err = txn.UpdateAccountConfig(acc)
+				if err != nil {
+					return AccountPublic{}, NewErr(NotAvailable, "cannot update account: %v", err)
+				}
 				return acc.GetPublicInfo(), nil
 			}
 			return AccountPublic{}, NewErr(AlreadyExists, "account already exists: %v", err)
@@ -218,12 +220,13 @@ func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upser
 			return AccountPublic{}, NewErr(NotAvailable, "cannot create address: %v", err)
 		}
 		account := Account{
-			Address:         addr,
-			ForeignID:       foreignID,
-			PayoutAddress:   Address(request.PayoutAddress),
-			PayoutThreshold: request.PayoutThreshold,
-			PayoutFrequency: request.PayoutFrequency,
-			Privkey:         priv,
+			Address:   addr,
+			ForeignID: foreignID,
+			Privkey:   priv,
+		}
+		account, err = a.applyAccountSettings(account, request)
+		if err != nil {
+			return AccountPublic{}, NewErr(BadRequest, err.Error())
 		}
 
 		// Generate and store addresses for transaction discovery on blockchain.
@@ -277,47 +280,35 @@ func (a API) CalculateBalance(foreignID string) (AccountBalance, error) {
 }
 
 // Update any of the 'settings' fields on an Account
-func (a API) UpdateAccountSettings(foreignID string, update map[string]interface{}) (AccountPublic, error) {
-	txn, err := a.Store.Begin()
-	if err != nil {
-		a.bus.Send(SYS_ERR, fmt.Sprintf("UpdateAccountSettings: Failed to begin txn: %s", err))
-		return AccountPublic{}, err
-	}
-	defer txn.Rollback()
-
-	acc, err := txn.GetAccount(foreignID)
-	if err != nil {
-		return AccountPublic{}, err
-	}
+func (a API) applyAccountSettings(acc Account, update map[string]any) (Account, error) {
+	var err error
 	for k, v := range update {
-		switch k {
-		case "PayoutAddress":
-			acc.PayoutAddress = v.(Address)
-		case "PayoutThreshold":
-			acc.PayoutThreshold, err = decimal.NewFromString(v.(string))
-			if err != nil {
-				return AccountPublic{}, err
+		if val, ok := v.(string); ok {
+			switch k {
+			case "payout_address":
+				if !doge.ValidateP2PKH(Address(val), &doge.DogeMainNetChain) {
+					return acc, fmt.Errorf("invalid main-net address: %v", val)
+				}
+				acc.PayoutAddress = Address(val)
+			case "payout_threshold":
+				acc.PayoutThreshold, err = decimal.NewFromString(val)
+				if err != nil {
+					return acc, err
+				}
+			case "payout_frequency":
+				acc.PayoutFrequency = val // format not yet specified
+			case "vendor_name":
+				acc.VendorName = val
+			case "vendor_icon":
+				acc.VendorIcon = val
+			case "vendor_address":
+				acc.VendorAddress = val
+			default:
+				return acc, fmt.Errorf("invalid account setting '%s'", k)
 			}
-		case "PayoutFrequency":
-			acc.PayoutFrequency = v.(string)
-		default:
-			a.bus.Send(SYS_ERR, fmt.Sprintf("Invalid account setting: %s", k))
 		}
 	}
-	err = txn.UpdateAccount(acc)
-	if err != nil {
-		return AccountPublic{}, err
-	}
-
-	err = txn.Commit()
-	if err != nil {
-		a.bus.Send(SYS_ERR, fmt.Sprintf("UpdateAccountSettings: Failed to commit: %s", foreignID))
-		return AccountPublic{}, err
-	}
-
-	pub := acc.GetPublicInfo()
-	a.bus.Send(ACC_UPDATED, pub)
-	return pub, nil
+	return acc, nil
 }
 
 type SendFundsResult struct {
@@ -361,7 +352,7 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 		dbtx.Rollback()
 		return
 	}
-	err = dbtx.UpdateAccount(account) // for NextInternalKey (change address)
+	err = dbtx.UpdateAccountKeys(account) // for NextInternalKey (change address)
 	if err != nil {
 		dbtx.Rollback()
 		return
@@ -477,7 +468,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 		tx.Rollback()
 		return
 	}
-	err = tx.UpdateAccount(account) // for NextInternalKey (change address)
+	err = tx.UpdateAccountKeys(account) // for NextInternalKey (change address)
 	if err != nil {
 		tx.Rollback()
 		return

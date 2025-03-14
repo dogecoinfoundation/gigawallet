@@ -124,12 +124,19 @@ const SQL_MIGRATION_v2 = `
 ALTER TABLE utxo ADD COLUMN spend_payment INTEGER;
 `
 
+const SQL_MIGRATION_v3 = `
+ALTER TABLE account ADD COLUMN vendor_name TEXT NOT NULL;
+ALTER TABLE account ADD COLUMN vendor_icon TEXT NOT NULL;
+ALTER TABLE account ADD COLUMN vendor_address TEXT NOT NULL;
+`
+
 var MIGRATIONS = []struct {
 	ver   int
 	query string
 }{
 	{1, SETUP_SQL},
 	{2, SQL_MIGRATION_v2},
+	{3, SQL_MIGRATION_v3},
 }
 
 /****************** SQLiteStore implements giga.Store ********************/
@@ -296,7 +303,7 @@ func (s SQLiteStore) GetServiceCursor(name string) (cursor int64, err error) {
 
 func (s SQLiteStore) getAccountCommon(tx Queryable, accountKey string, isForeignKey bool) (giga.Account, error) {
 	// Used to fetch an Account by ID (Address) or by ForeignID.
-	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency,current_balance,incoming_balance,outgoing_balance FROM account WHERE "
+	query := "SELECT foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency,vendor_name,vendor_icon,vendor_address,current_balance,incoming_balance,outgoing_balance FROM account WHERE "
 	if isForeignKey {
 		query += "foreign_id = $1"
 	} else {
@@ -309,6 +316,7 @@ func (s SQLiteStore) getAccountCommon(tx Queryable, accountKey string, isForeign
 		&acc.NextInternalKey, &acc.NextExternalKey,
 		&acc.NextPoolInternal, &acc.NextPoolExternal,
 		&acc.PayoutAddress, &acc.PayoutThreshold, &acc.PayoutFrequency, // common (see updateAccount)
+		&acc.VendorName, &acc.VendorIcon, &acc.VendorAddress,
 		&acc.CurrentBalance, &acc.IncomingBalance, &acc.OutgoingBalance) // not in updateAccount.
 	if err == sql.ErrNoRows {
 		return giga.Account{}, giga.NewErr(giga.NotFound, "account not found: %s", accountKey)
@@ -728,27 +736,36 @@ func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, payTo []
 
 func (t SQLiteStoreTransaction) CreateAccount(acc giga.Account) error {
 	_, err := t.tx.Exec(
-		"insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-		acc.ForeignID, acc.Address, acc.Privkey, // only in createAccount.
-		acc.NextInternalKey, acc.NextExternalKey, // common (see updateAccount) ...
+		"insert into account(foreign_id,address,privkey,next_int_key,next_ext_key,next_pool_int,next_pool_ext,payout_address,payout_threshold,payout_frequency,vendor_name,vendor_icon,vendor_address) values(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+		acc.ForeignID, acc.Address, acc.Privkey, // only in CreateAccount
+		acc.NextInternalKey, acc.NextExternalKey, // UpdateAccountKeys ...
 		acc.NextPoolInternal, acc.NextPoolExternal,
-		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency)
+		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency, // UpdateAccountConfig ...
+		acc.VendorName, acc.VendorIcon, acc.VendorAddress)
 	if err != nil {
 		return t.store.dbErr(err, "createAccount: executing insert")
 	}
 	return nil
 }
 
-func (t SQLiteStoreTransaction) UpdateAccount(acc giga.Account) error {
-	sql := "UPDATE account SET next_int_key=MAX(next_int_key,$1), next_ext_key=MAX(next_ext_key,$2), next_pool_int=MAX(next_pool_int,$3), next_pool_ext=MAX(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8"
+func (t SQLiteStoreTransaction) UpdateAccountKeys(acc giga.Account) error {
+	sql := "UPDATE account SET next_int_key=MAX(next_int_key,$1), next_ext_key=MAX(next_ext_key,$2), next_pool_int=MAX(next_pool_int,$3), next_pool_ext=MAX(next_pool_ext,$4) WHERE foreign_id=$5"
 	if t.store.isPostgres {
-		sql = "UPDATE account SET next_int_key=GREATEST(next_int_key,$1), next_ext_key=GREATEST(next_ext_key,$2), next_pool_int=GREATEST(next_pool_int,$3), next_pool_ext=GREATEST(next_pool_ext,$4), payout_address=$5, payout_threshold=$6, payout_frequency=$7 WHERE foreign_id=$8"
+		sql = "UPDATE account SET next_int_key=GREATEST(next_int_key,$1), next_ext_key=GREATEST(next_ext_key,$2), next_pool_int=GREATEST(next_pool_int,$3), next_pool_ext=GREATEST(next_pool_ext,$4) WHERE foreign_id=$5"
 	}
 	res, err := t.tx.Exec(sql,
-		acc.NextInternalKey, acc.NextExternalKey, // common (see createAccount) ...
+		acc.NextInternalKey, acc.NextExternalKey,
 		acc.NextPoolInternal, acc.NextPoolExternal,
+		acc.ForeignID)
+	return t.checkRowsAffected(res, err, "account", acc.ForeignID)
+}
+
+func (t SQLiteStoreTransaction) UpdateAccountConfig(acc giga.Account) error {
+	sql := "UPDATE account SET payout_address=$1, payout_threshold=$2, payout_frequency=$3, vendor_name=$4, vendor_icon=$5, vendor_address=$6 WHERE foreign_id=$7"
+	res, err := t.tx.Exec(sql,
 		acc.PayoutAddress, acc.PayoutThreshold, acc.PayoutFrequency,
-		acc.ForeignID) // the Key (not updated)
+		acc.VendorName, acc.VendorIcon, acc.VendorAddress,
+		acc.ForeignID)
 	return t.checkRowsAffected(res, err, "account", acc.ForeignID)
 }
 

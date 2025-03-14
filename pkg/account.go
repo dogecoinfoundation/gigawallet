@@ -26,6 +26,9 @@ type Account struct {
 	CurrentBalance   CoinAmount // current balance available to spend now (from BalanceKeeper)
 	IncomingBalance  CoinAmount // receiving coins waiting for confirmation (from BalanceKeeper)
 	OutgoingBalance  CoinAmount // spent coins waiting for confirmation (from BalanceKeeper)
+	VendorName       string     // DogeConnect Vendor name
+	VendorIcon       string     // DogeConnect Vendor icon https:// URL
+	VendorAddress    string     // DogeConnect Vendor address (optional)
 }
 
 // AccountBalance holds the current account balances for an Account.
@@ -92,7 +95,7 @@ func (a *Account) GenerateAddresses(lib L1, first uint32, count uint32, isIntern
 // NextPayToAddress generates the next unused "external address"
 // in the Account's HD-Wallet keyspace.
 // Modifies `NextExternalKey` so the caller should run `UpdatePoolAddresses`
-// and commit changes using `dbtx.UpdateAccount`
+// and commit changes using `dbtx.UpdateAccountKeys`
 func (a *Account) NextPayToAddress(lib L1) (Address, uint32, error) {
 	keyIndex := a.NextExternalKey
 	address, err := lib.MakeChildAddress(a.Privkey, keyIndex, false)
@@ -120,7 +123,16 @@ func (a *Account) NextChangeAddress(lib L1) (addr Address, index uint32, e error
 // GetPublicInfo gets those parts of the Account that are safe
 // to expose to the outside world (i.e. NOT private keys)
 func (a Account) GetPublicInfo() AccountPublic {
-	return AccountPublic{Address: a.Address, ForeignID: a.ForeignID, PayoutAddress: a.PayoutAddress, PayoutThreshold: a.PayoutThreshold, PayoutFrequency: a.PayoutFrequency}
+	return AccountPublic{
+		Address:         a.Address,
+		ForeignID:       a.ForeignID,
+		PayoutAddress:   a.PayoutAddress,
+		PayoutThreshold: a.PayoutThreshold,
+		PayoutFrequency: a.PayoutFrequency,
+		VendorName:      a.VendorName,
+		VendorIcon:      a.VendorIcon,
+		VendorAddress:   a.VendorAddress,
+	}
 }
 
 type AccountPublic struct {
@@ -129,4 +141,7 @@ type AccountPublic struct {
 	PayoutAddress   Address    `json:"payout_address"`
 	PayoutThreshold CoinAmount `json:"payout_threshold"`
 	PayoutFrequency string     `json:"payout_frequency"`
+	VendorName      string     `json:"vendor_name"`
+	VendorIcon      string     `json:"vendor_icon"`
+	VendorAddress   string     `json:"vendor_address"`
 }

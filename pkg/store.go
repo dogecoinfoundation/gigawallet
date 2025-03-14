@@ -115,11 +115,15 @@ type StoreTransaction interface {
 	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)
 	CreateAccount(account Account) error
 
-	// UpdateAccount updates an existing account.
+	// UpdateAccountKeys updates key-tracking fields for the HD wallet.
 	// It returns giga.NotFound if the account does not exist (key: ForeignID)
-	// NOTE: will not update 'Privkey' or 'Address' (changes ignored or rejected)
-	// NOTE: counters can only be advanced, not regressed (e.g. NextExternalKey) (ignored or rejected)
-	UpdateAccount(account Account) error
+	// NOTE: counters can only be advanced, not regressed (e.g. NextExternalKey) (ignored if lower)
+	UpdateAccountKeys(account Account) error
+
+	// UpdateAccount updates existing account configuration.
+	// It returns giga.NotFound if the account does not exist (key: ForeignID)
+	// Updates: PayoutAddress, PayoutThreshold, PayoutFrequency, VendorName, VendorIcon, VendorAddress.
+	UpdateAccountConfig(account Account) error
 
 	// StoreAddresses associates a list of addresses with an accountID
 	StoreAddresses(accountID Address, addresses []Address, firstAddress uint32, internal bool) error
