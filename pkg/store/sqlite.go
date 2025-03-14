@@ -125,9 +125,9 @@ ALTER TABLE utxo ADD COLUMN spend_payment INTEGER;
 `
 
 const SQL_MIGRATION_v3 = `
-ALTER TABLE account ADD COLUMN vendor_name TEXT NOT NULL;
-ALTER TABLE account ADD COLUMN vendor_icon TEXT NOT NULL;
-ALTER TABLE account ADD COLUMN vendor_address TEXT NOT NULL;
+ALTER TABLE account ADD COLUMN vendor_name TEXT NOT NULL DEFAULT "";
+ALTER TABLE account ADD COLUMN vendor_icon TEXT NOT NULL DEFAULT "";
+ALTER TABLE account ADD COLUMN vendor_address TEXT NOT NULL DEFAULT "";
 `
 
 var MIGRATIONS = []struct {
