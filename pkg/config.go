@@ -1,5 +1,7 @@
 package giga
 
+import "github.com/dogecoinfoundation/gigawallet/pkg/doge"
+
 type Config struct {
 	Gigawallet GigawalletConfig
 	WebAPI     WebAPIConfig
@@ -12,6 +14,9 @@ type Config struct {
 	// the one specified by config.Gigawallet.Network
 	Dogecoind map[string]NodeConfig
 	Core      NodeConfig
+
+	// Derved from Gigawallet.Network ("mainnet", "testnet")
+	Chain *doge.ChainParams
 }
 
 type GigawalletConfig struct {
@@ -125,5 +130,6 @@ func TestConfig() Config {
 		Loggers:   make(map[string]LoggersConfig),
 		Dogecoind: make(map[string]NodeConfig),
 		Core:      NodeConfig{},
+		Chain:     &doge.DogeTestNetChain,
 	}
 }

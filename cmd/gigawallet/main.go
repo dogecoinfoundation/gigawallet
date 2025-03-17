@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
 )
 
 func main() {
@@ -67,6 +68,7 @@ func main() {
 	if len(config.Core.Host) < 1 {
 		panic(fmt.Sprintf("bad config: missing network: %s", config.Gigawallet.Network))
 	}
+	config.Chain = doge.ChainFromTestNetFlag(config.Gigawallet.Network == "testnet")
 
 	// Sub commands!
 	switch flag.Arg(0) {
