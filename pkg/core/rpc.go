@@ -188,11 +188,17 @@ func (l *L1CoreRPC) Send(txnHex string) (txid string, err error) {
 }
 
 func (l *L1CoreRPC) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
-	var res float64
+	var res string
 	err = l.request("estimatefee", []any{confirmTarget}, &res)
-	if res < 0 {
+	if err != nil {
+		return
+	}
+	feePerKB, err = decimal.NewFromString(res)
+	if err != nil {
+		return
+	}
+	if feePerKB.LessThan(decimal.Zero) {
 		return giga.ZeroCoins, errors.New("fee-rate is negative")
 	}
-	feePerKB = decimal.NewFromFloat(res)
 	return
 }
