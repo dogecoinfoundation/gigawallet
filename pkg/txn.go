@@ -220,11 +220,11 @@ func estimateFeePerByte(lib L1) CoinAmount {
 // Calculate fee based on transacion size, within fee limits.
 func feeForTxn(sizeBytes int64, feePerByte CoinAmount, fixedFee CoinAmount, maxFee CoinAmount) CoinAmount {
 	if fixedFee.IsPositive() {
-		return fixedFee.Round(NumKoinuDigits) // override with specified fee
+		return fixedFee.RoundCeil(NumKoinuDigits) // override with specified fee
 	}
 	feeForSize := feePerByte.Mul(decimal.NewFromInt(sizeBytes))
-	feeForSize = decimal.Max(feeForSize, TxnRecommendedMinFee)   // at least minFee
-	return decimal.Min(feeForSize, maxFee).Round(NumKoinuDigits) // limit to maxFee, round to Koinu
+	feeForSize = decimal.Max(feeForSize, TxnRecommendedMinFee)       // at least minFee
+	return decimal.Min(feeForSize, maxFee).RoundCeil(NumKoinuDigits) // limit to maxFee, round to Koinu
 }
 
 // Calculate the Fee based on the size of the transaction.
