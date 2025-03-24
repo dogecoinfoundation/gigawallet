@@ -30,7 +30,8 @@ type L1 interface {
 	GetTransaction(txnHash string) (RawTxn, error)
 	Send(txnHex string) (txid string, err error)
 	EstimateFee(confirmTarget int) (feePerKB CoinAmount, err error)
-	//SignMessage([]byte, Privkey) (string, error)
+	TestMempoolAccept(tx string, maxFeeRate string) (MempoolAccept, error)
+	GetTxOut(txid string, vout uint32, include_mempool bool) (GetTxOut, error) // gettxout
 }
 
 type Address = doge.Address // Dogecoin address (base-58 public key hash aka PKH)
@@ -190,4 +191,55 @@ type RpcBlockchainInfo struct {
 	AutomaticPruning     bool    `json:"automatic_pruning"`    // (boolean) whether automatic pruning is enabled (only present if pruning is enabled)
 	PruneTargetSize      int64   `json:"prune_target_size"`    // (numeric) the target size used by pruning (only present if automatic pruning is enabled)
 
+}
+
+// MempoolAccept is the response from testmempoolaccept Core RPC
+type MempoolAccept struct {
+	TxID         string      `json:"txid"`          // The transaction hash in hex
+	Allowed      bool        `json:"allowed"`       // If the mempool allows this tx to be inserted
+	VSize        int64       `json:"vsize"`         // Virtual transaction size as defined in BIP 141. This is different from actual serialized size for witness transactions as witness data is discounted (only present when 'allowed' is true)
+	Fees         MempoolFees `json:"fees"`          // Transaction fees (only present if 'allowed' is true)
+	RejectReason string      `json:"reject-reason"` // Rejection string (only present when 'allowed' is false)
+}
+
+type MempoolFees struct {
+	Base string `json:"base"` // Transaction fee in Doge, DECIMAL
+}
+
+// GetTxOut is the result of a `gettxout` Core RPC
+//
+//	{
+//	  "bestblock": "f21a25e6980c00d5bb72b58fc490e52328b1bc78ec046ea5d65b8199fa624f06",
+//	  "confirmations": 1,
+//	  "value": 171.30751031,
+//	  "scriptPubKey": {
+//	    "asm": "OP_DUP OP_HASH160 44159c14228e731c5c2a247a1c25119a264f558e OP_EQUALVERIFY OP_CHECKSIG",
+//	    "hex": "76a91444159c14228e731c5c2a247a1c25119a264f558e88ac",
+//	    "reqSigs": 1,
+//	    "type": "pubkeyhash",
+//	    "addresses": [
+//	      "DBM6NmcNaL7HB7wNVNewbPETpq6ZJGe4Yr"
+//	    ]
+//	  },
+//	  "version": 1,
+//	  "coinbase": false
+//	}
+type GetTxOut struct {
+	BestBlock     string             `json:"bestblock"`     // Hash of the block at the tip of the chain (hex)
+	Confirmations int64              `json:"confirmations"` // Number of confirmations (blocks)
+	Value         RawNumber          `json:"value"`         // Transaction value in BTC, DECIMAL string
+	ScriptPubKey  RawTxnScriptPubKey `json:"scriptPubKey"`  // Output script
+	Version       int                `json:"version"`       // Transaction version
+	Coinbase      bool               `json:"coinbase"`      // Coinbase or not
+}
+
+// RawNumber parses a JSON number as a string, to preserve accuracy
+type RawNumber struct {
+	n string
+}
+
+// UnmarshalJSON implments json.Unmarshaler
+func (val *RawNumber) UnmarshalJSON(data []byte) error {
+	val.n = string(data)
+	return nil
 }

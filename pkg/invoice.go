@@ -15,7 +15,9 @@ type Invoice struct {
 	Items         []Item     `json:"items"`
 	Confirmations int32      `json:"required_confirmations"` // number of confirmed blocks (since block_id)
 	Created       time.Time  `json:"created"`
-	Total         CoinAmount `json:"total"` // derived from items
+	Total         CoinAmount `json:"total"`         // derived from items (used internally to confirm payment)
+	FiatTotal     CoinAmount `json:"fiat_total"`    // optional total in fiat
+	FiatCurrency  string     `json:"fiat_currency"` // ISO 4217 currency code for FiatTotal
 	// These are used internally to track invoice status.
 	KeyIndex           uint32     `json:"-"`               // which HD Wallet child-key was generated
 	BlockID            string     `json:"-"`               // transaction seen in this mined block
@@ -25,6 +27,8 @@ type Invoice struct {
 	PaidAmount         CoinAmount `json:"total_confirmed"` // total of all confirmed UTXOs
 	LastIncomingAmount CoinAmount `json:"-"`               // last incoming total used to send an event
 	LastPaidAmount     CoinAmount `json:"-"`               // last confirmed total used to send an event
+	MinFee             CoinAmount `json:"-"`               // DogeConnect: min fee per 1000 bytes
+	Expires            time.Time  `json:"-"`               // DogeConnect: time the Payment Request expires
 	// Additional derived fields (included in PublicInvoice)
 	PayTo          Address `json:"pay_to_address"`
 	PartDetected   bool    `json:"part_payment_detected"`       // Calculated

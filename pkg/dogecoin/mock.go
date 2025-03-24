@@ -77,3 +77,11 @@ func (l L1Mock) Send(txnHex string) (txid string, err error) {
 func (l L1Mock) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
 	return decimal.NewFromString("0.67891013") // example from Core
 }
+
+func (l L1Mock) TestMempoolAccept(tx string, maxFeeRate string) (giga.MempoolAccept, error) {
+	return giga.MempoolAccept{}, fmt.Errorf("not implemented")
+}
+
+func (l L1Mock) GetTxOut(txid string, vout uint32, include_mempool bool) (giga.GetTxOut, error) {
+	return giga.GetTxOut{}, fmt.Errorf("not implemented")
+}

@@ -240,3 +240,17 @@ func (l L1Libdogecoin) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount,
 	}
 	return giga.ZeroCoins, fmt.Errorf("not implemented")
 }
+
+func (l L1Libdogecoin) TestMempoolAccept(tx string, maxFeeRate string) (giga.MempoolAccept, error) {
+	if l.fallback != nil {
+		return l.fallback.TestMempoolAccept(tx, maxFeeRate)
+	}
+	return giga.MempoolAccept{}, fmt.Errorf("not implemented")
+}
+
+func (l L1Libdogecoin) GetTxOut(txid string, vout uint32, include_mempool bool) (giga.GetTxOut, error) {
+	if l.fallback != nil {
+		return l.fallback.GetTxOut(txid, vout, include_mempool)
+	}
+	return giga.GetTxOut{}, fmt.Errorf("not implemented")
+}

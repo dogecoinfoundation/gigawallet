@@ -686,7 +686,7 @@ func (t SQLiteStoreTransaction) GetChainState() (giga.ChainState, error) {
 	return t.store.getChainStateCommon(t.tx)
 }
 
-// Store an invoice
+// Create an invoice
 func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	items_b, err := json.Marshal(inv.Items)
 	if err != nil {
@@ -700,6 +700,14 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	if err != nil {
 		return t.store.dbErr(err, "StoreInvoice: insert")
 	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) SetInvoiceConnect(invoiceID giga.Address, minFee giga.CoinAmount, expires time.Time) error {
+	return nil
+}
+
+func (t SQLiteStoreTransaction) SetInvoiceTx(invoiceID giga.Address, txBytes []byte) error {
 	return nil
 }
 

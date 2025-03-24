@@ -101,6 +101,7 @@ func (a API) GetInvoiceConnectURL(invoice Invoice, rootURL string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("begin transaction: %w", err)
 	}
+	defer tx.Rollback()
 	acc, err := tx.GetAccountByID(invoice.Account)
 	if err != nil {
 		return "", fmt.Errorf("bad account: %w", err)
@@ -124,42 +125,6 @@ func (a API) GetInvoiceConnectURL(invoice Invoice, rootURL string) (string, erro
 	uri := connect.DogecoinURI(string(invoice.ID), invoice.CalcTotal().String(), connectURL, pubBytes)
 
 	return uri, nil
-}
-
-func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (connect.ConnectEnvelope, error) {
-	// Get the Account by its internal ID, rather than by foreign id.
-	tx, err := a.Store.Begin()
-	if err != nil {
-		return connect.ConnectEnvelope{}, fmt.Errorf("begin transaction: %w", err)
-	}
-	acc, err := tx.GetAccountByID(invoice.Account)
-	if err != nil {
-		return connect.ConnectEnvelope{}, fmt.Errorf("bad account: %w", err)
-	}
-	err = tx.Commit()
-	if err != nil {
-		return connect.ConnectEnvelope{}, fmt.Errorf("commit transaction: %w", err)
-	}
-
-	// Sign the DogeConnect Envelope using the account key.
-	// The key in the account is an Extended BIP32 Privkey.
-	privKey, err := doge.DecodeBip32WIF(string(acc.Privkey), nil)
-	if err != nil {
-		return connect.ConnectEnvelope{}, fmt.Errorf("bad key in account: %w", err)
-	}
-	defer privKey.Clear()
-	privBytes, err := privKey.GetECPrivKey()
-	if err != nil {
-		return connect.ConnectEnvelope{}, fmt.Errorf("bad key in account: %w", err)
-	}
-	defer clear(privBytes)
-
-	// Create and sign the Payment Request.
-	envelope, err := InvoiceToConnectPaymentRequest(invoice, acc, rootURL, privBytes)
-	if err != nil {
-		return connect.ConnectEnvelope{}, fmt.Errorf("signing envelope: %w", err)
-	}
-	return envelope, nil
 }
 
 type ListInvoicesResponse struct {
@@ -347,6 +312,7 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 	if err != nil {
 		return
 	}
+	defer dbtx.Rollback()
 	err = account.UpdatePoolAddresses(dbtx, a.L1) // we used a Change address.
 	if err != nil {
 		dbtx.Rollback()
@@ -463,6 +429,7 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 	if err != nil {
 		return
 	}
+	defer tx.Rollback()
 	err = account.UpdatePoolAddresses(tx, a.L1) // we have used an address.
 	if err != nil {
 		tx.Rollback()
@@ -535,6 +502,67 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 	}
 	a.bus.Send(PAYMENT_SENT, msg)
 	return SendFundsResult{TxId: txid, Total: invoiceAmount.Add(fee), Paid: invoiceAmount, Fee: fee}, nil
+}
+
+func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (env connect.ConnectEnvelope, err error) {
+	// Get the Account by its internal ID, rather than by foreign id.
+	tx, err := a.Store.Begin()
+	if err != nil {
+		return env, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	acc, err := tx.GetAccountByID(invoice.Account)
+	if err != nil {
+		return env, fmt.Errorf("bad account: %w", err)
+	}
+	err = tx.Commit()
+	if err != nil {
+		return env, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// Sign the DogeConnect Envelope using the account key.
+	// The key in the account is an Extended BIP32 Privkey.
+	privKey, err := doge.DecodeBip32WIF(string(acc.Privkey), nil)
+	if err != nil {
+		return env, fmt.Errorf("bad key in account: %w", err)
+	}
+	defer privKey.Clear()
+	privBytes, err := privKey.GetECPrivKey()
+	if err != nil {
+		return env, fmt.Errorf("bad key in account: %w", err)
+	}
+	defer clear(privBytes)
+
+	// Create and sign the Payment Request.
+	env, minFee, expires, err := ConnectPaymentRequest(invoice, acc, a.L1, &a.config, rootURL, privBytes)
+	if err != nil {
+		return env, fmt.Errorf("signing envelope: %w", err)
+	}
+
+	// Save minFee on the Invoice for verification in PayConnectInvoice
+	tx, err = a.Store.Begin()
+	defer tx.Rollback()
+	if err != nil {
+		return env, fmt.Errorf("begin transaction: %w", err)
+	}
+	err = tx.SetInvoiceConnect(invoice.ID, minFee, expires)
+	if err != nil {
+		return env, fmt.Errorf("commit transaction: %w", err)
+	}
+	err = tx.Commit()
+	if err != nil {
+		return env, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return env, nil
+}
+
+func (a API) PayConnectInvoice(invoice Invoice, tx string) error {
+	err := ConnectVerifyTx(invoice, tx, a.L1, a.Store, a.config.Chain)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Re-sync from a specific block height, or skip ahead (for now)

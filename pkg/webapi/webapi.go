@@ -517,7 +517,42 @@ func (t WebAPI) dcGetEnvelope(w http.ResponseWriter, r *http.Request, p httprout
 	sendResponse(w, envelope)
 }
 
+type PayInvoiceRequest struct {
+	ID     string `json:"id"`     // Relay-unique Payment ID from Connect Payment
+	Tx     string `json:"tx"`     // Hex-encoded signed dogecoin transaction
+	Refund string `json:"refund"` // Dogecoin address for refunds (RECOMMENDED)
+}
+
+type PayInvoiceReply struct {
+	ID        string `json:"id"`        // Relay-unique Payment ID from Connect Payment
+	Status    string `json:"status"`    // One of: accepted | confirmed | declined
+	Reason    string `json:"reason"`    // Reason for decline (message, optional)
+	Required  int    `json:"required"`  // Number of block confirmations required (risk analysis)
+	Confirmed int    `json:"confirmed"` // Current number of block confirmations on-chain
+	DueSec    int    `json:"due_sec"`   // Estimated time in seconds until confirmed
+}
+
 func (t WebAPI) dcPayInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	o := PayInvoiceRequest{}
+	err := json.NewDecoder(r.Body).Decode(&o)
+	if err != nil {
+		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
+		return
+	}
+
+	invoice, err := t.api.GetInvoice(giga.Address(o.ID))
+	if err != nil {
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice")
+		return
+	}
+
+	err = t.api.PayConnectInvoice(invoice, o.Tx)
+	if err != nil {
+		sendError(w, "PayInvoiceWithTx", err)
+		return
+	}
+
+	sendResponse(w, PayInvoiceReply{})
 }
 
 func (t WebAPI) dcPayStatus(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
