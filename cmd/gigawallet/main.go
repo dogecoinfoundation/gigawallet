@@ -134,6 +134,7 @@ func applyFlags(config *giga.Config, subs *SubCommandArgs) {
 	flag.IntVar(&config.Gigawallet.ConfirmationsNeeded, "confirmations-needed", config.Gigawallet.ConfirmationsNeeded, "Confirmations needed")
 	flag.StringVar(&config.WebAPI.AdminPort, "admin-port", config.WebAPI.AdminPort, "Admin API port")
 	flag.StringVar(&config.WebAPI.AdminBind, "admin-bind", config.WebAPI.AdminBind, "Admin API bind")
+	flag.StringVar(&config.WebAPI.AdminBearerToken, "admin-bearer-token", config.WebAPI.AdminBearerToken, "Admin API bearer token (optional)")
 	flag.StringVar(&config.WebAPI.PubPort, "pub-port", config.WebAPI.PubPort, "Pub API port")
 	flag.StringVar(&config.WebAPI.PubBind, "pub-bind", config.WebAPI.PubBind, "Pub API bind")
 	flag.StringVar(&config.Store.DBFile, "store-db-file", config.Store.DBFile, "Store DB file")

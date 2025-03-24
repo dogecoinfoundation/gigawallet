@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
 	"github.com/dogecoinfoundation/gigawallet/pkg/conductor"
@@ -58,44 +59,73 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 	return nil
 }
 
+func (t WebAPI) authMiddleware(handler httprouter.Handle) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		if t.config.WebAPI.AdminBearerToken == "" {
+			// Skip auth if the user hasn't configured a token.
+			handler(w, r, ps)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			sendErrorResponse(w, http.StatusUnauthorized, giga.Unauthorized, "Authorization header required")
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			sendErrorResponse(w, http.StatusUnauthorized, giga.Unauthorized, "Invalid authorization format, expected 'Bearer TOKEN'")
+			return
+		}
+
+		if parts[1] != t.config.WebAPI.AdminBearerToken {
+			sendErrorResponse(w, http.StatusUnauthorized, giga.Unauthorized, "Invalid token")
+			return
+		}
+
+		handler(w, r, ps)
+	}
+}
+
 func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter.Router) {
 	adminMux = httprouter.New() // Admin APIs
 	pubMux = httprouter.New()   // Public APIs
 
 	// Admin APIs
 
-	adminMux.POST("/admin/setsyncheight/:blockheight", t.setSyncHeight)
+	adminMux.POST("/admin/setsyncheight/:blockheight", t.authMiddleware(t.setSyncHeight))
 
 	// POST { account } /account/:foreignID -> { account } upsert account
-	adminMux.POST("/account/:foreignID", t.upsertAccount)
+	adminMux.POST("/account/:foreignID", t.authMiddleware(t.upsertAccount))
 
 	// GET /account/:foreignID -> { account } return an account
-	adminMux.GET("/account/:foreignID", t.getAccount)
+	adminMux.GET("/account/:foreignID", t.authMiddleware(t.getAccount))
 
 	// GET /account:foreignID/Balance -> { AccountBalance    Get the account balance
-	adminMux.GET("/account/:foreignID/balance", t.getAccountBalance)
+	adminMux.GET("/account/:foreignID/balance", t.authMiddleware(t.getAccountBalance))
 
 	// POST {invoice} /account/:foreignID/invoice -> { invoice } create new invoice
-	adminMux.POST("/account/:foreignID/invoice", t.createInvoice)
-	adminMux.POST("/account/:foreignID/invoice/", t.createInvoice) // deprecated: prior bug
+	adminMux.POST("/account/:foreignID/invoice", t.authMiddleware(t.createInvoice))
+	adminMux.POST("/account/:foreignID/invoice/", t.authMiddleware(t.createInvoice)) // deprecated: prior bug
 
 	// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
-	adminMux.GET("/account/:foreignID/invoices", t.listInvoices)
+	adminMux.GET("/account/:foreignID/invoices", t.authMiddleware(t.listInvoices))
 
 	// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
-	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.getAccountInvoice)
+	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.authMiddleware(t.getAccountInvoice))
 
 	// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
-	adminMux.POST("/account/:foreignID/pay", t.payToAddress)
+	adminMux.POST("/account/:foreignID/pay", t.authMiddleware(t.payToAddress))
 
 	// POST /account/:foreignID/paytx { "pay": [{ "amount":"1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" }] } -> { tx }
-	adminMux.POST("/account/:foreignID/paytx", t.payTransaction)
+	adminMux.POST("/account/:foreignID/paytx", t.authMiddleware(t.payTransaction))
 
 	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
-	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.payInvoiceFromInternal)
+	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.authMiddleware(t.payInvoiceFromInternal))
 
 	// POST /decode-txn -> test decoding
-	adminMux.POST("/decode-txn", t.decodeTxn)
+	adminMux.POST("/decode-txn", t.authMiddleware(t.decodeTxn))
 
 	// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
 

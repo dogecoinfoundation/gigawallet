@@ -15,6 +15,7 @@ var httpCodeForError = map[string]int{
 	string(giga.NotAvailable):  503,
 	string(giga.NotFound):      404,
 	string(giga.AlreadyExists): 500,
+	string(giga.Unauthorized):  401,
 	string(giga.UnknownError):  500,
 }
 

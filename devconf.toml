@@ -3,6 +3,7 @@
 [WebAPI]
   adminbind = "localhost"  # avoids macOS firewall confirmation!
   adminport = "8081"
+  # adminbearertoken = "your-secret-token"  # Optional: when set, requires this token for admin API access
   pubbind = "localhost"  # avoids macOS firewall confirmation!
   pubport = "8082"
   pubapirooturl = "http://localhost:8082"
