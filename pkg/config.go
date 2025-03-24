@@ -60,8 +60,9 @@ type NodeConfig struct {
 
 type WebAPIConfig struct {
 	// Admin API
-	AdminPort string
-	AdminBind string // optional interface IP address
+	AdminPort        string
+	AdminBind        string // optional interface IP address
+	AdminBearerToken string // optional bearer token for authenticating admin API requests
 
 	// Public API
 	PubPort       string

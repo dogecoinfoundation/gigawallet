@@ -11,6 +11,7 @@ const (
 	NotAvailable      ErrorCode = "not-available"
 	NotFound          ErrorCode = "not-found"
 	AlreadyExists     ErrorCode = "already-exists"
+	Unauthorized      ErrorCode = "unauthorized"
 	L1Error           ErrorCode = "libdoge-error"
 	InvalidTxn        ErrorCode = "invalid-txn"
 	InsufficientFunds ErrorCode = "insufficient-funds"
