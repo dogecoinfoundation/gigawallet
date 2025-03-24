@@ -17,6 +17,11 @@
 [gigawallet]
   network = "mainnet"  # which dogecoind to connect to
 
+[connect]
+#  txmaxsize = 10000
+#  minfeepercent = 0.8
+#  estimatefeeblocks = 6
+
 [dogecoind.testnet]
   host    = "localhost"
   zmqport = 28332

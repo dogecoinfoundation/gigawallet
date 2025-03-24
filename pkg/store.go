@@ -1,5 +1,7 @@
 package giga
 
+import "time"
+
 // A store represents a connection to a database
 // with a transactional API that
 type Store interface {
@@ -94,6 +96,12 @@ type StoreTransaction interface {
 	// Caller SHOULD update Account.NextExternalKey and use StoreAccount in the same StoreTransaction.
 	// It returns an unspecified error if the invoice ID already exists (FIXME)
 	StoreInvoice(invoice Invoice) error
+
+	// SetInvoiceConnect sets the DogeConnect "Payment Request" fields of an Invoice.
+	SetInvoiceConnect(invoiceID Address, minFee CoinAmount, expires time.Time) error
+
+	// SetInvoiceTx sets the submitted DogeConnect Payment Tx.
+	SetInvoiceTx(invoiceID Address, txBytes []byte) error
 
 	// Store a 'payment' which represents a pay-out to another address from a gigawallet
 	// managed account.

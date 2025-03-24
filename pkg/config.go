@@ -1,6 +1,9 @@
 package giga
 
-import "github.com/dogecoinfoundation/gigawallet/pkg/doge"
+import (
+	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
+	"github.com/shopspring/decimal"
+)
 
 type Config struct {
 	Gigawallet GigawalletConfig
@@ -9,6 +12,7 @@ type Config struct {
 	Loggers    map[string]LoggersConfig
 	Callbacks  map[string]CallbackConfig
 	MQTT       MQTTConfig
+	Connect    ConnectConfig
 
 	// Map of available networks, config.Core will be set to
 	// the one specified by config.Gigawallet.Network
@@ -103,6 +107,13 @@ type MQTTQueueConfig struct {
 	Types       []string
 }
 
+type ConnectConfig struct {
+	PaymentTimeout    int             // Seconds before the PaymentRequest expires (default 300)
+	TxMaxSize         int             // Maximum size in bytes of payment tx (deafult 10,000)
+	MinFeePercent     decimal.Decimal // Minimum tx fee as a percentage of Core `estimatefee` (default 0.8)
+	EstimateFeeBlocks int             // Number of blocks to pass to `estimatefee` (default 6)
+}
+
 func TestConfig() Config {
 	return Config{
 		Gigawallet: GigawalletConfig{
@@ -126,6 +137,12 @@ func TestConfig() Config {
 		},
 		MQTT: MQTTConfig{
 			Queues: make(map[string]MQTTQueueConfig),
+		},
+		Connect: ConnectConfig{
+			PaymentTimeout:    300,
+			TxMaxSize:         10_000,
+			MinFeePercent:     decimal.RequireFromString("0.8"),
+			EstimateFeeBlocks: 6,
 		},
 		Loggers:   make(map[string]LoggersConfig),
 		Dogecoind: make(map[string]NodeConfig),

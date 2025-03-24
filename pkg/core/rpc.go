@@ -202,3 +202,24 @@ func (l *L1CoreRPC) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, er
 	}
 	return
 }
+
+func (l *L1CoreRPC) TestMempoolAccept(tx string, maxFeeRate string) (giga.MempoolAccept, error) {
+	var res []giga.MempoolAccept
+	txs := []string{tx}
+	err := l.request("testmempoolaccept", []any{txs, maxFeeRate}, &res)
+	if err != nil {
+		return giga.MempoolAccept{}, fmt.Errorf("testmempoolaccept: %v", err)
+	}
+	if len(res) < 1 {
+		return giga.MempoolAccept{}, fmt.Errorf("testmempoolaccept: no results")
+	}
+	return res[0], nil
+}
+
+func (l *L1CoreRPC) GetTxOut(txid string, vout uint32, include_mempool bool) (res giga.GetTxOut, err error) {
+	err = l.request("gettxout", []any{txid, vout, include_mempool}, &res)
+	if err != nil {
+		return giga.GetTxOut{}, fmt.Errorf("gettxout: %v", err)
+	}
+	return
+}

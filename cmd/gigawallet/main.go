@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/shopspring/decimal"
 	flag "github.com/spf13/pflag"
 
 	"github.com/BurntSushi/toml"
@@ -42,9 +43,15 @@ func main() {
 		MQTT: giga.MQTTConfig{
 			Queues: make(map[string]giga.MQTTQueueConfig),
 		},
+		Connect: giga.ConnectConfig{
+			PaymentTimeout:    300,
+			TxMaxSize:         10_000,
+			MinFeePercent:     decimal.RequireFromString("0.8"),
+			EstimateFeeBlocks: 6,
+		},
 		Loggers:   make(map[string]giga.LoggersConfig),
+		Callbacks: make(map[string]giga.CallbackConfig),
 		Dogecoind: make(map[string]giga.NodeConfig),
-		Core:      giga.NodeConfig{},
 	}
 
 	subCommandArgs := SubCommandArgs{}
