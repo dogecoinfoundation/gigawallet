@@ -80,8 +80,9 @@ type LoggersConfig struct {
 }
 
 type CallbackConfig struct {
-	Path  string
-	Types []string
+	Path       string
+	Types      []string
+	HMACSecret string
 }
 
 type MQTTConfig struct {

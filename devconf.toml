@@ -29,8 +29,8 @@
   zmqport = 28332
   rpchost = "127.0.0.1"
   rpcport = 22555
-  rpcpass = "suchpay"
-  rpcuser = "suchpay"
+  rpcpass = "gigawallet"
+  rpcuser = "gigawallet"
 
 ## Setup loggers, see pkg/config.go LoggersConfig
 [loggers.events]
@@ -42,6 +42,8 @@
 #[callbacks.example1]
 #  path = "https://example.com/invoiceEvents"
 #  types = ["INV"]
+#  # Optional: Add HMAC secret for request signing
+#  # hmacsecret = "your-secret-key-here"
 
 
 ## Setup MQTT event publishing, see pkg/config.go MQTTConfig
