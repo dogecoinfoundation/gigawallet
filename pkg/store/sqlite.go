@@ -179,14 +179,14 @@ func (s *SQLiteStore) initSchema(backend string) error {
 		return s.dbErr(err, "begin transaction")
 	}
 	// set up version table (idempotent)
+	_, err = tx.Exec("CREATE TABLE IF NOT EXISTS migration (version INTEGER NOT NULL)")
+	if err != nil {
+		return s.dbErr(err, "creating migration table")
+	}
 	version := 0
 	err = tx.QueryRow("SELECT version FROM migration LIMIT 1").Scan(&version)
 	if err != nil {
-		_, err = tx.Exec("CREATE TABLE migration (version INTEGER NOT NULL)")
-		if err != nil {
-			return s.dbErr(err, "creating migration table")
-		}
-		_, err = tx.Exec("INSERT INTO migration (version) VALUES (?)", version)
+		_, err = tx.Exec("INSERT INTO migration (version) VALUES ($1)", version)
 		if err != nil {
 			return s.dbErr(err, "querying schema version")
 		}
@@ -207,7 +207,7 @@ func (s *SQLiteStore) initSchema(backend string) error {
 		}
 	}
 	if version != initVer {
-		_, err = tx.Exec("UPDATE migration SET version=?", version)
+		_, err = tx.Exec("UPDATE migration SET version=$1", version)
 		if err != nil {
 			return s.dbErr(err, "updating schema version")
 		}
