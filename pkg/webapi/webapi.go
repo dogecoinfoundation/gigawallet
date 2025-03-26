@@ -552,7 +552,14 @@ func (t WebAPI) dcPayInvoice(w http.ResponseWriter, r *http.Request, p httproute
 		return
 	}
 
-	sendResponse(w, PayInvoiceReply{})
+	sendResponse(w, PayInvoiceReply{
+		ID:        o.ID,
+		Status:    "accepted",
+		Reason:    "",
+		Required:  int(invoice.Confirmations),
+		Confirmed: 0,
+		DueSec:    int(invoice.Confirmations) * 60,
+	})
 }
 
 func (t WebAPI) dcPayStatus(w http.ResponseWriter, r *http.Request, p httprouter.Params) {

@@ -102,7 +102,7 @@ func ConnectPaymentRequest(i Invoice, acc Account, lib L1, config *Config, rootU
 	return env, feePerKB, expires, nil
 }
 
-func ConnectVerifyTx(invoice Invoice, txHex string, lib L1, store Store, chain *doge.ChainParams) error {
+func ConnectVerifyTx(invoice Invoice, txBytes []byte, lib L1, store Store, chain *doge.ChainParams) error {
 	if invoice.MinFee.IsZero() {
 		// No PaymentRequest issued (ConnectPaymentRequest has not been called for this Invoice)
 		return ErrNotConnect
@@ -113,10 +113,6 @@ func ConnectVerifyTx(invoice Invoice, txHex string, lib L1, store Store, chain *
 	}
 
 	// decode the transaction
-	txBytes, err := hex.DecodeString(txHex)
-	if err != nil {
-		return ErrInvalidTx
-	}
 	tx, ok := tryDecodeTx(txBytes)
 	if !ok {
 		return ErrInvalidTx
@@ -154,18 +150,6 @@ func ConnectVerifyTx(invoice Invoice, txHex string, lib L1, store Store, chain *
 	txFee := koinuToDoge(totalIn - totalOut)
 	if txFee.LessThan(minFee) {
 		return ErrTxLowFee
-	}
-
-	// record the submitted `tx` on the Invoice
-	err = store.SetInvoiceTx(invoice.ID, txBytes)
-	if err != nil {
-		return ErrNotAvailable
-	}
-
-	// submit the tx to core
-	_, err = lib.Send(txHex)
-	if err != nil {
-		return ErrSubmitTx
 	}
 
 	return nil
