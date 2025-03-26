@@ -239,6 +239,32 @@ func (s SQLiteStore) Begin() (giga.StoreTransaction, error) {
 	return &SQLiteStoreTransaction{tx: tx, finality: false, store: s}, nil
 }
 
+func (s SQLiteStore) Transact(work func(tx giga.StoreTransaction) error) error {
+	retry := 0
+	for {
+		tx, err := s.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		err = work(tx)
+		if err == nil {
+			err = tx.Commit()
+		}
+		if err != nil {
+			if giga.IsDBConflictError(err) {
+				retry += 1
+				if retry >= 5 {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
+		return nil // success
+	}
+}
+
 func (s SQLiteStore) GetAccount(foreignID string) (giga.Account, error) {
 	return s.getAccountCommon(s.db, foreignID, true /*isForeignKey*/)
 }

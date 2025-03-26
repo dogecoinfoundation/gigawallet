@@ -7,6 +7,9 @@ import "time"
 type Store interface {
 	Begin() (StoreTransaction, error)
 
+	// Perform a Store transaction, with retries.
+	Transact(func(tx StoreTransaction) error) error
+
 	// GetAccount returns the account with the given ForeignID.
 	GetAccount(foreignID string) (Account, error)
 
