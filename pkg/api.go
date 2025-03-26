@@ -1,6 +1,7 @@
 package giga
 
 import (
+	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
@@ -506,19 +507,11 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 
 func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (env connect.ConnectEnvelope, err error) {
 	// Get the Account by its internal ID, rather than by foreign id.
-	tx, err := a.Store.Begin()
-	if err != nil {
-		return env, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-	acc, err := tx.GetAccountByID(invoice.Account)
-	if err != nil {
-		return env, fmt.Errorf("bad account: %w", err)
-	}
-	err = tx.Commit()
-	if err != nil {
-		return env, fmt.Errorf("commit transaction: %w", err)
-	}
+	var acc Account
+	a.Store.Transact(func(tx StoreTransaction) error {
+		acc, err = tx.GetAccountByID(invoice.Account)
+		return err
+	})
 
 	// Sign the DogeConnect Envelope using the account key.
 	// The key in the account is an Extended BIP32 Privkey.
@@ -540,28 +533,36 @@ func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (env con
 	}
 
 	// Save minFee on the Invoice for verification in PayConnectInvoice
-	tx, err = a.Store.Begin()
-	defer tx.Rollback()
-	if err != nil {
-		return env, fmt.Errorf("begin transaction: %w", err)
-	}
-	err = tx.SetInvoiceConnect(invoice.ID, minFee, expires)
-	if err != nil {
-		return env, fmt.Errorf("commit transaction: %w", err)
-	}
-	err = tx.Commit()
-	if err != nil {
-		return env, fmt.Errorf("commit transaction: %w", err)
-	}
+	a.Store.Transact(func(tx StoreTransaction) error {
+		return tx.SetInvoiceConnect(invoice.ID, minFee, expires)
+	})
 
 	return env, nil
 }
 
 func (a API) PayConnectInvoice(invoice Invoice, tx string) error {
-	err := ConnectVerifyTx(invoice, tx, a.L1, a.Store, a.config.Chain)
+	txBytes, err := hex.DecodeString(tx)
+	if err != nil {
+		return ErrInvalidTx
+	}
+
+	// verify the submitted `tx`
+	err = ConnectVerifyTx(invoice, txBytes, a.L1, a.Store, a.config.Chain)
 	if err != nil {
 		return err
 	}
+
+	// record the submitted `tx` on the Invoice
+	a.Store.Transact(func(tx StoreTransaction) error {
+		return tx.SetInvoiceTx(invoice.ID, txBytes)
+	})
+
+	// submit the tx to core
+	_, err = a.L1.Send(tx)
+	if err != nil {
+		return ErrSubmitTx
+	}
+
 	return nil
 }
 
