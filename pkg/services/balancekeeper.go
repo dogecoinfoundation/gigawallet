@@ -164,12 +164,37 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 		// Check each invoice to see if it's paid and we haven't sent an event yet,
 		// or other changes in amounts paid.
 		for n, inv := range invoices {
+
+			// Send INV_BALANCE_CHANGED if IncomingAmount or PaidAmount have changed.
+			incomingChanged := !inv.IncomingAmount.Equals(inv.LastIncomingAmount)
+			paidChanged := !inv.PaidAmount.Equals(inv.LastPaidAmount)
+			if incomingChanged || paidChanged {
+				event := giga.INV_BALANCE_CHANGED
+				msg := giga.InvPaymentEvent{
+					InvoiceID:      inv.ID,
+					AccountID:      acc.Address,
+					ForeignID:      acc.ForeignID,
+					InvoiceTotal:   inv.Total,
+					TotalIncoming:  inv.IncomingAmount,
+					TotalConfirmed: inv.PaidAmount,
+				}
+				unique_id := fmt.Sprintf("IBC-%d-%d", cursor, n)
+				err = b.bus.Send(event, msg, unique_id)
+				if err != nil {
+					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
+					return err
+				}
+				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
+			}
+
 			// need a way to detect:
 			// new unconfirmed payment: IncomingAmount > LastIncomingAmount
 			// invoice fully paid (in Store): PaidHeight set
 			// rollbacks: PaidHeight unset & PaidEvent set; PaidTotal < LastPaidTotal; Incoming < LastIncoming
 			// NB. IncomingAmount doesn't reduce when payments are confirmed (unlike
 			// IncomingBalance on Account) because it simplifies this logic:
+
+			// Detect and send Payment Detected events (not yet confirmed)
 			if inv.IncomingAmount.GreaterThan(inv.LastIncomingAmount) {
 				// incoming amount has increased.
 				// need to avoid reporting PART/TOTAL again after we report TOTAL.
@@ -215,13 +240,9 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 					}
 					b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
 				}
-				// This updates LastIncomingAmount from IncomingAmount.
-				err = tx.MarkInvoiceEventSent(inv.ID, giga.INV_PART_PAYMENT_DETECTED)
-				if err != nil {
-					log.Printf("BalanceKeeper: MarkInvoiceEventSent: '%s': %v\n", inv.ID, err)
-					return err
-				}
 			}
+
+			// Detect and send Payment Confirmed / Unconfirmed (fork) events
 			if inv.PaidHeight != 0 && inv.PaidEvent.IsZero() {
 				// invoice is fully paid and confirmed.
 				// notify BUS listeners.
@@ -270,6 +291,8 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 				}
 				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
 			}
+
+			// Detect and send Overpayment Confirmed events
 			if inv.PaidAmount.GreaterThan(inv.LastPaidAmount) && inv.PaidAmount.GreaterThan(inv.Total) {
 				// an overpayment was confirmed.
 				msg := giga.InvOverpaymentEvent{
@@ -289,13 +312,25 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
 					return err
 				}
-				// This updates LastPaidAmount from PaidAmount.
-				err = tx.MarkInvoiceEventSent(inv.ID, event)
+				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
+			}
+
+			// Update the DB to avoid repeated events.
+			if incomingChanged {
+				// This sets LastIncomingAmount to IncomingAmount (event name just selects update mode)
+				err = tx.MarkInvoiceEventSent(inv.ID, giga.INV_PART_PAYMENT_DETECTED)
 				if err != nil {
 					log.Printf("BalanceKeeper: MarkInvoiceEventSent: '%s': %v\n", inv.ID, err)
 					return err
 				}
-				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %s in %s\n", event, inv.ID, id))
+			}
+			if paidChanged {
+				// This sets LastPaidAmount to PaidAmount (event name just selects update mode)
+				err = tx.MarkInvoiceEventSent(inv.ID, giga.INV_OVER_PAYMENT_CONFIRMED)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkInvoiceEventSent: '%s': %v\n", inv.ID, err)
+					return err
+				}
 			}
 		}
 		num_inv += len(invoices)
