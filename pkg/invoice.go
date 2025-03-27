@@ -17,14 +17,21 @@ type Invoice struct {
 	Created       time.Time  `json:"created"`
 	Total         CoinAmount `json:"total"` // derived from items
 	// These are used internally to track invoice status.
-	KeyIndex           uint32     `json:"-"` // which HD Wallet child-key was generated
-	BlockID            string     `json:"-"` // transaction seen in this mined block
-	PaidHeight         int64      `json:"-"` // block-height when the invoice was marked as paid
-	PaidEvent          time.Time  `json:"-"` // timestamp when INV_PAID event was sent
-	IncomingAmount     CoinAmount `json:"-"` // total of all incoming UTXOs
-	PaidAmount         CoinAmount `json:"-"` // total of all confirmed UTXOs
-	LastIncomingAmount CoinAmount `json:"-"` // last incoming total used to send an event
-	LastPaidAmount     CoinAmount `json:"-"` // last confirmed total used to send an event
+	KeyIndex           uint32     `json:"-"`               // which HD Wallet child-key was generated
+	BlockID            string     `json:"-"`               // transaction seen in this mined block
+	PaidHeight         int64      `json:"-"`               // block-height when the invoice was marked as paid
+	PaidEvent          time.Time  `json:"-"`               // timestamp when INV_PAID event was sent
+	IncomingAmount     CoinAmount `json:"total_incoming"`  // total of all incoming UTXOs
+	PaidAmount         CoinAmount `json:"total_confirmed"` // total of all confirmed UTXOs
+	LastIncomingAmount CoinAmount `json:"-"`               // last incoming total used to send an event
+	LastPaidAmount     CoinAmount `json:"-"`               // last confirmed total used to send an event
+	// Additional derived fields (included in PublicInvoice)
+	PayTo          Address `json:"pay_to_address"`
+	PartDetected   bool    `json:"part_payment_detected"`       // Calculated
+	TotalDetected  bool    `json:"total_payment_detected"`      // Calculated
+	TotalConfirmed bool    `json:"total_payment_confirmed"`     // Calculated
+	Unconfirmed    bool    `json:"payment_unconfirmed"`         // Calculated
+	Estimate       int     `json:"estimate_seconds_to_confirm"` // Calculated
 }
 
 // CalcTotal sums up the Items listed on the Invoice.
@@ -101,6 +108,16 @@ func (i *Invoice) Validate() error {
 	return nil
 }
 
+// AddPublic adds the derived public fields to the Invoice
+func (i *Invoice) AddPublic() {
+	i.PayTo = i.ID
+	i.PartDetected = i.IncomingAmount.IsPositive()
+	i.TotalDetected = i.IncomingAmount.GreaterThanOrEqual(i.Total)
+	i.TotalConfirmed = (i.PaidHeight > 1)
+	i.Unconfirmed = false // XXX meant to indicate if a rollback has occured
+	i.Estimate = 0        // XXX meant to estimate time until confirmation
+}
+
 func (i *Invoice) ToPublic() PublicInvoice {
 
 	pub := PublicInvoice{
@@ -113,8 +130,8 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		PartDetected:   false,
 		TotalDetected:  false,
 		TotalConfirmed: false,
-		Unconfirmed:    false,
-		Estimate:       0,
+		Unconfirmed:    false, // XXX meant to indicate if a rollback has occured
+		Estimate:       0,     // XXX meant to estimate time until confirmation
 	}
 
 	if i.LastIncomingAmount.IsPositive() {
@@ -125,7 +142,6 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		pub.TotalDetected = true
 	}
 
-	//if i.LastPaidAmount.GreaterThanOrEqual(i.Total) {
 	if i.PaidHeight > 1 {
 		pub.TotalConfirmed = true
 	}
