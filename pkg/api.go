@@ -506,12 +506,36 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 }
 
 func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (env connect.ConnectEnvelope, err error) {
+	// Determine expiry time and check if expired
+	issueTime := invoice.Created
+	expires := issueTime.Add(time.Duration(a.config.Connect.PaymentTimeout) * time.Second)
+	if expires.Before(time.Now()) {
+		return env, ErrInvoiceExpired
+	}
+
 	// Get the Account by its internal ID, rather than by foreign id.
 	var acc Account
 	a.Store.Transact(func(tx StoreTransaction) error {
 		acc, err = tx.GetAccountByID(invoice.Account)
 		return err
 	})
+
+	// Set the MinFee on the Invoice once.
+	if invoice.MinFee.IsZero() {
+		// Get a fee estimate from Core
+		feePerKB, err := a.L1.EstimateFee(a.config.Connect.EstimateFeeBlocks)
+		if err != nil {
+			return env, err
+		}
+
+		// Require some minimum percentage of that fee
+		minFee := feePerKB.Mul(a.config.Connect.MinFeePercent)
+
+		// Save minFee on the Invoice for verification in PayConnectInvoice
+		a.Store.Transact(func(tx StoreTransaction) error {
+			return tx.SetInvoiceConnect(invoice.ID, minFee)
+		})
+	}
 
 	// Sign the DogeConnect Envelope using the account key.
 	// The key in the account is an Extended BIP32 Privkey.
@@ -527,15 +551,10 @@ func (a API) GetInvoiceConnectEnvelope(invoice Invoice, rootURL string) (env con
 	defer clear(privBytes)
 
 	// Create and sign the Payment Request.
-	env, minFee, expires, err := ConnectPaymentRequest(invoice, acc, a.L1, &a.config, rootURL, privBytes)
+	env, err = ConnectPaymentRequest(invoice, acc, &a.config, rootURL, privBytes)
 	if err != nil {
 		return env, fmt.Errorf("signing envelope: %w", err)
 	}
-
-	// Save minFee on the Invoice for verification in PayConnectInvoice
-	a.Store.Transact(func(tx StoreTransaction) error {
-		return tx.SetInvoiceConnect(invoice.ID, minFee, expires)
-	})
 
 	return env, nil
 }
