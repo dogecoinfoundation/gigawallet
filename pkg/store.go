@@ -1,7 +1,5 @@
 package giga
 
-import "time"
-
 // A store represents a connection to a database
 // with a transactional API that
 type Store interface {
@@ -101,7 +99,7 @@ type StoreTransaction interface {
 	StoreInvoice(invoice Invoice) error
 
 	// SetInvoiceConnect sets the DogeConnect "Payment Request" fields of an Invoice.
-	SetInvoiceConnect(invoiceID Address, minFee CoinAmount, expires time.Time) error
+	SetInvoiceConnect(invoiceID Address, minFee CoinAmount) error
 
 	// SetInvoiceTx sets the submitted DogeConnect Payment Tx.
 	SetInvoiceTx(invoiceID Address, txBytes []byte) error

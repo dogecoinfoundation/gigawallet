@@ -130,6 +130,11 @@ ALTER TABLE account ADD COLUMN vendor_icon TEXT NOT NULL DEFAULT "";
 ALTER TABLE account ADD COLUMN vendor_address TEXT NOT NULL DEFAULT "";
 `
 
+const SQL_MIGRATION_v4 = `
+ALTER TABLE invoice ADD COLUMN min_fee NUMERIC(18,8);
+ALTER TABLE invoice ADD COLUMN pay_tx BYTEA;
+`
+
 var MIGRATIONS = []struct {
 	ver   int
 	query string
@@ -137,6 +142,7 @@ var MIGRATIONS = []struct {
 	{1, SETUP_SQL},
 	{2, SQL_MIGRATION_v2},
 	{3, SQL_MIGRATION_v3},
+	{4, SQL_MIGRATION_v4},
 }
 
 /****************** SQLiteStore implements giga.Store ********************/
@@ -729,11 +735,19 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) SetInvoiceConnect(invoiceID giga.Address, minFee giga.CoinAmount, expires time.Time) error {
+func (t SQLiteStoreTransaction) SetInvoiceConnect(invoiceID giga.Address, minFee giga.CoinAmount) error {
+	_, err := t.tx.Exec("UPDATE invoice SET min_fee=$1 WHERE id=$2", minFee, invoiceID)
+	if err != nil {
+		return t.store.dbErr(err, "SetInvoiceConnect: stmt.Exec update")
+	}
 	return nil
 }
 
 func (t SQLiteStoreTransaction) SetInvoiceTx(invoiceID giga.Address, txBytes []byte) error {
+	_, err := t.tx.Exec("UPDATE invoice SET pay_tx=$1 WHERE id=$2", txBytes, invoiceID)
+	if err != nil {
+		return t.store.dbErr(err, "SetInvoiceTx: stmt.Exec update")
+	}
 	return nil
 }
 

@@ -18,7 +18,7 @@ var OneDogeDecimal = decimal.NewFromInt(doge.OneDoge)
 
 var (
 	ErrNotConnect     = NewErr(BadRequest, "no PaymentRequest issued")
-	ErrInvoiceExpired = NewErr(BadRequest, "PaymentRequest expired")
+	ErrInvoiceExpired = NewErr(BadRequest, "PaymentRequest has expired")
 	ErrInvalidTx      = NewErr(BadRequest, "invalid transaction")
 	ErrTxDoesNotPay   = NewErr(BadRequest, "transaction does not pay invoice")
 	ErrTxLowFee       = NewErr(BadRequest, "transaction fee too low")
@@ -27,16 +27,7 @@ var (
 	ErrNotAvailable   = NewErr(NotAvailable, "service not available")
 )
 
-func ConnectPaymentRequest(i Invoice, acc Account, lib L1, config *Config, rootURL string, privKey []byte) (env connect.ConnectEnvelope, minFee CoinAmount, expires time.Time, err error) {
-
-	// Get a fee estimate from Core
-	feePerKB, err := lib.EstimateFee(config.Connect.EstimateFeeBlocks)
-	if err != nil {
-		return env, minFee, expires, err
-	}
-
-	// Require some minimum percentage of that fee
-	feePerKB = feePerKB.Mul(config.Connect.MinFeePercent)
+func ConnectPaymentRequest(i Invoice, acc Account, config *Config, rootURL string, privKey []byte) (env connect.ConnectEnvelope, err error) {
 
 	// Sum up totals on the Invoice
 	totalAmt := decimal.Zero
@@ -54,14 +45,14 @@ func ConnectPaymentRequest(i Invoice, acc Account, lib L1, config *Config, rootU
 
 	// Build a DogeConnect Payment Request
 	relayURL := fmt.Sprintf("%s/dc/%s", rootURL, i.ID)
-	issueTime := time.Now()
+	issueTime := i.Created
 	r := connect.ConnectPayment{
 		Type:          connect.PaymentRequestType,     // MUST be PaymentRequestType
 		ID:            string(i.ID),                   // Gateway unique payment-request ID
 		Issued:        issueTime.Format(time.RFC3339), // RFC 3339 Timestamp (2006-01-02T15:04:05-07:00)
 		Timeout:       config.Connect.PaymentTimeout,  // Seconds; do not submit payment Tx after this time (Issued+Timeout)
 		Relay:         relayURL,                       // Payment Relay URL, https://example.com/dc
-		FeePerKB:      feePerKB.String(),              // Minimum fee per 1000 bytes accepted
+		FeePerKB:      i.MinFee.String(),              // Minimum fee per 1000 bytes accepted
 		MaxSize:       config.Connect.TxMaxSize,       // Maximum tx size in bytes accepted
 		VendorIcon:    acc.VendorIcon,                 // vendor icon URL, SHOULD be https:// JPG or PNG
 		VendorName:    acc.VendorName,                 // vendor display name
@@ -95,11 +86,10 @@ func ConnectPaymentRequest(i Invoice, acc Account, lib L1, config *Config, rootU
 	// Encode and sign the payload
 	env, err = connect.SignPaymentRequest(r, privKey[:])
 	if err != nil {
-		return env, minFee, expires, err
+		return env, err
 	}
 
-	expires = issueTime.Add(time.Duration(config.Connect.PaymentTimeout) * time.Second)
-	return env, feePerKB, expires, nil
+	return env, nil
 }
 
 func ConnectVerifyTx(invoice Invoice, txBytes []byte, lib L1, store Store, chain *doge.ChainParams) error {
