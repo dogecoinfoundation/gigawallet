@@ -188,12 +188,12 @@ func (l *L1CoreRPC) Send(txnHex string) (txid string, err error) {
 }
 
 func (l *L1CoreRPC) EstimateFee(confirmTarget int) (feePerKB giga.CoinAmount, err error) {
-	var res string
+	var res RawNumber
 	err = l.request("estimatefee", []any{confirmTarget}, &res)
 	if err != nil {
 		return
 	}
-	feePerKB, err = decimal.NewFromString(res)
+	feePerKB, err = decimal.NewFromString(res.n)
 	if err != nil {
 		return
 	}
@@ -222,4 +222,15 @@ func (l *L1CoreRPC) GetTxOut(txid string, vout uint32, include_mempool bool) (re
 		return giga.GetTxOut{}, fmt.Errorf("gettxout: %v", err)
 	}
 	return
+}
+
+// RawNumber parses a JSON number as a string, to preserve accuracy
+type RawNumber struct {
+	n string
+}
+
+// UnmarshalJSON implments json.Unmarshaler
+func (val *RawNumber) UnmarshalJSON(data []byte) error {
+	val.n = string(data)
+	return nil
 }
