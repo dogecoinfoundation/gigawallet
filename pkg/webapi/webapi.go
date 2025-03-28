@@ -234,7 +234,7 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
 		return
 	}
-	sendResponse(w, invoice.ToPublic())
+	sendResponse(w, invoice)
 }
 
 func (t WebAPI) getInvoiceConnect(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
@@ -351,18 +351,17 @@ func (t WebAPI) listInvoices(w http.ResponseWriter, r *http.Request, p httproute
 		sendError(w, "ListInvoices", err)
 		return
 	}
-
-	pubInvoices := ListInvoicesPublicResponse{Cursor: invoices.Cursor}
-
-	for _, inv := range invoices.Items {
-		pubInvoices.Items = append(pubInvoices.Items, inv.ToPublic())
+	items := invoices.Items
+	for i, inv := range items {
+		inv.AddPublic()
+		items[i] = inv // mutate slice
 	}
-	sendResponse(w, pubInvoices)
+	sendResponse(w, invoices)
 }
 
-type ListInvoicesPublicResponse struct {
-	Items  []giga.PublicInvoice `json:"items"`
-	Cursor int                  `json:"cursor"`
+type ListInvoicesResponse struct {
+	Items  []giga.Invoice `json:"items"`
+	Cursor int            `json:"cursor"`
 }
 
 type PayToAddressRequest struct {

@@ -61,7 +61,7 @@ func TestWebAPI(t *testing.T) {
 	}
 
 	// List invoices
-	var inv_l ListInvoicesPublicResponse
+	var inv_l ListInvoicesResponse
 	request(t, admin, "/account/Pepper/invoices?cursor=0&limit=10", "", &inv_l)
 	if inv_l.Cursor != 0 {
 		t.Fatalf("List Invoices: expected zero cursor (end of list) %v", inv_l.Cursor)
