@@ -6,6 +6,7 @@
   # adminbearertoken = "your-secret-token"  # Optional: when set, requires this token for admin API access
   pubbind = "localhost"  # avoids macOS firewall confirmation!
   pubport = "8082"
+  # pubbearertoken = "your-secret-token"  # Optional: when set, requires this token for public API access  
   pubapirooturl = "http://localhost:8082"
 
 [Store]

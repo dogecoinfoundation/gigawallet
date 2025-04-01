@@ -65,9 +65,10 @@ type WebAPIConfig struct {
 	AdminBearerToken string // optional bearer token for authenticating admin API requests
 
 	// Public API
-	PubPort       string
-	PubBind       string // optional interface IP address
-	PubAPIRootURL string // ie: https://example.com/gigawallet
+	PubPort        string
+	PubBind        string // optional interface IP address
+	PubBearerToken string // optional bearer token for authenticating public API requests
+	PubAPIRootURL  string // ie: https://example.com/gigawallet
 }
 
 type StoreConfig struct {

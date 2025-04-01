@@ -61,7 +61,7 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 
 func (t WebAPI) authMiddleware(handler httprouter.Handle) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		if t.config.WebAPI.AdminBearerToken == "" {
+		if t.config.WebAPI.AdminBearerToken == "" || t.config.WebAPI.PubBearerToken == "" {
 			// Skip auth if the user hasn't configured a token.
 			handler(w, r, ps)
 			return
@@ -79,7 +79,7 @@ func (t WebAPI) authMiddleware(handler httprouter.Handle) httprouter.Handle {
 			return
 		}
 
-		if parts[1] != t.config.WebAPI.AdminBearerToken {
+		if parts[1] != t.config.WebAPI.AdminBearerToken || parts[1] != t.config.WebAPI.PubBearerToken {
 			sendErrorResponse(w, http.StatusUnauthorized, giga.Unauthorized, "Invalid token")
 			return
 		}
@@ -134,11 +134,11 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// External APIs
 
 	// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
-	pubMux.GET("/invoice/:invoiceID", t.getInvoice)
+	pubMux.GET("/invoice/:invoiceID", t.authMiddleware(t.getInvoice))
 
-	pubMux.GET("/invoice/:invoiceID/qr.png", t.getInvoiceQR)
+	pubMux.GET("/invoice/:invoiceID/qr.png", t.authMiddleware(t.getInvoiceQR))
 
-	pubMux.GET("/invoice/:invoiceID/connect", t.getInvoiceConnect)
+	pubMux.GET("/invoice/:invoiceID/connect", t.authMiddleware(t.getInvoiceConnect))
 
 	// GET /invoice/:invoiceID/connect -> { dogeConnect json } get the dogeConnect JSON for an invoice
 

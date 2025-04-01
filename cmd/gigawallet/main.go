@@ -137,6 +137,7 @@ func applyFlags(config *giga.Config, subs *SubCommandArgs) {
 	flag.StringVar(&config.WebAPI.AdminBearerToken, "admin-bearer-token", config.WebAPI.AdminBearerToken, "Admin API bearer token (optional)")
 	flag.StringVar(&config.WebAPI.PubPort, "pub-port", config.WebAPI.PubPort, "Pub API port")
 	flag.StringVar(&config.WebAPI.PubBind, "pub-bind", config.WebAPI.PubBind, "Pub API bind")
+	flag.StringVar(&config.WebAPI.PubBearerToken, "pub-bearer-token", config.WebAPI.PubBearerToken, "Public API bearer token (optional)")
 	flag.StringVar(&config.Store.DBFile, "store-db-file", config.Store.DBFile, "Store DB file")
 	// Extra arguments for various subcommands
 	flag.StringVar(&subs.RemoteAdminServer, "remote-admin-server", "", "http/s base URL for a remote GigaWallet server to command")
