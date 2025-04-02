@@ -533,10 +533,21 @@ type PayInvoiceReply struct {
 }
 
 func (t WebAPI) dcPayInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// the invoiceID is the address of the invoice
+	id := p.ByName("invoiceID")
+	if id == "" {
+		sendBadRequest(w, "missing invoice ID")
+		return
+	}
 	o := PayInvoiceRequest{}
 	err := json.NewDecoder(r.Body).Decode(&o)
 	if err != nil {
 		sendBadRequest(w, fmt.Sprintf("bad request body (expecting JSON): %v", err))
+		return
+	}
+	if o.ID != id {
+		// DogeConnect spec requires `id` field.
+		sendBadRequest(w, "missing invoice ID")
 		return
 	}
 
