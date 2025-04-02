@@ -30,7 +30,7 @@ func TestWebAPI(t *testing.T) {
 
 	// Create Account "FeeFee" with config
 	var feefee giga.AccountPublic
-	request(t, admin, "/account/FeeFee", `{"payout_address":"xyz","payout_threshold":"10","payout_frequency":"1"}`, &feefee)
+	request(t, admin, "/account/FeeFee", `{"payout_address":"DKATsz7yxXDyBZdqez5ZK1DnmeeG7wXpXK","payout_threshold":"10","payout_frequency":"1"}`, &feefee)
 
 	// Get Account "Pepper"
 	var pepper2 giga.AccountPublic
