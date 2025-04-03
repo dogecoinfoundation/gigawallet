@@ -59,10 +59,18 @@ func (t WebAPI) Run(started, stopped chan bool, stop chan context.Context) error
 	return nil
 }
 
-func (t WebAPI) authMiddleware(handler httprouter.Handle) httprouter.Handle {
+// Define a type to specify which token to check
+type TokenType int
+
+const (
+	AdminToken TokenType = iota
+	PubToken
+)
+
+func (t WebAPI) authMiddleware(tokenType TokenType, handler httprouter.Handle) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		if t.config.WebAPI.AdminBearerToken == "" || t.config.WebAPI.PubBearerToken == "" {
-			// Skip auth if the user hasn't configured a token.
+		// Skip auth if no tokens are configured
+		if t.config.WebAPI.AdminBearerToken == "" && t.config.WebAPI.PubBearerToken == "" {
 			handler(w, r, ps)
 			return
 		}
@@ -79,9 +87,18 @@ func (t WebAPI) authMiddleware(handler httprouter.Handle) httprouter.Handle {
 			return
 		}
 
-		if parts[1] != t.config.WebAPI.AdminBearerToken || parts[1] != t.config.WebAPI.PubBearerToken {
-			sendErrorResponse(w, http.StatusUnauthorized, giga.Unauthorized, "Invalid token")
-			return
+		token := parts[1]
+		switch tokenType {
+		case AdminToken:
+			if t.config.WebAPI.AdminBearerToken != "" && token != t.config.WebAPI.AdminBearerToken {
+				sendErrorResponse(w, http.StatusUnauthorized, giga.Unauthorized, "Invalid admin token")
+				return
+			}
+		case PubToken:
+			if t.config.WebAPI.PubBearerToken != "" && token != t.config.WebAPI.PubBearerToken {
+				sendErrorResponse(w, http.StatusUnauthorized, giga.Unauthorized, "Invalid public token")
+				return
+			}
 		}
 
 		handler(w, r, ps)
@@ -94,38 +111,38 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 
 	// Admin APIs
 
-	adminMux.POST("/admin/setsyncheight/:blockheight", t.authMiddleware(t.setSyncHeight))
+	adminMux.POST("/admin/setsyncheight/:blockheight", t.authMiddleware(AdminToken, t.setSyncHeight))
 
 	// POST { account } /account/:foreignID -> { account } upsert account
-	adminMux.POST("/account/:foreignID", t.authMiddleware(t.upsertAccount))
+	adminMux.POST("/account/:foreignID", t.authMiddleware(AdminToken, t.upsertAccount))
 
 	// GET /account/:foreignID -> { account } return an account
-	adminMux.GET("/account/:foreignID", t.authMiddleware(t.getAccount))
+	adminMux.GET("/account/:foreignID", t.authMiddleware(AdminToken, t.getAccount))
 
 	// GET /account:foreignID/Balance -> { AccountBalance    Get the account balance
-	adminMux.GET("/account/:foreignID/balance", t.authMiddleware(t.getAccountBalance))
+	adminMux.GET("/account/:foreignID/balance", t.authMiddleware(AdminToken, t.getAccountBalance))
 
 	// POST {invoice} /account/:foreignID/invoice -> { invoice } create new invoice
-	adminMux.POST("/account/:foreignID/invoice", t.authMiddleware(t.createInvoice))
-	adminMux.POST("/account/:foreignID/invoice/", t.authMiddleware(t.createInvoice)) // deprecated: prior bug
+	adminMux.POST("/account/:foreignID/invoice", t.authMiddleware(AdminToken, t.createInvoice))
+	adminMux.POST("/account/:foreignID/invoice/", t.authMiddleware(AdminToken, t.createInvoice)) // deprecated: prior bug
 
 	// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
-	adminMux.GET("/account/:foreignID/invoices", t.authMiddleware(t.listInvoices))
+	adminMux.GET("/account/:foreignID/invoices", t.authMiddleware(AdminToken, t.listInvoices))
 
 	// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
-	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.authMiddleware(t.getAccountInvoice))
+	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.authMiddleware(AdminToken, t.getAccountInvoice))
 
 	// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
-	adminMux.POST("/account/:foreignID/pay", t.authMiddleware(t.payToAddress))
+	adminMux.POST("/account/:foreignID/pay", t.authMiddleware(AdminToken, t.payToAddress))
 
 	// POST /account/:foreignID/paytx { "pay": [{ "amount":"1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" }] } -> { tx }
-	adminMux.POST("/account/:foreignID/paytx", t.authMiddleware(t.payTransaction))
+	adminMux.POST("/account/:foreignID/paytx", t.authMiddleware(AdminToken, t.payTransaction))
 
 	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
-	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.authMiddleware(t.payInvoiceFromInternal))
+	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.authMiddleware(AdminToken, t.payInvoiceFromInternal))
 
 	// POST /decode-txn -> test decoding
-	adminMux.POST("/decode-txn", t.authMiddleware(t.decodeTxn))
+	adminMux.POST("/decode-txn", t.authMiddleware(AdminToken, t.decodeTxn))
 
 	// POST { amount } /invoice/:invoiceID/refundtoaddr/:address -> { status } refund all or part of a paid invoice to address
 
@@ -134,11 +151,11 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// External APIs
 
 	// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
-	pubMux.GET("/invoice/:invoiceID", t.authMiddleware(t.getInvoice))
+	pubMux.GET("/invoice/:invoiceID", t.authMiddleware(PubToken, t.getInvoice))
 
-	pubMux.GET("/invoice/:invoiceID/qr.png", t.authMiddleware(t.getInvoiceQR))
+	pubMux.GET("/invoice/:invoiceID/qr.png", t.authMiddleware(PubToken, t.getInvoiceQR))
 
-	pubMux.GET("/invoice/:invoiceID/connect", t.authMiddleware(t.getInvoiceConnect))
+	pubMux.GET("/invoice/:invoiceID/connect", t.authMiddleware(PubToken, t.getInvoiceConnect))
 
 	// GET /invoice/:invoiceID/connect -> { dogeConnect json } get the dogeConnect JSON for an invoice
 
