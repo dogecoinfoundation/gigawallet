@@ -1,5 +1,7 @@
 package doge
 
+import "log"
+
 const (
 	VersionAuxPoW = 256
 	CoinbaseVOut  = 0xffffffff
@@ -20,6 +22,7 @@ type BlockHeader struct {
 	Timestamp  uint32
 	Bits       uint32
 	Nonce      uint32
+	Hash       string // hex, computed from block data
 }
 
 func (b *BlockHeader) IsAuxPoW() bool {
@@ -77,12 +80,15 @@ func readBlock(s *Stream) (b Block) {
 }
 
 func readHeader(s *Stream) (b BlockHeader) {
+	start := s.p
 	b.Version = s.uint32le()
 	b.PrevBlock = s.bytes(32)
 	b.MerkleRoot = s.bytes(32)
 	b.Timestamp = s.uint32le()
 	b.Bits = s.uint32le()
 	b.Nonce = s.uint32le()
+	// (version, prev_block, merkle_root, timestamp, bits, nonce)
+	b.Hash = BlockHashHex(s.b[start:s.p])
 	return
 }
 
@@ -111,34 +117,50 @@ func DecodeTx(txBytes []byte) BlockTx {
 }
 
 func readTx(s *Stream) (tx BlockTx) {
+	log.Println("tx.s.p", len(s.b), s.p)
 	start := s.p
 	tx.Version = s.uint32le()
+	log.Printf("tx.Version: %v", tx.Version)
 	tx_in := s.var_uint()
+	log.Println("tx.tx_in", tx_in)
 	for i := uint64(0); i < tx_in; i++ {
 		tx.VIn = append(tx.VIn, readTxIn(s))
 	}
 	tx_out := s.var_uint()
+	log.Println("tx.tx_out", tx_out)
 	for i := uint64(0); i < tx_out; i++ {
 		tx.VOut = append(tx.VOut, readTxOut(s))
 	}
 	tx.LockTime = s.uint32le()
+	log.Printf("tx.LockTime: %v", tx.LockTime)
 	// Compute TX hash from transaction bytes.
 	tx.TxID = TxHashHex(s.b[start:s.p])
+	log.Printf("tx.TxID: %v", tx.TxID)
 	return
 }
 
 func readTxIn(s *Stream) (in BlockTxIn) {
+	log.Println("in.s.p", len(s.b), s.p)
 	in.TxID = s.bytes(32)
+	log.Printf("in.TxID: %v", in.TxID)
 	in.VOut = s.uint32le()
+	log.Printf("in.VOut: %v", in.VOut)
 	script_len := s.var_uint()
+	log.Printf("in.script_len: %v", script_len)
 	in.Script = s.bytes(script_len)
+	log.Printf("in.Script: %v", in.Script)
 	in.Sequence = s.uint32le()
+	log.Printf("in.Sequence: %v", in.Sequence)
 	return
 }
 
 func readTxOut(s *Stream) (out BlockTxOut) {
+	log.Println("out.s.p", len(s.b), s.p)
 	out.Value = int64(s.uint64le())
+	log.Printf("out.Value: %v", out.Value)
 	script_len := s.var_uint()
+	log.Printf("out.script_len: %v", script_len)
 	out.Script = s.bytes(script_len)
+	log.Printf("out.Script: %v", out.Script)
 	return
 }

@@ -68,6 +68,7 @@ func (l *L1CoreRPC) request(method string, params []any, result any) error {
 	// otherwise the underlying connection cannot be re-used.
 	defer res.Body.Close()
 	res_bytes, err := io.ReadAll(res.Body)
+	log.Printf("res_bytes: %v", len(res_bytes))
 	if err != nil {
 		return fmt.Errorf("json-rpc read response: %v", err)
 	}

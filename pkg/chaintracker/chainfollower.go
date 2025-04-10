@@ -247,7 +247,7 @@ func (c *ChainFollower) followChainToTip(pos ChainPos) ChainPos {
 	//   had no 'nextblockhash' the last time we fetched it.
 	// • We may have just started up and we're well behind the tip; our block
 	//   might have been part of a fork when we shut down (or any time, really)
-	log.Println("ChainFollower: fetching header:", pos.BlockHash)
+	//log.Println("ChainFollower: fetching header:", pos.BlockHash)
 	lastBlock := c.fetchBlockHeader(pos.BlockHash)
 	if lastBlock.Confirmations != -1 {
 		// Still on-chain: resume processing from NextBlockHash.
@@ -280,7 +280,7 @@ func (c *ChainFollower) transactionalRollForward(pos ChainPos) ChainPos {
 	var txIDs []string
 	var changes []UTXOChange
 	for pos.NextBlockHash != "" {
-		//log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
+		log.Println("ChainFollower: fetching block:", pos.NextBlockHash)
 		block := c.fetchBlockHeader(pos.NextBlockHash)
 		if block.Confirmations != -1 {
 			// Still on-chain, so update chainstate from block transactions.
@@ -578,6 +578,10 @@ func (c *ChainFollower) applyUTXOChanges(dbtx giga.StoreTransaction, changes []U
 func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
 	blockData := c.fetchBlockData(blockHash)
 	block := doge.DecodeBlock(blockData)
+	// Verify the block hash (we don't verify the block, but guard against corrupt data)
+	if block.Header.Hash != blockHash {
+		log.Fatalf("Block hash mismatch: got %v expected %v at height %v", block.Header.Hash, blockHash, blockHeight)
+	}
 	// c.verifyDecodedBlock(&block, blockHash)
 	log.Println("ChainFollower: processing block", blockHash, len(block.Tx), blockHeight)
 	// Insert entirely-new UTXOs that don't exist in the database.
