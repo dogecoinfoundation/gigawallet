@@ -83,12 +83,15 @@ func SetupCallbacks(cond *conductor.Conductor, bus giga.MessageBus, conf giga.Co
 	}
 }
 
-func generateSha256HMAC(payload []byte, secret string) string {
+func generateSha256HMAC(timestamp string, payload []byte, secret string) string {
 	if secret == "" {
 		return ""
 	}
+
+	dataToSign := []byte(fmt.Sprintf("%s.%s", timestamp, string(payload)))
 	h := hmac.New(sha256.New, []byte(secret))
-	h.Write(payload)
+	h.Write(dataToSign)
+
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -116,9 +119,11 @@ func postWithRetry(sender CallbackSender, msg giga.Message) error {
 
 	go func() {
 		if sender.HMACSecret != "" {
-			signature := generateSha256HMAC(objJSON, sender.HMACSecret)
+			timestampStr := fmt.Sprintf("%d", time.Now().Unix())
+			signature := generateSha256HMAC(timestampStr, objJSON, sender.HMACSecret)
+
 			req.Header.Set("X-Giga-Signature", fmt.Sprintf("sha256=%s", signature))
-			req.Header.Set("X-Giga-Timestamp", fmt.Sprintf("%d", time.Now().Unix()))
+			req.Header.Set("X-Giga-Timestamp", timestampStr)
 		}
 
 		retryCount := 0
