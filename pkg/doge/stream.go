@@ -37,16 +37,28 @@ func (s *Stream) uint64le() uint64 {
 }
 
 func (s *Stream) var_uint() uint64 {
+	if s.p >= uint64(len(s.b)) {
+		panic("stream: read beyond buffer capacity")
+	}
 	val := s.b[s.p]
 	s.p += 1
 	if val < 253 {
 		return uint64(val)
 	}
 	if val == 253 {
+		if s.p+1 >= uint64(len(s.b)) {
+			panic("stream: read beyond buffer capacity")
+		}
 		return uint64(s.uint16le())
 	}
 	if val == 254 {
+		if s.p+3 >= uint64(len(s.b)) {
+			panic("stream: read beyond buffer capacity")
+		}
 		return uint64(s.uint32le())
+	}
+	if s.p+7 >= uint64(len(s.b)) {
+		panic("stream: read beyond buffer capacity")
 	}
 	return s.uint64le()
 }

@@ -577,7 +577,11 @@ func (c *ChainFollower) applyUTXOChanges(dbtx giga.StoreTransaction, changes []U
 
 func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
 	blockData := c.fetchBlockData(blockHash)
-	block := doge.DecodeBlock(blockData)
+	block, err := doge.DecodeBlock(blockData)
+	if err != nil {
+		log.Printf("ChainFollower: error decoding block %s: %v", blockHash, err)
+		return changes, txIDs // Skip this block but continue processing
+	}
 	// c.verifyDecodedBlock(&block, blockHash)
 	log.Println("ChainFollower: processing block", blockHash, len(block.Tx), blockHeight)
 	// Insert entirely-new UTXOs that don't exist in the database.
