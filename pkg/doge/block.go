@@ -1,8 +1,13 @@
 package doge
 
+import (
+	"fmt"
+)
+
 const (
 	VersionAuxPoW = 256
 	CoinbaseVOut  = 0xffffffff
+	MaxScriptSize = 10000 // Maximum reasonable script size in bytes
 )
 
 var CoinbaseTxID = [32]byte{}
@@ -59,21 +64,29 @@ type BlockTxOut struct {
 	Script []byte // varied length
 }
 
-func DecodeBlock(blockBytes []byte) Block {
+func DecodeBlock(blockBytes []byte) (Block, error) {
 	s := &Stream{b: blockBytes}
 	return readBlock(s)
 }
 
-func readBlock(s *Stream) (b Block) {
+func readBlock(s *Stream) (b Block, err error) {
 	b.Header = readHeader(s)
 	if b.Header.IsAuxPoW() {
-		b.AuxPoW = readMerkleTx(s)
+		auxPow, err := readMerkleTx(s)
+		if err != nil {
+			return b, fmt.Errorf("error reading AuxPoW: %v", err)
+		}
+		b.AuxPoW = auxPow
 	}
 	numTx := s.var_uint()
 	for i := uint64(0); i < numTx; i++ {
-		b.Tx = append(b.Tx, readTx(s))
+		tx, err := readTx(s)
+		if err != nil {
+			return b, fmt.Errorf("error reading transaction %d: %v", i, err)
+		}
+		b.Tx = append(b.Tx, tx)
 	}
-	return
+	return b, nil
 }
 
 func readHeader(s *Stream) (b BlockHeader) {
@@ -86,14 +99,18 @@ func readHeader(s *Stream) (b BlockHeader) {
 	return
 }
 
-func readMerkleTx(s *Stream) *MerkleTx {
+func readMerkleTx(s *Stream) (*MerkleTx, error) {
 	var m MerkleTx
-	m.CoinbaseTx = readTx(s)
+	coinbaseTx, err := readTx(s)
+	if err != nil {
+		return nil, fmt.Errorf("error reading coinbase tx: %v", err)
+	}
+	m.CoinbaseTx = coinbaseTx
 	m.ParentHash = s.bytes(32)
 	m.CoinbaseBranch = readMerkleBranch(s)
 	m.BlockchainBranch = readMerkleBranch(s)
 	m.ParentBlock = readHeader(s)
-	return &m
+	return &m, nil
 }
 
 func readMerkleBranch(s *Stream) (b MerkleBranch) {
@@ -105,40 +122,56 @@ func readMerkleBranch(s *Stream) (b MerkleBranch) {
 	return
 }
 
-func DecodeTx(txBytes []byte) BlockTx {
+func DecodeTx(txBytes []byte) (BlockTx, error) {
 	s := &Stream{b: txBytes}
 	return readTx(s)
 }
 
-func readTx(s *Stream) (tx BlockTx) {
+func readTx(s *Stream) (tx BlockTx, err error) {
 	start := s.p
 	tx.Version = s.uint32le()
 	tx_in := s.var_uint()
 	for i := uint64(0); i < tx_in; i++ {
-		tx.VIn = append(tx.VIn, readTxIn(s))
+		vin, err := readTxIn(s)
+		if err != nil {
+			return tx, fmt.Errorf("error reading tx input %d: %v", i, err)
+		}
+		tx.VIn = append(tx.VIn, vin)
 	}
 	tx_out := s.var_uint()
 	for i := uint64(0); i < tx_out; i++ {
-		tx.VOut = append(tx.VOut, readTxOut(s))
+		vout, err := readTxOut(s)
+		if err != nil {
+			return tx, fmt.Errorf("error reading tx output %d: %v", i, err)
+		}
+		tx.VOut = append(tx.VOut, vout)
 	}
 	tx.LockTime = s.uint32le()
 	// Compute TX hash from transaction bytes.
 	tx.TxID = TxHashHex(s.b[start:s.p])
-	return
+	return tx, nil
 }
 
-func readTxIn(s *Stream) (in BlockTxIn) {
+func readTxIn(s *Stream) (BlockTxIn, error) {
+	var in BlockTxIn
 	in.TxID = s.bytes(32)
 	in.VOut = s.uint32le()
-	script_len := s.var_uint()
-	in.Script = s.bytes(script_len)
+	scriptLen := s.var_uint()
+	if scriptLen > MaxScriptSize {
+		return in, fmt.Errorf("script length %d exceeds maximum allowed size of %d", scriptLen, MaxScriptSize)
+	}
+	in.Script = s.bytes(uint64(scriptLen))
 	in.Sequence = s.uint32le()
-	return
+	return in, nil
 }
 
-func readTxOut(s *Stream) (out BlockTxOut) {
+func readTxOut(s *Stream) (BlockTxOut, error) {
+	var out BlockTxOut
 	out.Value = int64(s.uint64le())
-	script_len := s.var_uint()
-	out.Script = s.bytes(script_len)
-	return
+	scriptLen := s.var_uint()
+	if scriptLen > MaxScriptSize {
+		return out, fmt.Errorf("script length %d exceeds maximum allowed size of %d", scriptLen, MaxScriptSize)
+	}
+	out.Script = s.bytes(uint64(scriptLen))
+	return out, nil
 }
