@@ -579,7 +579,7 @@ func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, change
 	blockData := c.fetchBlockData(blockHash)
 	block, err := doge.DecodeBlock(blockData)
 	if err != nil {
-		log.Printf("ChainFollower: error decoding block %s: %v", blockHash, err)
+		log.Printf("ChainFollower: ERROR DECODING BLOCK - SKIPPED - SHOULD FIX AND RE-PROCESS: %v %v: %v", blockHash, blockHeight, err)
 		return changes, txIDs // Skip this block but continue processing
 	}
 	// c.verifyDecodedBlock(&block, blockHash)

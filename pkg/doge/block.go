@@ -7,7 +7,7 @@ import (
 const (
 	VersionAuxPoW = 256
 	CoinbaseVOut  = 0xffffffff
-	MaxScriptSize = 10000 // Maximum reasonable script size in bytes
+	MaxScriptSize = 10_000 // MAX_SCRIPT_SIZE from Dogecoin Core
 )
 
 var CoinbaseTxID = [32]byte{}
