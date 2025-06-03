@@ -30,7 +30,7 @@ func TestBlock(t *testing.T) {
 		1000000000,
 		1045842885,
 	}
-	b, err := DecodeBlock(hx2b(hex))
+	b, err := DecodeBlock(hx2b(hex), "test block")
 	if err != nil {
 		t.Errorf("TestBlock: decode error: %v", err)
 	}

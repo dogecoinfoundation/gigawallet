@@ -81,7 +81,7 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Accoun
 		return
 	}
 	txid = doge.TxHashHex(txData)
-	dTx, err := doge.DecodeTx(txData)
+	dTx, err := doge.DecodeTx(txData, txid)
 	if err != nil {
 		return newTx, change, state.inputs, txid, fmt.Errorf("error decoding transaction: %v", err)
 	}

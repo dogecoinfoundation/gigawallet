@@ -577,7 +577,7 @@ func (c *ChainFollower) applyUTXOChanges(dbtx giga.StoreTransaction, changes []U
 
 func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
 	blockData := c.fetchBlockData(blockHash)
-	block, err := doge.DecodeBlock(blockData)
+	block, err := doge.DecodeBlock(blockData, blockHash)
 	if err != nil {
 		log.Printf("ChainFollower: ERROR DECODING BLOCK - SKIPPED - SHOULD FIX AND RE-PROCESS: %v %v: %v", blockHash, blockHeight, err)
 		return changes, txIDs // Skip this block but continue processing
