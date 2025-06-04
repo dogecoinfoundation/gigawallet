@@ -30,7 +30,10 @@ func TestBlock(t *testing.T) {
 		1000000000,
 		1045842885,
 	}
-	b := DecodeBlock(hx2b(hex))
+	b, err := DecodeBlock(hx2b(hex), "test block")
+	if err != nil {
+		t.Errorf("TestBlock: decode error: %v", err)
+	}
 	log.Printf("Block: ver %x prev %v merkel %v ntx %v", b.Header.Version, revhex(b.Header.PrevBlock), revhex(b.Header.MerkleRoot), len(b.Tx))
 	if len(b.Tx) != expectTxs {
 		t.Errorf("TestBlock: wrong number of transactions: %d vs %d", len(b.Tx), expectTxs)

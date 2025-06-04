@@ -2,6 +2,7 @@ package giga
 
 import (
 	"encoding/hex"
+	"fmt"
 	"log"
 
 	"github.com/dogecoinfoundation/gigawallet/pkg/doge"
@@ -80,7 +81,10 @@ func CreateTxn(payTo []PayTo, fixedFee CoinAmount, maxFee CoinAmount, acc Accoun
 		return
 	}
 	txid = doge.TxHashHex(txData)
-	dTx := doge.DecodeTx(txData)
+	dTx, err := doge.DecodeTx(txData, txid)
+	if err != nil {
+		return newTx, change, state.inputs, txid, fmt.Errorf("error decoding transaction: %v", err)
+	}
 	chain := doge.ChainFromWIFString(string(acc.Address))
 	for n, out := range dTx.VOut {
 		// This should be caught before now, e.g. in subtractFeeFromOutput.
