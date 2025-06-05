@@ -577,9 +577,9 @@ func (c *ChainFollower) applyUTXOChanges(dbtx giga.StoreTransaction, changes []U
 
 func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, changes []UTXOChange, txIDs []string) ([]UTXOChange, []string) {
 	blockData := c.fetchBlockData(blockHash)
-	block, err := doge.DecodeBlock(blockData, blockHash)
+	block, err := c.decodeBlock(blockData, blockHash, blockHeight)
 	if err != nil {
-		log.Printf("ChainFollower: ERROR DECODING BLOCK - SKIPPED - SHOULD FIX AND RE-PROCESS: %v %v: %v", blockHash, blockHeight, err)
+		log.Printf("[!] ChainFollower: ERROR DECODING BLOCK - SKIPPED - SHOULD FIX AND RE-PROCESS: %v %v: %v", blockHash, blockHeight, err)
 		return changes, txIDs // Skip this block but continue processing
 	}
 	// c.verifyDecodedBlock(&block, blockHash)
@@ -625,6 +625,28 @@ func (c *ChainFollower) processBlock(blockHash string, blockHeight int64, change
 		}
 	}
 	return changes, txIDs
+}
+
+func (c *ChainFollower) decodeBlock(blockData []byte, blockHash string, blockHeight int64) (block doge.Block, err error) {
+	block, err = doge.DecodeBlock(blockData, blockHash, true)
+	if err != nil {
+		// Failed to parse using normal parsing method.
+		log.Printf("[!] ChainFollower: ERROR DECODING BLOCK - TRYING FALLBACK METHOD: %v %v: %v", blockHash, blockHeight, err)
+		// Try alternate approach: use the gossiped header to find the transaction data in the block.
+		rawHeader := c.fetchRawHeader(blockHash)
+		rawBlock := rawHeader[0:80]                                // block header is always 80 bytes
+		rawBlock = append(rawBlock, blockData[len(rawHeader):]...) // data after rawHeader (skip AuxPoW data)
+		block, err = doge.DecodeBlock(rawBlock, blockHash, false)  // parse without AuxPoW data
+		if err == nil {
+			// Successfully parsed using fallback method.
+			if block.Header.IsAuxPoW() {
+				log.Printf("[!] ChainFollower: DECODED AuxPoW BLOCK USING FALLBACK METHOD: %v %v", blockHash, blockHeight)
+			} else {
+				log.Printf("[!] ChainFollower: DECODED NORMAL BLOCK USING FALLBACK METHOD: %v %v", blockHash, blockHeight)
+			}
+		}
+	}
+	return
 }
 
 func (c *ChainFollower) beginStoreTxn() (tx giga.StoreTransaction) {
@@ -785,6 +807,18 @@ func (c *ChainFollower) fetchBlock(blockHash string) giga.RpcBlock {
 			c.sleepForRetry(err, 0)
 		} else {
 			return block
+		}
+	}
+}
+
+func (c *ChainFollower) fetchRawHeader(blockHash string) []byte {
+	for {
+		header, err := c.l1.GetRawBlockHeader(blockHash)
+		if err != nil {
+			log.Println("ChainFollower: error retrieving block header (will retry):", err)
+			c.sleepForRetry(err, 0)
+		} else {
+			return header
 		}
 	}
 }

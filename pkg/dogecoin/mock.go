@@ -1,6 +1,7 @@
 package dogecoin
 
 import (
+	"encoding/hex"
 	"fmt"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -15,7 +16,9 @@ func NewL1Mock(config giga.Config) (L1Mock, error) {
 	return L1Mock{}, nil
 }
 
-type L1Mock struct{}
+type L1Mock struct {
+	RawBlockHeader string // for GetRawBlockHeader
+}
 
 func (l L1Mock) MakeAddress(isTestNet bool) (giga.Address, giga.Privkey, error) {
 	return "mockAddress", "mockPrivkey", nil
@@ -43,6 +46,14 @@ func (l L1Mock) GetBlockHex(blockHash string) (hex string, err error) {
 
 func (l L1Mock) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err error) {
 	return giga.RpcBlockHeader{}, fmt.Errorf("not implemented")
+}
+
+func (l L1Mock) GetRawBlockHeader(blockHash string) (bytes []byte, err error) {
+	if l.RawBlockHeader != "" {
+		bytes, err = hex.DecodeString(l.RawBlockHeader)
+		return
+	}
+	return []byte{}, fmt.Errorf("not implemented")
 }
 
 func (l L1Mock) GetBlockHash(height int64) (hash string, err error) {

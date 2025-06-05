@@ -35,7 +35,7 @@ func TestBlock(t *testing.T) {
 		1000000000,
 		1045842885,
 	}
-	b, err := DecodeBlock(hx2b(hex), "test block")
+	b, err := DecodeBlock(hx2b(hex), "test block", true)
 	if err != nil {
 		t.Errorf("TestBlock: decode error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestAuxPoW(t *testing.T) {
 	expectValues := []int64{
 		5000000000,
 	}
-	b, err := DecodeBlock(hx2b(hex), "TestAuxPoW block")
+	b, err := DecodeBlock(hx2b(hex), "TestAuxPoW block", true)
 	if err != nil {
 		t.Errorf("TestAuxPoW: decode error: %v", err)
 	}
