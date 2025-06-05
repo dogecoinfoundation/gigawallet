@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,6 +136,16 @@ func (l *L1CoreRPC) GetBlockHex(blockHash string) (hex string, err error) {
 func (l *L1CoreRPC) GetBlockHeader(blockHash string) (txn giga.RpcBlockHeader, err error) {
 	decode := true // to get back JSON rather than HEX
 	err = l.request("getblockheader", []any{blockHash, decode}, &txn)
+	return
+}
+
+func (l *L1CoreRPC) GetRawBlockHeader(blockHash string) (bytes []byte, err error) {
+	decode := false // to get back hex
+	var hdr string
+	err = l.request("getblockheader", []any{blockHash, decode}, &hdr)
+	if err == nil {
+		bytes, err = hex.DecodeString(hdr)
+	}
 	return
 }
 

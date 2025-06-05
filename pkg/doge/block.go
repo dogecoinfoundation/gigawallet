@@ -68,9 +68,9 @@ type BlockTxOut struct {
 	Script []byte // varied length
 }
 
-func DecodeBlock(blockBytes []byte, blockid string) (b Block, err error) {
+func DecodeBlock(blockBytes []byte, blockid string, parseAuxPoW bool) (b Block, err error) {
 	s := NewStream(blockBytes)
-	b, err = readBlock(s, blockid)
+	b, err = readBlock(s, blockid, parseAuxPoW)
 	if err == nil && !s.Complete() {
 		if s.Valid() {
 			err = fmt.Errorf("error reading block: did not use all data: %v of %v", s.pos, s.len)
@@ -81,9 +81,9 @@ func DecodeBlock(blockBytes []byte, blockid string) (b Block, err error) {
 	return
 }
 
-func readBlock(s *Stream, blockid string) (b Block, err error) {
+func readBlock(s *Stream, blockid string, parseAuxPoW bool) (b Block, err error) {
 	b.Header = readHeader(s)
-	if b.Header.IsAuxPoW() {
+	if b.Header.IsAuxPoW() && parseAuxPoW {
 		auxPow, err := readMerkleTx(s, "AuxPoW "+blockid)
 		if err != nil {
 			return b, fmt.Errorf("error reading AuxPoW: %v", err)
