@@ -23,6 +23,7 @@ type L1 interface {
 	GetBlock(blockHash string) (RpcBlock, error)
 	GetBlockHex(blockHash string) (string, error)
 	GetBlockHeader(blockHash string) (RpcBlockHeader, error)
+	GetRawBlockHeader(blockHash string) ([]byte, error)
 	GetBlockHash(height int64) (string, error)
 	GetBestBlockHash() (string, error)
 	GetBlockCount() (int64, error)
