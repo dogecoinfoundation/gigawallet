@@ -73,6 +73,9 @@ func main() {
 	case "server":
 		Server(config)
 		os.Exit(0)
+	case "browser":
+		LaunchBrowser(config)
+		os.Exit(0)
 	case "printconf":
 		o, _ := json.MarshalIndent(config, ">", " ")
 		fmt.Println(string(o))
