@@ -2,6 +2,7 @@ package dogecoin
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	giga "github.com/dogecoinfoundation/gigawallet/pkg"
@@ -85,6 +86,7 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 
 	// add transaction inputs: UTXOs to spend.
 	for _, utxo := range inputs {
+		log.Printf("add_utxo: %v %v\n", utxo.TxID, utxo.VOut)
 		if libdogecoin.W_add_utxo(tx, utxo.TxID, utxo.VOut) != 1 {
 			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot add transaction input: %v", utxo)
 		}
@@ -93,6 +95,7 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 	// add transaction outputs: P2PKH paid to ScriptAddress.
 	var anyOutputAddress string
 	for _, out := range outputs {
+		log.Printf("add_output: %v %v\n", string(out.ScriptAddress), out.Amount.String())
 		if libdogecoin.W_add_output(tx, string(out.ScriptAddress), out.Amount.String()) != 1 {
 			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot add transaction output: %v", out)
 		}
@@ -102,6 +105,7 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 	// finalize the transaction: adds a change output if necessary.
 	// the first address (destination_address) is only used to determine main-net or test-net.
 	// the final argument is the change_address which will be used to add a txn output if there is any change.
+	log.Printf("finalize_transaction: %v %v %v %v\n", anyOutputAddress, fee.String(), totalIn.String(), string(change))
 	tx_hex := libdogecoin.W_finalize_transaction(tx, anyOutputAddress, fee.String(), totalIn.String(), string(change))
 	if tx_hex == "" {
 		return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot finalize_transaction")
