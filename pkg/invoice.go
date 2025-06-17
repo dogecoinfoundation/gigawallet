@@ -119,7 +119,6 @@ func (i *Invoice) AddPublic() {
 }
 
 func (i *Invoice) ToPublic() PublicInvoice {
-
 	pub := PublicInvoice{
 		ID:             i.ID,
 		Items:          i.Items,
@@ -134,11 +133,11 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		Estimate:       0,     // XXX meant to estimate time until confirmation
 	}
 
-	if i.LastIncomingAmount.IsPositive() {
+	if i.LastPaidAmount.IsPositive() {
 		pub.PartDetected = true
 	}
 
-	if i.LastIncomingAmount.GreaterThanOrEqual(i.Total) {
+	if i.LastPaidAmount.GreaterThanOrEqual(i.Total) {
 		pub.TotalDetected = true
 	}
 
@@ -146,7 +145,6 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		pub.TotalConfirmed = true
 	}
 
-	// TODO: we still need a way to handle Unconfirmed?
 	return pub
 }
 
