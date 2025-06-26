@@ -14,7 +14,8 @@
                 "server"
             ],
             "cwd": "${workspaceFolder}",
-            "env": {"CONFIGOR_DEBUG_MODE":"true","GIGA_ENV":"devconf"}
+            // GIGA_ENV sets config file to localconf.toml
+            "env": {"CONFIGOR_DEBUG_MODE":"true","GIGA_ENV":"localconf"}
         }
     ]
 }
