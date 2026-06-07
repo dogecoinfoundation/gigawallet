@@ -21,7 +21,7 @@
 
 #### Transaction Broker - @raffecat
   - [ ] Detect tip reorgs (what happens?) 
-  - [x] Connect to core ZMQ channels and recieve blocks
+  - [x] Connect to core ZMQ channels and receive blocks
 
 #### Wallet logic - @raffecat
   - [ ] Implement balance querying API (total vs available?)
