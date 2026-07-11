@@ -486,3 +486,25 @@ func (a API) SetSyncHeight(height int64) error {
 	a.follower.SendCommand(ReSyncChainFollowerCmd{BlockHash: hash})
 	return nil
 }
+
+// VoidPayment cancels a payment that failed before/on broadcast and releases reserved UTXOs.
+// Only allowed when PaidTxID is empty (not accepted by the network). See #110 ops recovery.
+func (a API) VoidPayment(foreignID string, paymentID int64) error {
+	acc, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return err
+	}
+	tx, err := a.Store.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := tx.VoidPayment(acc.Address, paymentID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	a.bus.Send(SYS_MSG, fmt.Sprintf("VoidPayment: account=%s payment=%d UTXOs released", foreignID, paymentID))
+	return nil
+}

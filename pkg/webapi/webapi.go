@@ -121,6 +121,9 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// POST /account/:foreignID/paytx { "pay": [{ "amount":"1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" }] } -> { tx }
 	adminMux.POST("/account/:foreignID/paytx", t.authMiddleware(t.payTransaction))
 
+	// POST /account/:foreignID/payment/:paymentID/void — release reserved UTXOs (#110)
+	adminMux.POST("/account/:foreignID/payment/:paymentID/void", t.authMiddleware(t.voidPayment))
+
 	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.authMiddleware(t.payInvoiceFromInternal))
 
@@ -449,6 +452,30 @@ func (t WebAPI) payInvoiceFromInternal(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	sendResponse(w, res)
+}
+
+
+// voidPayment releases UTXOs locked by a failed/stuck payout that never went on-chain.
+func (t WebAPI) voidPayment(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	var paymentID int64
+	if _, err := fmt.Sscan(p.ByName("paymentID"), &paymentID); err != nil || paymentID <= 0 {
+		sendBadRequest(w, "missing or invalid payment ID")
+		return
+	}
+	if err := t.api.VoidPayment(foreignID, paymentID); err != nil {
+		sendError(w, "VoidPayment", err)
+		return
+	}
+	sendResponse(w, map[string]interface{}{
+		"ok":         true,
+		"payment_id": paymentID,
+		"status":     "voided",
+	})
 }
 
 // upsertAccount returns the address of the new account with the foreignID in the URL

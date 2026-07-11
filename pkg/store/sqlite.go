@@ -666,6 +666,33 @@ func (t SQLiteStoreTransaction) UpdatePaymentWithTxID(paymentID int64, txID stri
 	return nil
 }
 
+// VoidPayment releases UTXOs reserved for a payment that never broadcast, then marks it VOID (#110 ops).
+func (t SQLiteStoreTransaction) VoidPayment(account giga.Address, paymentID int64) error {
+	pay, err := t.GetPayment(account, paymentID)
+	if err != nil {
+		return err
+	}
+	if pay.PaidTxID != "" && pay.PaidTxID != giga.PaymentVoidTxID {
+		return giga.NewErr(giga.InvalidTxn, "cannot void payment %d: already on-chain (txid=%s)", paymentID, pay.PaidTxID)
+	}
+	_, err = t.tx.Exec("UPDATE utxo SET spend_payment=NULL WHERE spend_payment=$1", paymentID)
+	if err != nil {
+		return t.store.dbErr(err, "VoidPayment: unreserve UTXOs")
+	}
+	res, err := t.tx.Exec(
+		"UPDATE payment SET paid_txid=$1 WHERE id=$2 AND account_address=$3",
+		giga.PaymentVoidTxID, paymentID, account,
+	)
+	if err != nil {
+		return t.store.dbErr(err, "VoidPayment: mark void")
+	}
+	n, _ := res.RowsAffected()
+	if n < 1 {
+		return giga.NewErr(giga.NotFound, "payment not found: %d", paymentID)
+	}
+	return nil
+}
+
 func (t SQLiteStoreTransaction) ListPayments(account giga.Address, cursor int64, limit int) (items []giga.Payment, next_cursor int64, err error) {
 	return t.store.listPaymentsCommon(t.tx, account, cursor, limit)
 }
