@@ -234,6 +234,9 @@ func (t WebAPI) getAccountInvoice(w http.ResponseWriter, r *http.Request, p http
 		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
 		return
 	}
+	// Admin GET must populate derived payment flags (listInvoices already does).
+	// Without this, total_payment_confirmed stays false even when amounts are paid (#149).
+	invoice.AddPublic()
 	sendResponse(w, invoice)
 }
 
