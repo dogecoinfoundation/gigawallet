@@ -30,7 +30,7 @@ func TestNewTxn(t *testing.T) {
 	}
 
 	t.Run("CreateTxn with DeductFeePercent", func(t *testing.T) {
-		// Pay to Multiple Addresses with percentage split
+		// Pay to Multiple Addresses with percentage split (#113 multi-payout)
 		payTo := []giga.PayTo{
 			{Amount: dc("2"), PayTo: to_1, DeductFeePercent: dc("80")},
 			{Amount: dc("1"), PayTo: to_2, DeductFeePercent: dc("20")},

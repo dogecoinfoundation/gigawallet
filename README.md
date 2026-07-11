@@ -39,4 +39,12 @@ well as protocol for how to send a signed txn back via the vendor.
 
 [DogeConnect Payment Protocol Specification 0.1](/doc/doge-connect.md)
 
+## Multiple payout targets
+
+`POST /account/:foreignID/pay` accepts either a single `{ "amount", "to" }` or a
+`pay` array of destinations (with optional `deduct_fee_percent` for fee splits).
+This covers merchant “processing fee” payouts in one transaction.
+
+[Multiple payout documentation](/doc/multi-payout.md)
+
 
