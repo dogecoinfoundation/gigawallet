@@ -229,3 +229,52 @@ func p2pkhScriptHex(t *testing.T, addr giga.Address) string {
 	}
 	return "76a914" + hash + "88ac"
 }
+
+func TestAccountUpsertAppliesPayoutSettings(t *testing.T) {
+	admin, _, _, _ := newTestRig(t)
+
+	var created giga.AccountPublic
+	request(t, admin, "/account/UpsertShibe", `{"payout_address":"Dinit","payout_threshold":"1","payout_frequency":"daily"}`, &created)
+	if created.PayoutAddress != "Dinit" {
+		t.Fatalf("create payout_address: got %q", created.PayoutAddress)
+	}
+
+	// Second POST is upsert — must update settings, not ignore body (#134)
+	var updated giga.AccountPublic
+	request(t, admin, "/account/UpsertShibe", `{"payout_address":"Dchanged","payout_threshold":"25.5","payout_frequency":"weekly"}`, &updated)
+	if updated.Address != created.Address {
+		t.Fatalf("upsert must not rotate account address: %v vs %v", updated.Address, created.Address)
+	}
+	if updated.PayoutAddress != "Dchanged" {
+		t.Fatalf("upsert payout_address not applied: %q", updated.PayoutAddress)
+	}
+	if !updated.PayoutThreshold.Equal(decimal.RequireFromString("25.5")) {
+		t.Fatalf("upsert payout_threshold not applied: %v", updated.PayoutThreshold)
+	}
+	if updated.PayoutFrequency != "weekly" {
+		t.Fatalf("upsert payout_frequency not applied: %q", updated.PayoutFrequency)
+	}
+
+	var got giga.AccountPublic
+	request(t, admin, "/account/UpsertShibe", "", &got)
+	if got.PayoutAddress != "Dchanged" || got.PayoutFrequency != "weekly" {
+		t.Fatalf("GET after upsert missing settings: %+v", got)
+	}
+}
+
+func TestInvoicePublicPaymentFlagsBaseline(t *testing.T) {
+	admin, _, _, _ := newTestRig(t)
+	request(t, admin, "/account/FlagShibe", `{}`, &giga.AccountPublic{})
+
+	var inv giga.PublicInvoice
+	request(t, admin, "/account/FlagShibe/invoice", `{"items":[{"type":"item","name":"Hat","value":"5","quantity":1}],"confirmations":1}`, &inv)
+	if inv.TotalConfirmed {
+		t.Fatalf("new invoice should not be total_payment_confirmed")
+	}
+	if inv.PartDetected || inv.TotalDetected {
+		t.Fatalf("new invoice should not show payment detected flags")
+	}
+	if !inv.Total.Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("invoice total: %v", inv.Total)
+	}
+}
