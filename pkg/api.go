@@ -332,6 +332,8 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 		// Submit tx to the network.
 		coreTxid, e := a.L1.Send(txHex)
 		if e != nil {
+			log.Printf("[!] sendrawtransaction rejected by Core (SendFundsToAddress payment=%d account=%s): %v", payment.ID, account.Address, e)
+			a.bus.Send(SYS_ERR, fmt.Sprintf("sendrawtransaction rejected: payment=%d account=%s err=%v", payment.ID, account.Address, e))
 			err = e
 			return
 		}
@@ -443,6 +445,8 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 	// Submit the transaction to core.
 	coreTxid, err := a.L1.Send(txHex)
 	if err != nil {
+		log.Printf("[!] sendrawtransaction rejected by Core (PayInvoiceFromAccount payment=%d account=%s): %v", payment.ID, account.Address, err)
+		a.bus.Send(SYS_ERR, fmt.Sprintf("sendrawtransaction rejected: payment=%d account=%s err=%v", payment.ID, account.Address, err))
 		return
 	}
 	if coreTxid != txid {

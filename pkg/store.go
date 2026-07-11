@@ -167,6 +167,9 @@ type StoreTransaction interface {
 	// Set an event-sent timestamp on an invoice.
 	MarkInvoiceEventSent(invoiceID Address, event EVENT_INV) error
 
+	// Set an event-sent timestamp on a payment (outgoing).
+	MarkPaymentEventSent(paymentID int64, event EVENT_PAYMENT) error
+
 	// RevertChangesAboveHeight clears chain-heights above the given height recorded in UTXOs and Payments.
 	// This serves to roll back the effects of adding or spending those UTXOs and/or Payments.
 	RevertChangesAboveHeight(maxValidHeight int64, nextSeq int64) (newSeq int64, err error)
