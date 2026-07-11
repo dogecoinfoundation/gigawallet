@@ -121,6 +121,9 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// POST /account/:foreignID/paytx { "pay": [{ "amount":"1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" }] } -> { tx }
 	adminMux.POST("/account/:foreignID/paytx", t.authMiddleware(t.payTransaction))
 
+	// GET /account/:foreignID/payments/flagged?flag=AML&cursor=0&limit=50 (#121)
+	adminMux.GET("/account/:foreignID/payments/flagged", t.authMiddleware(t.listFlaggedPayments))
+
 	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
 	adminMux.POST("/invoice/:invoiceID/payfrom/:foreignID", t.authMiddleware(t.payInvoiceFromInternal))
 
@@ -370,6 +373,9 @@ type PayToAddressRequest struct {
 	ExplicitFee giga.CoinAmount `json:"explicit_fee"` // optional fee override (missing or zero: calculate the fee)
 	MaxFee      giga.CoinAmount `json:"max_fee"`      // optional maximum fee (missing or zero: maximum is 1 DOGE)
 	Pay         []giga.PayTo    `json:"pay"`          // either Pay, or Amount and PayTo.
+	// Flags is a free-form tag list stored on the payment (#121), e.g. ["AML"].
+	// "AML" is also auto-applied when config AMLThresholdUSD is exceeded.
+	Flags []string `json:"flags"`
 }
 
 type PayToAddressResponse = giga.SendFundsResult
@@ -394,7 +400,7 @@ func (t WebAPI) payToAddress(w http.ResponseWriter, r *http.Request, p httproute
 		// treat 'PayTo' request as an array of one item.
 		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
 	}
-	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee, true)
+	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee, true, o.Flags)
 	if err != nil {
 		sendError(w, "SendFundsToAddress", err)
 		return
@@ -422,7 +428,7 @@ func (t WebAPI) payTransaction(w http.ResponseWriter, r *http.Request, p httprou
 		// treat 'PayTo' request as an array of one item.
 		o.Pay = append(o.Pay, giga.PayTo{Amount: o.Amount, PayTo: o.PayTo})
 	}
-	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee, false)
+	res, err := t.api.SendFundsToAddress(foreignID, o.Pay, o.ExplicitFee, o.MaxFee, false, o.Flags)
 	if err != nil {
 		sendError(w, "PayTransaction", err)
 		return
@@ -449,6 +455,42 @@ func (t WebAPI) payInvoiceFromInternal(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	sendResponse(w, res)
+}
+
+
+// listFlaggedPayments returns payments with a given flag (default AML) for compliance review (#121)
+func (t WebAPI) listFlaggedPayments(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	q := r.URL.Query()
+	flag := q.Get("flag")
+	if flag == "" {
+		flag = "AML"
+	}
+	cursor := int64(0)
+	limit := 50
+	if c := q.Get("cursor"); c != "" {
+		fmt.Sscan(c, &cursor)
+	}
+	if l := q.Get("limit"); l != "" {
+		fmt.Sscan(l, &limit)
+	}
+	items, next, err := t.api.ListFlaggedPayments(foreignID, flag, cursor, limit)
+	if err != nil {
+		sendError(w, "ListFlaggedPayments", err)
+		return
+	}
+	if items == nil {
+		items = []giga.Payment{}
+	}
+	sendResponse(w, map[string]interface{}{
+		"items":  items,
+		"cursor": next,
+		"flag":   flag,
+	})
 }
 
 // upsertAccount returns the address of the new account with the foreignID in the URL

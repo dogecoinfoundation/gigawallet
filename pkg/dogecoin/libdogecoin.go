@@ -115,6 +115,20 @@ func (l L1Libdogecoin) MakeTransaction(inputs []giga.UTXO, outputs []giga.NewTxO
 	change_amt := totalIn.Sub(totalOut).Sub(fee)
 
 	// Sign the transaction: we need to sign each input UTXO separately,
+	// Pre-validate inputs before calling into C (avoids SIGABRT from libdogecoin assertions; #110).
+	for _, utxo := range inputs {
+		if utxo.ScriptHex == "" {
+			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot sign: UTXO missing ScriptHex (txid=%s vout=%d)", utxo.TxID, utxo.VOut)
+		}
+		if utxo.ScriptType != "" && utxo.ScriptType != doge.ScriptTypeP2PKH {
+			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot sign: only P2PKH inputs supported (type=%s txid=%s)", utxo.ScriptType, utxo.TxID)
+		}
+		if string(utxo.ScriptAddress) == "" {
+			return giga.NewTxn{}, giga.NewErr(giga.InvalidTxn, "cannot sign: UTXO missing ScriptAddress (txid=%s)", utxo.TxID)
+		}
+	}
+
+	// Sign the transaction: we need to sign each input UTXO separately,
 	// because each one is generated from our HD Wallet with a different P2PKH Address.
 	chain := doge.ChainFromWIFString(string(private_key))
 	for n, utxo := range inputs {

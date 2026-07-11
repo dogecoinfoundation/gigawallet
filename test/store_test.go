@@ -216,7 +216,7 @@ func TestStore(t *testing.T) {
 					DeductFeePercent: decimal.NewFromInt(100),
 				},
 			}
-			pay, err := tx.CreatePayment(addr1, payTo, decimal.NewFromInt(100), decimal.NewFromInt(1))
+			pay, err := tx.CreatePayment(addr1, payTo, decimal.NewFromInt(100), decimal.NewFromInt(1), nil)
 			if err != nil {
 				t.Fatal(n("CreatePayment"), err)
 			}
@@ -257,7 +257,7 @@ func TestStore(t *testing.T) {
 						DeductFeePercent: decimal.Zero,
 					},
 				}
-				_, err := tx.CreatePayment(addr1, payTo, decimal.NewFromInt(100), decimal.NewFromInt(1))
+				_, err := tx.CreatePayment(addr1, payTo, decimal.NewFromInt(100), decimal.NewFromInt(1), nil)
 				if err != nil {
 					t.Fatal(n("CreatePayment"), err)
 				}
