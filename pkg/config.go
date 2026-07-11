@@ -47,7 +47,15 @@ type GigawalletConfig struct {
 	// is marked as a double-spend and warnings are thrown. This only
 	// occurs if a confirmation has already been issued. Default 6
 	RejectionsNeeded int
+
+	// Optional AML large-tx flagging (#121). When AMLThresholdUSD > 0 and
+	// DogeUSDPrice > 0, outgoing payments whose DOGE total * price >= threshold
+	// get an "AML" flag stored on the payment row and logged on the bus.
+	// Operators should keep DogeUSDPrice reasonably current (static config is fine for v1).
+	AMLThresholdUSD float64 // e.g. 10000 for FinCEN CTR-style threshold; 0 disables
+	DogeUSDPrice    float64 // DOGE price in USD used for the USD conversion
 }
+
 
 type NodeConfig struct {
 	Host    string

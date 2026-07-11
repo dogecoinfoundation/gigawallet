@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS payment (
 	confirmed_height INTEGER,
 	on_chain_event DATETIME,
 	confirmed_event DATETIME,
-	unconfirmed_event DATETIME
+	unconfirmed_event DATETIME,
+	flags TEXT
 );
 
 CREATE INDEX IF NOT EXISTS payment_account_i ON payment (account_address);
@@ -124,12 +125,18 @@ const SQL_MIGRATION_v2 = `
 ALTER TABLE utxo ADD COLUMN spend_payment INTEGER;
 `
 
+// #121 payment flags (JSON array) for AML / operator tags
+const SQL_MIGRATION_v3 = `
+ALTER TABLE payment ADD COLUMN flags TEXT;
+`
+
 var MIGRATIONS = []struct {
 	ver   int
 	query string
 }{
 	{1, SETUP_SQL},
 	{2, SQL_MIGRATION_v2},
+	{3, SQL_MIGRATION_v3},
 }
 
 /****************** SQLiteStore implements giga.Store ********************/
@@ -475,7 +482,7 @@ func (s SQLiteStore) listInvoicesCommon(tx Queryable, account giga.Address, curs
 }
 
 // These must match the row.Scan in scanPayment below.
-const payment_select_cols = "id, account_address, total, fee, created, paid_txid, paid_height, confirmed_height, on_chain_event, confirmed_event, unconfirmed_event"
+const payment_select_cols = "id, account_address, total, fee, created, paid_txid, paid_height, confirmed_height, on_chain_event, confirmed_event, unconfirmed_event, COALESCE(flags,'') AS flags"
 
 func (s SQLiteStore) scanPayment(row Scannable, account giga.Address) (giga.Payment, error) {
 	var paid_txid sql.NullString
@@ -484,13 +491,20 @@ func (s SQLiteStore) scanPayment(row Scannable, account giga.Address) (giga.Paym
 	var on_chain_event sql.NullTime
 	var confirmed_event sql.NullTime
 	var unconfirmed_event sql.NullTime
+	var flags_json string
 	pay := giga.Payment{}
-	err := row.Scan(&pay.ID, &pay.AccountAddress, &pay.Total, &pay.Fee, &pay.Created, &paid_txid, &paid_height, &confirmed_height, &on_chain_event, &confirmed_event, &unconfirmed_event)
+	err := row.Scan(&pay.ID, &pay.AccountAddress, &pay.Total, &pay.Fee, &pay.Created, &paid_txid, &paid_height, &confirmed_height, &on_chain_event, &confirmed_event, &unconfirmed_event, &flags_json)
 	if err == sql.ErrNoRows {
 		return pay, giga.NewErr(giga.NotFound, "payment not found: %v", account)
 	}
 	if err != nil {
 		return pay, s.dbErr(err, "ScanPayment: row.Scan")
+	}
+	if flags_json != "" {
+		if err := json.Unmarshal([]byte(flags_json), &pay.Flags); err != nil {
+			// tolerate plain CSV fallback
+			pay.Flags = []string{flags_json}
+		}
 	}
 	if paid_txid.Valid {
 		pay.PaidTxID = paid_txid.String
@@ -670,6 +684,53 @@ func (t SQLiteStoreTransaction) ListPayments(account giga.Address, cursor int64,
 	return t.store.listPaymentsCommon(t.tx, account, cursor, limit)
 }
 
+func (t SQLiteStoreTransaction) ListFlaggedPayments(account giga.Address, flag string, cursor int64, limit int) (items []giga.Payment, next_cursor int64, err error) {
+	return t.store.listFlaggedPaymentsCommon(t.tx, account, flag, cursor, limit)
+}
+
+func (s SQLiteStore) ListFlaggedPayments(account giga.Address, flag string, cursor int64, limit int) (items []giga.Payment, next_cursor int64, err error) {
+	return s.listFlaggedPaymentsCommon(s.db, account, flag, cursor, limit)
+}
+
+func (s SQLiteStore) listFlaggedPaymentsCommon(tx Queryable, account giga.Address, flag string, cursor int64, limit int) (items []giga.Payment, next_cursor int64, err error) {
+	// flags stored as JSON array text; LIKE is good enough for tag membership
+	like := "%\"" + flag + "\"%"
+	var rows *sql.Rows
+	if account == "" {
+		rows, err = tx.Query(
+			fmt.Sprintf("SELECT %s FROM payment WHERE id >= $1 AND flags LIKE $2 ORDER BY id LIMIT $3", payment_select_cols),
+			cursor, like, limit)
+	} else {
+		rows, err = tx.Query(
+			fmt.Sprintf("SELECT %s FROM payment WHERE account_address = $1 AND id >= $2 AND flags LIKE $3 ORDER BY id LIMIT $4", payment_select_cols),
+			account, cursor, like, limit)
+	}
+	if err != nil {
+		return nil, 0, s.dbErr(err, "ListFlaggedPayments: query")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		pay, err := s.scanPayment(rows, account)
+		if err != nil {
+			return nil, 0, err
+		}
+		// load outputs
+		pay.PayTo, err = s.getPaymentOutputs(tx, pay.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, pay)
+		next_cursor = pay.ID + 1
+	}
+	if err = rows.Err(); err != nil {
+		return nil, 0, s.dbErr(err, "ListFlaggedPayments: rows")
+	}
+	if len(items) < limit {
+		next_cursor = 0
+	}
+	return
+}
+
 func (t SQLiteStoreTransaction) GetAllUnreservedUTXOs(account giga.Address) (result []giga.UTXO, err error) {
 	return t.store.getAllUnreservedUTXOsCommon(t.tx, account)
 }
@@ -695,16 +756,24 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 	return nil
 }
 
-func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, payTo []giga.PayTo, total giga.CoinAmount, fee giga.CoinAmount) (giga.Payment, error) {
+func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, payTo []giga.PayTo, total giga.CoinAmount, fee giga.CoinAmount, flags []string) (giga.Payment, error) {
 	stmt, err := t.tx.Prepare("INSERT INTO output (payment_id, vout, pay_to, amount, deduct_fee_percent) VALUES ($1,$2,$3,$4,$5)")
 	if err != nil {
 		return giga.Payment{}, t.store.dbErr(err, "CreatePayment: preparing insert")
 	}
 	defer stmt.Close()
 	now := time.Now()
+	flagsJSON := "[]"
+	if len(flags) > 0 {
+		b, mErr := json.Marshal(flags)
+		if mErr != nil {
+			return giga.Payment{}, t.store.dbErr(mErr, "CreatePayment: marshal flags")
+		}
+		flagsJSON = string(b)
+	}
 	row := t.tx.QueryRow(
-		"INSERT INTO payment (account_address, created, total, fee) VALUES ($1,$2,$3,$4) RETURNING ID",
-		accountAddr, now, total, fee)
+		"INSERT INTO payment (account_address, created, total, fee, flags) VALUES ($1,$2,$3,$4,$5) RETURNING ID",
+		accountAddr, now, total, fee, flagsJSON)
 	var id int64
 	err = row.Scan(&id)
 	if err != nil {
@@ -723,6 +792,7 @@ func (t SQLiteStoreTransaction) CreatePayment(accountAddr giga.Address, payTo []
 		Total:          total,
 		Fee:            fee,
 		Created:        now,
+		Flags:          flags,
 	}, nil
 }
 

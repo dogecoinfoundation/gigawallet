@@ -259,7 +259,35 @@ type SendFundsResult struct {
 	TxData string     `json:"tx"`    // transaction data, hex-encoded
 }
 
-func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee CoinAmount, maxFee CoinAmount, sendTx bool) (res SendFundsResult, err error) {
+
+// paymentFlagsFor builds free-form flags for a payment (#121).
+// Auto-adds "AML" when config AMLThresholdUSD and DogeUSDPrice are set and
+// total DOGE * price >= threshold. Merges any operator-supplied flags.
+func (a API) paymentFlagsFor(total CoinAmount, explicit []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(f string) {
+		if f == "" || seen[f] {
+			return
+		}
+		seen[f] = true
+		out = append(out, f)
+	}
+	for _, f := range explicit {
+		add(f)
+	}
+	th := a.config.Gigawallet.AMLThresholdUSD
+	price := a.config.Gigawallet.DogeUSDPrice
+	if th > 0 && price > 0 {
+		usd := total.Mul(decimal.NewFromFloat(price))
+		if usd.GreaterThanOrEqual(decimal.NewFromFloat(th)) {
+			add("AML")
+		}
+	}
+	return out
+}
+
+func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee CoinAmount, maxFee CoinAmount, sendTx bool, explicitFlags []string) (res SendFundsResult, err error) {
 	account, err := a.Store.GetAccount(foreignID)
 	if err != nil {
 		return
@@ -298,7 +326,8 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 		return
 	}
 	// Create the `payment` row with no txid or paid_height.
-	payment, err := dbtx.CreatePayment(account.Address, payTo, total, fee)
+	flags := a.paymentFlagsFor(total, explicitFlags)
+	payment, err := dbtx.CreatePayment(account.Address, payTo, total, fee, flags)
 	if err != nil {
 		dbtx.Rollback()
 		return
@@ -364,8 +393,13 @@ func (a API) SendFundsToAddress(foreignID string, payTo []PayTo, explicitFee Coi
 			PayTo:     payTo,
 			Total:     total,
 			TxID:      txid,
+			Flags:     payment.Flags,
 		}
 		a.bus.Send(PAYMENT_SENT, msg)
+		if len(payment.Flags) > 0 {
+			a.bus.Send(PAYMENT_FLAGGED, msg)
+			log.Printf("PAYMENT_FLAGGED: id=%d flags=%v total=%s", payment.ID, payment.Flags, total)
+		}
 	}
 
 	return SendFundsResult{TxId: txid, Total: total.Add(fee), Paid: total, Fee: fee, TxData: txHex}, nil
@@ -414,7 +448,8 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 		return
 	}
 	// Create the `payment` row with no txid or paid_height.
-	payment, err := tx.CreatePayment(account.Address, payTo, invoiceAmount, fee)
+	flags := a.paymentFlagsFor(invoiceAmount, nil)
+	payment, err := tx.CreatePayment(account.Address, payTo, invoiceAmount, fee, flags)
 	if err != nil {
 		tx.Rollback()
 		return
@@ -472,8 +507,13 @@ func (a API) PayInvoiceFromAccount(invoiceID Address, foreignID string) (res Sen
 		PayTo:     payTo,
 		Total:     invoiceAmount,
 		TxID:      txid,
+		Flags:     payment.Flags,
 	}
 	a.bus.Send(PAYMENT_SENT, msg)
+	if len(payment.Flags) > 0 {
+		a.bus.Send(PAYMENT_FLAGGED, msg)
+		log.Printf("PAYMENT_FLAGGED: id=%d flags=%v total=%s", payment.ID, payment.Flags, invoiceAmount)
+	}
 	return SendFundsResult{TxId: txid, Total: invoiceAmount.Add(fee), Paid: invoiceAmount, Fee: fee}, nil
 }
 
@@ -485,4 +525,25 @@ func (a API) SetSyncHeight(height int64) error {
 	}
 	a.follower.SendCommand(ReSyncChainFollowerCmd{BlockHash: hash})
 	return nil
+}
+
+// ListFlaggedPayments returns payments tagged with a flag (default "AML") for an account.
+// Empty foreignID is not supported here — use admin path with account from foreignID.
+func (a API) ListFlaggedPayments(foreignID string, flag string, cursor int64, limit int) ([]Payment, int64, error) {
+	if flag == "" {
+		flag = "AML"
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	acc, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return nil, 0, err
+	}
+	tx, err := a.Store.Begin()
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback()
+	return tx.ListFlaggedPayments(acc.Address, flag, cursor, limit)
 }

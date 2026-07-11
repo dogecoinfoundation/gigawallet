@@ -19,6 +19,8 @@ type Payment struct {
 	OnChainEvent     time.Time  // Time when the on-chain event was sent
 	ConfirmedEvent   time.Time  // Time when the confirmed event was sent
 	UnconfirmedEvent time.Time  // Time when the unconfirmed event was sent
+	// Flags is a free-form tag list (e.g. "AML") for compliance / ops (#121).
+	Flags []string `json:"flags,omitempty"`
 }
 
 // Pay an amount to an address

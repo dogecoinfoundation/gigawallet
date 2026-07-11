@@ -97,7 +97,7 @@ type StoreTransaction interface {
 
 	// Store a 'payment' which represents a pay-out to another address from a gigawallet
 	// managed account.
-	CreatePayment(account Address, payTo []PayTo, total CoinAmount, fee CoinAmount) (Payment, error)
+	CreatePayment(account Address, payTo []PayTo, total CoinAmount, fee CoinAmount, flags []string) (Payment, error)
 
 	// GetPayment returns the Payment for the given ID
 	GetPayment(account Address, id int64) (Payment, error)
@@ -110,6 +110,10 @@ type StoreTransaction interface {
 	// pagination: when next_cursor == 0, that is the final page of results.
 	// pagination: stores CAN return < limit (or zero) items WITH next_cursor > 0 (due to filtering)
 	ListPayments(account Address, cursor int64, limit int) (items []Payment, next_cursor int64, err error)
+
+	// ListFlaggedPayments returns payments that include the given flag (e.g. "AML").
+	// account empty string = all accounts (admin). Pagination same as ListPayments.
+	ListFlaggedPayments(account Address, flag string, cursor int64, limit int) (items []Payment, next_cursor int64, err error)
 
 	// CreateAccount stores a NEW account.
 	// It returns giga.AlreadyExists if the account already exists (key: ForeignID)

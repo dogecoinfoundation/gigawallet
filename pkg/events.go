@@ -15,7 +15,8 @@ var EVENT_TYPES []EventType = []EventType{EVENT_ALL("ALL"),
 	EVENT_SYS("SYS"),
 	EVENT_NET("NET"),
 	EVENT_ACC("ACC"),
-	EVENT_INV("INV")}
+	EVENT_INV("INV"),
+	EVENT_PAYMENT("PAYMENT")}
 
 // Special category, do not use directly, represents *
 type EVENT_ALL string
@@ -77,6 +78,7 @@ const (
 	PAYMENT_ON_CHAIN    EVENT_PAYMENT = "PAYMENT_ON_CHAIN"
 	PAYMENT_CONFIRMED   EVENT_PAYMENT = "PAYMENT_CONFIRMED"
 	PAYMENT_UNCONFIRMED EVENT_PAYMENT = "PAYMENT_UNCONFIRMED"
+	PAYMENT_FLAGGED     EVENT_PAYMENT = "PAYMENT_FLAGGED" // large-tx / operator flags (#121)
 )
 
 type PaymentEvent struct {
@@ -86,6 +88,7 @@ type PaymentEvent struct {
 	PayTo     []PayTo    `json:"pay_to"`
 	Total     CoinAmount `json:"total"`
 	TxID      string     `json:"txid"`
+	Flags     []string   `json:"flags,omitempty"`
 }
 
 // Invoice Events
