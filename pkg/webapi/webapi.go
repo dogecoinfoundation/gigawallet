@@ -112,6 +112,9 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// GET /account/:foreignID/invoices ? args -> [ {...}, ..] get all / filtered invoices
 	adminMux.GET("/account/:foreignID/invoices", t.authMiddleware(t.listInvoices))
 
+	// GET /account/:foreignID/payments ? cursor, limit
+	adminMux.GET("/account/:foreignID/payments", t.authMiddleware(t.listPayments))
+
 	// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
 	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.authMiddleware(t.getAccountInvoice))
 
@@ -132,6 +135,10 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// POST { amount } /invoice/:invoiceID/refundtoacc/:foreignID -> { status } refund all or part of a paid invoice to account
 
 	// External APIs
+
+	// Liveness for load balancers / k8s (no auth)
+	adminMux.GET("/health", t.health)
+	pubMux.GET("/health", t.health)
 
 	// GET /invoice/:invoiceID -> { invoice } get an invoice (sans account ID)
 	pubMux.GET("/invoice/:invoiceID", t.getInvoice)
@@ -311,6 +318,59 @@ func (t WebAPI) getInvoice(w http.ResponseWriter, r *http.Request, p httprouter.
 		return
 	}
 	sendResponse(w, invoice.ToPublic())
+}
+
+// health is a simple liveness probe for operators and load balancers.
+func (t WebAPI) health(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	sendResponse(w, map[string]interface{}{
+		"ok":      true,
+		"service": "gigawallet",
+	})
+}
+
+// listPayments returns outgoing payments for an account (paginated).
+func (t WebAPI) listPayments(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	qs := r.URL.Query()
+	var cursor int64
+	limit := 10
+	var err error
+	if c := qs.Get("cursor"); c != "" {
+		cursor, err = strconv.ParseInt(c, 10, 64)
+		if err != nil || cursor < 0 {
+			sendBadRequest(w, "invalid cursor in URL")
+			return
+		}
+	}
+	if l := qs.Get("limit"); l != "" {
+		var lim int
+		lim, err = strconv.Atoi(l)
+		if err != nil || lim < 1 {
+			sendBadRequest(w, "invalid limit in URL")
+			return
+		}
+		if lim > 100 {
+			sendBadRequest(w, "invalid limit in URL (cannot be greater than 100)")
+			return
+		}
+		limit = lim
+	}
+	items, next, err := t.api.ListPayments(foreignID, cursor, limit)
+	if err != nil {
+		sendError(w, "ListPayments", err)
+		return
+	}
+	if items == nil {
+		items = []giga.Payment{}
+	}
+	sendResponse(w, map[string]interface{}{
+		"items":  items,
+		"cursor": next,
+	})
 }
 
 // listInvoices is responsible for returning a list of invoices and their status for an account

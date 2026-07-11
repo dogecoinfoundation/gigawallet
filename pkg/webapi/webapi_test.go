@@ -229,3 +229,26 @@ func p2pkhScriptHex(t *testing.T, addr giga.Address) string {
 	}
 	return "76a914" + hash + "88ac"
 }
+
+func TestHealthAndListPayments(t *testing.T) {
+	admin, pub, _, _ := newTestRig(t)
+
+	var health map[string]interface{}
+	request(t, pub, "/health", "", &health)
+	if health["ok"] != true {
+		t.Fatalf("health ok: %v", health)
+	}
+
+	request(t, admin, "/account/PayListShibe", `{}`, &giga.AccountPublic{})
+	var list struct {
+		Items  []giga.Payment `json:"items"`
+		Cursor int64          `json:"cursor"`
+	}
+	request(t, admin, "/account/PayListShibe/payments?cursor=0&limit=10", "", &list)
+	if list.Items == nil {
+		t.Fatalf("expected empty items array, not null")
+	}
+	if len(list.Items) != 0 {
+		t.Fatalf("expected 0 payments, got %d", len(list.Items))
+	}
+}
