@@ -955,6 +955,27 @@ func (t SQLiteStoreTransaction) MarkInvoiceEventSent(invoiceID giga.Address, eve
 	return nil
 }
 
+// MarkPaymentEventSent records that a PAYMENT_* bus event was emitted.
+func (t SQLiteStoreTransaction) MarkPaymentEventSent(paymentID int64, event giga.EVENT_PAYMENT) error {
+	sql := ""
+	switch event {
+	case giga.PAYMENT_ON_CHAIN:
+		sql = "UPDATE payment SET on_chain_event=CURRENT_TIMESTAMP WHERE id=$1"
+	case giga.PAYMENT_CONFIRMED:
+		sql = "UPDATE payment SET confirmed_event=CURRENT_TIMESTAMP WHERE id=$1"
+	case giga.PAYMENT_UNCONFIRMED:
+		// clear confirmed marker so a later re-confirm can re-fire
+		sql = "UPDATE payment SET confirmed_event=NULL, confirmed_height=NULL WHERE id=$1"
+	default:
+		return giga.NewErr(giga.BadRequest, "unsupported payment event")
+	}
+	_, err := t.tx.Exec(sql, paymentID)
+	if err != nil {
+		return t.store.dbErr(err, "MarkPaymentEventSent: UPDATE")
+	}
+	return nil
+}
+
 // Prepare query for MarkInvoicesPaid.
 // Summing all UTXOs that payTo the Invoice Address that have been confirmed (spendable_height is non-null)
 var sum_utxos_for_invoice = "SELECT SUM(value) FROM utxo WHERE script_address=i.invoice_address AND spendable_height IS NOT NULL"

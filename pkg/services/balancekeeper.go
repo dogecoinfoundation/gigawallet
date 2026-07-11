@@ -359,7 +359,6 @@ func (b BalanceKeeper) sendPaymentEvents(tx giga.StoreTransaction, acc *giga.Acc
 			// on confirmed_height = 0 && has confirmed_event => PAYMENT_UNCONFIRMED
 			if pay.PaidHeight != 0 && pay.OnChainEvent.IsZero() {
 				// payment is on-chain.
-				// notify BUS listeners.
 				msg := giga.PaymentEvent{
 					PaymentID: pay.ID,
 					ForeignID: acc.ForeignID,
@@ -375,14 +374,14 @@ func (b BalanceKeeper) sendPaymentEvents(tx giga.StoreTransaction, acc *giga.Acc
 					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
 					return err
 				}
-				// err = tx.MarkPaymentEventSent(pay.ID, event)
-				// if err != nil {
-				// 	log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", id, err)
-				// 	return err
-				// }
+				err = tx.MarkPaymentEventSent(pay.ID, event)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkPaymentEventSent '%s': %v\n", id, err)
+					return err
+				}
 				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %v in %s\n", event, pay.ID, id))
 			} else if pay.ConfirmedHeight != 0 && pay.ConfirmedEvent.IsZero() {
-				// payment is confirmed.
+				// payment is confirmed on-chain (#88).
 				msg := giga.PaymentEvent{
 					PaymentID: pay.ID,
 					ForeignID: acc.ForeignID,
@@ -398,11 +397,34 @@ func (b BalanceKeeper) sendPaymentEvents(tx giga.StoreTransaction, acc *giga.Acc
 					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
 					return err
 				}
-				// err = tx.MarkInvoiceEventSent(pay.ID, event)
-				// if err != nil {
-				// 	log.Printf("BalanceKeeper: MarkInvoiceEventSent '%s': %v\n", id, err)
-				// 	return err
-				// }
+				err = tx.MarkPaymentEventSent(pay.ID, event)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkPaymentEventSent '%s': %v\n", id, err)
+					return err
+				}
+				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %v in %s\n", event, pay.ID, id))
+			} else if pay.ConfirmedHeight == 0 && !pay.ConfirmedEvent.IsZero() {
+				// reorg after confirm (#89).
+				msg := giga.PaymentEvent{
+					PaymentID: pay.ID,
+					ForeignID: acc.ForeignID,
+					AccountID: acc.Address,
+					PayTo:     pay.PayTo,
+					Total:     pay.Total,
+					TxID:      pay.PaidTxID,
+				}
+				event := giga.PAYMENT_UNCONFIRMED
+				unique_id := fmt.Sprintf("PUC-%d-%d", cursor, num_pay+n)
+				err = b.bus.Send(event, msg, unique_id)
+				if err != nil {
+					log.Printf("BalanceKeeper: bus error for '%s': %v\n", id, err)
+					return err
+				}
+				err = tx.MarkPaymentEventSent(pay.ID, event)
+				if err != nil {
+					log.Printf("BalanceKeeper: MarkPaymentEventSent '%s': %v\n", id, err)
+					return err
+				}
 				b.bus.Send(giga.SYS_MSG, fmt.Sprintf("BalanceKeeper: %s: %v in %s\n", event, pay.ID, id))
 			}
 		}

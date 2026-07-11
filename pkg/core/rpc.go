@@ -183,6 +183,8 @@ func (l *L1CoreRPC) Send(txnHex string) (txid string, err error) {
 	}
 	err = l.request("sendrawtransaction", []any{txnHex}, &txid)
 	if err != nil {
+		// #86 — surface Core rejections in logs (not only return value)
+		log.Printf("[!] sendrawtransaction: Core rejected transaction: %v", err)
 		return "", fmt.Errorf("sendrawtransaction: %v", err)
 	}
 	if len(txid) != 64 || !doge.IsValidHex(txid) {
