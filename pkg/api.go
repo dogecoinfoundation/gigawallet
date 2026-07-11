@@ -23,6 +23,9 @@ func NewAPI(store Store, l1 L1, bus MessageBus, follower ChainFollower, config C
 type InvoiceCreateRequest struct {
 	Items         []Item `json:"items"`
 	Confirmations int32  `json:"required_confirmations"` // specify -1 to mean not set
+	// ExpireMinutes sets invoice expiry as current tip height + minutes
+	// (Dogecoin ~1 block/minute). 0 or omitted = never expires. (#112)
+	ExpireMinutes int `json:"expire_minutes"`
 }
 
 func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invoice, error) {
@@ -53,6 +56,15 @@ func (a API) CreateInvoice(request InvoiceCreateRequest, foreignID string) (Invo
 	}
 
 	i := Invoice{ID: invoiceID, Account: acc.Address, Items: request.Items, KeyIndex: keyIndex, Confirmations: confirmations, Created: time.Now()}
+
+	// Optional expiry: archive unpaid invoices after N blocks (~minutes). (#112)
+	if request.ExpireMinutes > 0 {
+		tip, tipErr := a.L1.GetBlockCount()
+		if tipErr != nil {
+			return Invoice{}, NewErr(UnknownError, "CreateInvoice: GetBlockCount for expire: %v", tipErr)
+		}
+		i.ExpireHeight = tip + int64(request.ExpireMinutes)
+	}
 
 	//validate invoice
 	err = i.Validate()
@@ -485,4 +497,27 @@ func (a API) SetSyncHeight(height int64) error {
 	}
 	a.follower.SendCommand(ReSyncChainFollowerCmd{BlockHash: hash})
 	return nil
+}
+
+
+// UnarchiveInvoice clears the archived flag so BalanceKeeper will re-check the invoice.
+// Use when a payer reports a late payment after expiry (#112).
+func (a API) UnarchiveInvoice(id Address) (Invoice, error) {
+	dbtx, err := a.Store.Begin()
+	if err != nil {
+		return Invoice{}, err
+	}
+	defer dbtx.Rollback()
+	inv, err := dbtx.GetInvoice(id)
+	if err != nil {
+		return Invoice{}, err
+	}
+	if err := dbtx.SetInvoiceArchived(id, false); err != nil {
+		return Invoice{}, err
+	}
+	if err := dbtx.Commit(); err != nil {
+		return Invoice{}, err
+	}
+	inv.Archived = false
+	return inv, nil
 }

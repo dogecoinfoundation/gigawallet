@@ -389,6 +389,14 @@ func (c *ChainFollower) attemptToApplyChanges(changes []UTXOChange, txIDs []stri
 		return pos, err // retry.
 	}
 	accounts.AddIds(invoiceAccounts)
+	// Archive unpaid invoices past their expire_height so BalanceKeeper skips them. (#112)
+	expiredAccounts, err := dbtx.ArchiveExpiredInvoices(pos.BlockHeight)
+	if err != nil {
+		log.Println("ChainFollower: ArchiveExpiredInvoices:", err)
+		dbtx.Rollback()
+		return pos, err // retry.
+	}
+	accounts.AddIds(expiredAccounts)
 	// Mark payments as on-chain if they match the transaction ids in this block.
 	// This records to block-height where we saw the payment happen (paid_height)
 	// Once paid_height is populated, ConfirmPayments will monitor for confirmation.

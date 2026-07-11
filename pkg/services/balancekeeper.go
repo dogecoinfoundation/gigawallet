@@ -155,10 +155,10 @@ func (b BalanceKeeper) sendInvoiceEvents(tx giga.StoreTransaction, acc *giga.Acc
 	inv_c := 0
 	num_inv := 0
 	for cont := true; cont; cont = inv_c > 0 {
-		// Fetch a batch of invoices.
-		invoices, new_inv_c, err := tx.ListInvoices(id, inv_c, ACCOUNT_BATCH_SIZE)
+		// Fetch a batch of active (non-archived) invoices. (#112)
+		invoices, new_inv_c, err := tx.ListActiveInvoices(id, inv_c, ACCOUNT_BATCH_SIZE)
 		if err != nil {
-			log.Printf("BalanceKeeper: ListInvoices '%s': %v\n", id, err)
+			log.Printf("BalanceKeeper: ListActiveInvoices '%s': %v\n", id, err)
 			return err
 		}
 		// Check each invoice to see if it's paid and we haven't sent an event yet,

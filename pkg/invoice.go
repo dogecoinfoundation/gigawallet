@@ -32,6 +32,9 @@ type Invoice struct {
 	TotalConfirmed bool    `json:"total_payment_confirmed"`     // Calculated
 	Unconfirmed    bool    `json:"payment_unconfirmed"`         // Calculated
 	Estimate       int     `json:"estimate_seconds_to_confirm"` // Calculated
+	// Expiry / archive (#112): skip archived invoices in BalanceKeeper scans.
+	ExpireHeight int64 `json:"expire_height,omitempty"` // chain height after which unpaid invoices archive (0 = never)
+	Archived     bool  `json:"archived"`                 // true = inactive for payment-event scanning
 }
 
 // CalcTotal sums up the Items listed on the Invoice.
@@ -146,6 +149,9 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		pub.TotalConfirmed = true
 	}
 
+	pub.ExpireHeight = i.ExpireHeight
+	pub.Archived = i.Archived
+
 	// TODO: we still need a way to handle Unconfirmed?
 	return pub
 }
@@ -163,4 +169,6 @@ type PublicInvoice struct {
 	TotalConfirmed bool       `json:"total_payment_confirmed"`     // Calculated
 	Unconfirmed    bool       `json:"payment_unconfirmed"`         // Calculated
 	Estimate       int        `json:"estimate_seconds_to_confirm"` // Calculated
+	ExpireHeight   int64      `json:"expire_height,omitempty"`
+	Archived       bool       `json:"archived"`
 }

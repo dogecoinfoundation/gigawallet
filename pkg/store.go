@@ -95,6 +95,15 @@ type StoreTransaction interface {
 	// It returns an unspecified error if the invoice ID already exists (FIXME)
 	StoreInvoice(invoice Invoice) error
 
+	// ListActiveInvoices is ListInvoices but skips archived invoices (BalanceKeeper path). (#112)
+	ListActiveInvoices(account Address, cursor int, limit int) (items []Invoice, next_cursor int, err error)
+
+	// SetInvoiceArchived sets/clears the archived flag on an invoice. (#112)
+	SetInvoiceArchived(id Address, archived bool) error
+
+	// ArchiveExpiredInvoices marks unpaid invoices with expire_height <= blockHeight as archived. (#112)
+	ArchiveExpiredInvoices(blockHeight int64) (affectedAccounts []string, err error)
+
 	// Store a 'payment' which represents a pay-out to another address from a gigawallet
 	// managed account.
 	CreatePayment(account Address, payTo []PayTo, total CoinAmount, fee CoinAmount) (Payment, error)
