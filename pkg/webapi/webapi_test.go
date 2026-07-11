@@ -229,3 +229,30 @@ func p2pkhScriptHex(t *testing.T, addr giga.Address) string {
 	}
 	return "76a914" + hash + "88ac"
 }
+
+func TestPayToAddressRequestMultiJSON(t *testing.T) {
+	// Documents #113 multi-destination wire format (already supported by /pay and /paytx).
+	const body = `{"pay":[
+		{"amount":"9.0","to":"DCustomerxxxxxxxxxxxxxxxxxxxxxxx","deduct_fee_percent":"0"},
+		{"amount":"1.0","to":"DProcessorxxxxxxxxxxxxxxxxxxxxxx","deduct_fee_percent":"100"}
+	],"max_fee":"1.0"}`
+	var o PayToAddressRequest
+	if err := json.Unmarshal([]byte(body), &o); err != nil {
+		t.Fatalf("unmarshal multi pay: %v", err)
+	}
+	if len(o.Pay) != 2 {
+		t.Fatalf("expected 2 pay targets, got %d", len(o.Pay))
+	}
+	if o.Pay[0].Amount.String() != "9" && !o.Pay[0].Amount.Equal(decimal.RequireFromString("9.0")) {
+		// shopspring may normalize; just check positive and second fee split
+	}
+	if !o.Pay[0].Amount.Equal(decimal.RequireFromString("9.0")) {
+		t.Fatalf("pay[0].amount: %v", o.Pay[0].Amount)
+	}
+	if !o.Pay[1].DeductFeePercent.Equal(decimal.NewFromInt(100)) {
+		t.Fatalf("pay[1].deduct_fee_percent: %v", o.Pay[1].DeductFeePercent)
+	}
+	if string(o.Pay[1].PayTo) != "DProcessorxxxxxxxxxxxxxxxxxxxxxx" {
+		t.Fatalf("pay[1].to: %q", o.Pay[1].PayTo)
+	}
+}

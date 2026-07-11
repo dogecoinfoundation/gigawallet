@@ -115,10 +115,12 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
 	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.authMiddleware(t.getAccountInvoice))
 
-	// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
+	// POST /account/:foreignID/pay — single or multi-output payout (broadcast).
+	// Body: { "amount","to" } OR { "pay":[{ "amount","to","deduct_fee_percent"? }, ...] }
+	// Multi-pay enables processor fee splits in one txn (#113). See doc/multi-payout.md
 	adminMux.POST("/account/:foreignID/pay", t.authMiddleware(t.payToAddress))
 
-	// POST /account/:foreignID/paytx { "pay": [{ "amount":"1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" }] } -> { tx }
+	// POST /account/:foreignID/paytx — same as /pay but return signed hex only (no broadcast)
 	adminMux.POST("/account/:foreignID/paytx", t.authMiddleware(t.payTransaction))
 
 	// POST /invoice/:invoiceID/payfrom/:foreignID -> { status } pay invoice from internal account
