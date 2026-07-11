@@ -105,6 +105,11 @@ type StoreTransaction interface {
 	// Update txid on a payment.
 	UpdatePaymentWithTxID(paymentID int64, txID string) error
 
+	// VoidPayment releases UTXOs reserved for a payment that never made it on-chain
+	// (paid_txid empty). Marks the payment voided so it cannot be submitted later.
+	// Returns giga.NotFound if payment missing, InvalidTxn if already on-chain.
+	VoidPayment(account Address, paymentID int64) error
+
 	// ListPayments returns a list of payments for an account.
 	// pagination: next_cursor should be passed as 'cursor' on the next call (initial cursor = 0)
 	// pagination: when next_cursor == 0, that is the final page of results.

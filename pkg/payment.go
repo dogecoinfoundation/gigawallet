@@ -6,6 +6,10 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// PaymentVoidTxID is stored in PaidTxID when a payment is voided before broadcast
+// (releases reserved UTXOs). See API.VoidPayment.
+const PaymentVoidTxID = "VOID"
+
 type Payment struct {
 	ID               int64      // incrementing payment number, per account
 	AccountAddress   Address    // owner account (source of funds)
@@ -13,7 +17,7 @@ type Payment struct {
 	Total            CoinAmount // total paid to others (excluding fees and change)
 	Fee              CoinAmount // fee paid by the transaction
 	Created          time.Time  // when the payment was created
-	PaidTxID         string     // TXID of the Transaction that made the payment
+	PaidTxID         string     // TXID of the Transaction that made the payment (or PaymentVoidTxID)
 	PaidHeight       int64      // Block Height of the Transaction that made the payment
 	ConfirmedHeight  int64      // Block Height when payment transaction was confirmed
 	OnChainEvent     time.Time  // Time when the on-chain event was sent
