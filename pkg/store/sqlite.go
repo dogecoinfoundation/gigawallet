@@ -55,9 +55,12 @@ CREATE TABLE IF NOT EXISTS invoice (
 	last_paid NUMERIC(18,8),
 	paid_height INTEGER,
 	block_id TEXT,
-	paid_event DATETIME
+	paid_event DATETIME,
+	expire_height INTEGER,
+	archived INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS invoice_account_i ON invoice (account_address);
+CREATE INDEX IF NOT EXISTS invoice_archived_i ON invoice (account_address, archived);
 
 CREATE TABLE IF NOT EXISTS payment (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,12 +127,20 @@ const SQL_MIGRATION_v2 = `
 ALTER TABLE utxo ADD COLUMN spend_payment INTEGER;
 `
 
+// #112 invoice expiry / archive for high-volume unpaid invoice pruning
+const SQL_MIGRATION_v3 = `
+ALTER TABLE invoice ADD COLUMN expire_height INTEGER;
+ALTER TABLE invoice ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS invoice_archived_i ON invoice (account_address, archived);
+`
+
 var MIGRATIONS = []struct {
 	ver   int
 	query string
 }{
 	{1, SETUP_SQL},
 	{2, SQL_MIGRATION_v2},
+	{3, SQL_MIGRATION_v3},
 }
 
 /****************** SQLiteStore implements giga.Store ********************/
@@ -246,6 +257,10 @@ func (s SQLiteStore) GetInvoice(addr giga.Address) (giga.Invoice, error) {
 
 func (s SQLiteStore) ListInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
 	return s.listInvoicesCommon(s.db, account, cursor, limit)
+}
+
+func (s SQLiteStore) ListActiveInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return s.listActiveInvoicesCommon(s.db, account, cursor, limit)
 }
 
 func (s SQLiteStore) GetPayment(account giga.Address, id int64) (giga.Payment, error) {
@@ -374,7 +389,9 @@ type Scannable interface {
 // These must match the row.Scan in scanInvoice below.
 const invoice_select_cols = `invoice_address, account_address, items, key_index, block_id, confirmations, created, total, paid_height, paid_event, last_incoming, last_paid,
 COALESCE((SELECT SUM(value) FROM utxo WHERE added_height IS NOT NULL AND script_address=invoice.invoice_address),0) AS incoming_amount,
-COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND script_address=invoice.invoice_address),0) AS paid_amount`
+COALESCE((SELECT SUM(value) FROM utxo WHERE spendable_height IS NOT NULL AND script_address=invoice.invoice_address),0) AS paid_amount,
+COALESCE(expire_height, 0) AS expire_height,
+COALESCE(archived, 0) AS archived`
 
 func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.Invoice, error) {
 	var items_json string
@@ -386,13 +403,17 @@ func (s SQLiteStore) scanInvoice(row Scannable, invoiceID giga.Address) (giga.In
 	var last_incoming sql.NullString
 	var last_paid sql.NullString
 	inv := giga.Invoice{}
-	err := row.Scan(&inv.ID, &inv.Account, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &inv.Total, &paid_height, &paid_event, &last_incoming, &last_paid, &incoming_amount, &paid_amount)
+	var expire_height int64
+	var archived int
+	err := row.Scan(&inv.ID, &inv.Account, &items_json, &inv.KeyIndex, &block_id, &inv.Confirmations, &inv.Created, &inv.Total, &paid_height, &paid_event, &last_incoming, &last_paid, &incoming_amount, &paid_amount, &expire_height, &archived)
 	if err == sql.ErrNoRows {
 		return inv, giga.NewErr(giga.NotFound, "invoice not found: %v", invoiceID)
 	}
 	if err != nil {
 		return inv, s.dbErr(err, "ScanInvoice: row.Scan")
 	}
+	inv.ExpireHeight = expire_height
+	inv.Archived = archived != 0
 	err = json.Unmarshal([]byte(items_json), &inv.Items)
 	if err != nil {
 		return inv, s.dbErr(err, "ScanInvoice: json.Unmarshal")
@@ -443,6 +464,7 @@ func (s SQLiteStore) getInvoiceCommon(tx Queryable, addr giga.Address) (giga.Inv
 // we need a way to resume the query next time from whatever next_cursor we return,
 // and the aggregate result SHOULD be stable even as the DB is modified.
 var list_invoices_sql = fmt.Sprintf("SELECT %s FROM invoice WHERE account_address = $1 AND key_index >= $2 ORDER BY key_index LIMIT $3", invoice_select_cols)
+var list_active_invoices_sql = fmt.Sprintf("SELECT %s FROM invoice WHERE account_address = $1 AND key_index >= $2 AND COALESCE(archived,0) = 0 ORDER BY key_index LIMIT $3", invoice_select_cols)
 
 func (s SQLiteStore) listInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
 	// note: we CAN return less than 'limit' items on each call, and there can be gaps (e.g. filtering)
@@ -470,6 +492,34 @@ func (s SQLiteStore) listInvoicesCommon(tx Queryable, account giga.Address, curs
 	if rows_found < limit {
 		// in this backend, we know there are no more rows to follow.
 		next_cursor = 0 // meaning "end of query results"
+	}
+	return
+}
+
+func (s SQLiteStore) listActiveInvoicesCommon(tx Queryable, account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	rows_found := 0
+	rows, err := tx.Query(list_active_invoices_sql, account, cursor, limit)
+	if err != nil {
+		return nil, 0, s.dbErr(err, "ListActiveInvoices: querying invoices")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		inv, err := s.scanInvoice(rows, account)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, inv)
+		after_this := int(inv.KeyIndex) + 1
+		if after_this > next_cursor {
+			next_cursor = after_this
+		}
+		rows_found++
+	}
+	if err = rows.Err(); err != nil {
+		return nil, 0, s.dbErr(err, "ListActiveInvoices: querying invoices")
+	}
+	if rows_found < limit {
+		next_cursor = 0
 	}
 	return
 }
@@ -654,6 +704,42 @@ func (t SQLiteStoreTransaction) ListInvoices(account giga.Address, cursor int, l
 	return t.store.listInvoicesCommon(t.tx, account, cursor, limit)
 }
 
+func (t SQLiteStoreTransaction) ListActiveInvoices(account giga.Address, cursor int, limit int) (items []giga.Invoice, next_cursor int, err error) {
+	return t.store.listActiveInvoicesCommon(t.tx, account, cursor, limit)
+}
+
+func (t SQLiteStoreTransaction) SetInvoiceArchived(id giga.Address, archived bool) error {
+	val := 0
+	if archived {
+		val = 1
+	}
+	res, err := t.tx.Exec("UPDATE invoice SET archived=$1 WHERE invoice_address=$2", val, id)
+	if err != nil {
+		return t.store.dbErr(err, "SetInvoiceArchived")
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return giga.NewErr(giga.NotFound, "invoice not found: %v", id)
+	}
+	return nil
+}
+
+func (t SQLiteStoreTransaction) ArchiveExpiredInvoices(blockHeight int64) (accounts []string, err error) {
+	rows, err := t.tx.Query(
+		`UPDATE invoice SET archived=1
+		 WHERE COALESCE(archived,0)=0
+		   AND expire_height IS NOT NULL AND expire_height > 0
+		   AND expire_height <= $1
+		   AND paid_height IS NULL
+		 RETURNING account_address`,
+		blockHeight,
+	)
+	if accounts, err = collectArrayIDs(rows, err, accounts); err != nil {
+		return nil, t.store.dbErr(err, "ArchiveExpiredInvoices")
+	}
+	return
+}
+
 func (t SQLiteStoreTransaction) GetPayment(account giga.Address, id int64) (giga.Payment, error) {
 	return t.store.getPaymentCommon(t.tx, account, id)
 }
@@ -685,9 +771,13 @@ func (t SQLiteStoreTransaction) StoreInvoice(inv giga.Invoice) error {
 		return t.store.dbErr(err, "StoreInvoice: json.Marshal items")
 	}
 	total := inv.CalcTotal()
+	archived := 0
+	if inv.Archived {
+		archived = 1
+	}
 	_, err = t.tx.Exec(
-		"insert into invoice(invoice_address, account_address, items, total, key_index, confirmations, created) values($1,$2,$3,$4,$5,$6,$7)",
-		inv.ID, inv.Account, string(items_b), total, inv.KeyIndex, inv.Confirmations, inv.Created,
+		"insert into invoice(invoice_address, account_address, items, total, key_index, confirmations, created, expire_height, archived) values($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+		inv.ID, inv.Account, string(items_b), total, inv.KeyIndex, inv.Confirmations, inv.Created, inv.ExpireHeight, archived,
 	)
 	if err != nil {
 		return t.store.dbErr(err, "StoreInvoice: insert")
@@ -958,7 +1048,7 @@ func (t SQLiteStoreTransaction) MarkInvoiceEventSent(invoiceID giga.Address, eve
 // Prepare query for MarkInvoicesPaid.
 // Summing all UTXOs that payTo the Invoice Address that have been confirmed (spendable_height is non-null)
 var sum_utxos_for_invoice = "SELECT SUM(value) FROM utxo WHERE script_address=i.invoice_address AND spendable_height IS NOT NULL"
-var unpaid_invoices_above_total = fmt.Sprintf("SELECT invoice_address FROM invoice i WHERE paid_height IS NULL AND (%s) >= total", sum_utxos_for_invoice)
+var unpaid_invoices_above_total = fmt.Sprintf("SELECT invoice_address FROM invoice i WHERE paid_height IS NULL AND COALESCE(archived,0) = 0 AND (%s) >= total", sum_utxos_for_invoice)
 var mark_invoices_paid = fmt.Sprintf("UPDATE invoice SET paid_height=$1, block_id=$2 WHERE invoice_address IN (%s) RETURNING account_address", unpaid_invoices_above_total)
 
 // Mark all invoices paid that have corresponding confirmed UTXOs [via ConfirmUTXOs]

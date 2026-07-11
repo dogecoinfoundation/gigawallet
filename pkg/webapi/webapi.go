@@ -115,6 +115,9 @@ func (t WebAPI) createRouters() (adminMux *httprouter.Router, pubMux *httprouter
 	// GET /account/:foreignID/invoice/:invoiceID -> { invoice } get an invoice
 	adminMux.GET("/account/:foreignID/invoice/:invoiceID", t.authMiddleware(t.getAccountInvoice))
 
+	// POST /account/:foreignID/invoice/:invoiceID/unarchive -> re-enable scanning after expiry (#112)
+	adminMux.POST("/account/:foreignID/invoice/:invoiceID/unarchive", t.authMiddleware(t.unarchiveInvoice))
+
 	// POST /account/:foreignID/pay { "amount": "1.0", "to": "DPeTgZm7LabnmFTJkAPfADkwiKreEMmzio" } -> { status }
 	adminMux.POST("/account/:foreignID/pay", t.authMiddleware(t.payToAddress))
 
@@ -201,6 +204,40 @@ func (t WebAPI) createInvoice(w http.ResponseWriter, r *http.Request, p httprout
 	invoice, err := t.api.CreateInvoice(o, foreignID)
 	if err != nil {
 		sendError(w, "CreateInvoice", err)
+		return
+	}
+	sendResponse(w, invoice.ToPublic())
+}
+
+// unarchiveInvoice re-enables BalanceKeeper scanning for a late-paid invoice (#112)
+func (t WebAPI) unarchiveInvoice(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	foreignID := p.ByName("foreignID")
+	if foreignID == "" {
+		sendBadRequest(w, "missing account ID in URL")
+		return
+	}
+	id := p.ByName("invoiceID")
+	if id == "" {
+		sendBadRequest(w, "missing invoice ID")
+		return
+	}
+	acc, err := t.api.GetAccount(foreignID)
+	if err != nil {
+		sendError(w, "GetAccount", err)
+		return
+	}
+	invoice, err := t.api.GetInvoice(giga.Address(id))
+	if err != nil {
+		sendError(w, "GetInvoice", err)
+		return
+	}
+	if invoice.Account != acc.Address {
+		sendErrorResponse(w, 404, giga.NotFound, "no such invoice in this account")
+		return
+	}
+	invoice, err = t.api.UnarchiveInvoice(giga.Address(id))
+	if err != nil {
+		sendError(w, "UnarchiveInvoice", err)
 		return
 	}
 	sendResponse(w, invoice.ToPublic())
