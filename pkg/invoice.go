@@ -113,13 +113,20 @@ func (i *Invoice) AddPublic() {
 	i.PayTo = i.ID
 	i.PartDetected = i.IncomingAmount.IsPositive()
 	i.TotalDetected = i.IncomingAmount.GreaterThanOrEqual(i.Total)
-	i.TotalConfirmed = (i.PaidHeight > 1)
+	// PaidHeight is the block height when the invoice was marked paid (0 = unpaid).
+	// Match BalanceKeeper: paid when PaidHeight != 0. Also treat PaidAmount >= Total
+	// as confirmed so API flags stay true if height lag exists after UTXO confirm.
+	i.TotalConfirmed = i.PaidHeight != 0 || i.PaidAmount.GreaterThanOrEqual(i.Total)
 	i.Unconfirmed = false // XXX meant to indicate if a rollback has occured
 	i.Estimate = 0        // XXX meant to estimate time until confirmation
 }
 
 func (i *Invoice) ToPublic() PublicInvoice {
-
+	// Use *current* Incoming/Paid amounts for public flags.
+	// LastIncomingAmount/LastPaidAmount are event-cursor fields and lag behind
+	// balance updates — reading them here made total_payment_detected /
+	// total_payment_confirmed stay false while total_incoming/total_confirmed
+	// already showed the funds (see dogecoinfoundation/gigawallet#149).
 	pub := PublicInvoice{
 		ID:             i.ID,
 		Items:          i.Items,
@@ -127,23 +134,11 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		Total:          i.CalcTotal(),
 		PayTo:          i.ID,
 		Confirmations:  i.Confirmations,
-		PartDetected:   false,
-		TotalDetected:  false,
-		TotalConfirmed: false,
+		PartDetected:   i.IncomingAmount.IsPositive(),
+		TotalDetected:  i.IncomingAmount.GreaterThanOrEqual(i.Total),
+		TotalConfirmed: i.PaidHeight != 0 || i.PaidAmount.GreaterThanOrEqual(i.Total),
 		Unconfirmed:    false, // XXX meant to indicate if a rollback has occured
 		Estimate:       0,     // XXX meant to estimate time until confirmation
-	}
-
-	if i.LastIncomingAmount.IsPositive() {
-		pub.PartDetected = true
-	}
-
-	if i.LastIncomingAmount.GreaterThanOrEqual(i.Total) {
-		pub.TotalDetected = true
-	}
-
-	if i.PaidHeight > 1 {
-		pub.TotalConfirmed = true
 	}
 
 	// TODO: we still need a way to handle Unconfirmed?
