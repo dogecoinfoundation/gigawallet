@@ -486,3 +486,18 @@ func (a API) SetSyncHeight(height int64) error {
 	a.follower.SendCommand(ReSyncChainFollowerCmd{BlockHash: hash})
 	return nil
 }
+
+// ListPayments returns outgoing payments for an account (paginated).
+func (a API) ListPayments(foreignID string, cursor int64, limit int) (items []Payment, next int64, err error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	acc, err := a.Store.GetAccount(foreignID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return a.Store.ListPayments(acc.Address, cursor, limit)
+}
