@@ -137,6 +137,31 @@ func (a API) CreateAccount(request AccountCreateRequest, foreignID string, upser
 		if err == nil {
 			// Account already exists.
 			if upsert {
+				// Apply payout settings from the request (#134 — bare return ignored updates).
+				changed := false
+				if request.PayoutAddress != "" && request.PayoutAddress != acc.PayoutAddress {
+					acc.PayoutAddress = request.PayoutAddress
+					changed = true
+				}
+				if request.PayoutThreshold.IsPositive() && !request.PayoutThreshold.Equal(acc.PayoutThreshold) {
+					acc.PayoutThreshold = request.PayoutThreshold
+					changed = true
+				}
+				if request.PayoutFrequency != "" && request.PayoutFrequency != acc.PayoutFrequency {
+					acc.PayoutFrequency = request.PayoutFrequency
+					changed = true
+				}
+				if changed {
+					if err := txn.UpdateAccount(acc); err != nil {
+						return AccountPublic{}, err
+					}
+					if err := txn.Commit(); err != nil {
+						return AccountPublic{}, err
+					}
+					pub := acc.GetPublicInfo()
+					a.bus.Send(ACC_UPDATED, pub)
+					return pub, nil
+				}
 				return acc.GetPublicInfo(), nil
 			}
 			return AccountPublic{}, NewErr(AlreadyExists, "account already exists: %v", err)
