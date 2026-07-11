@@ -113,13 +113,14 @@ func (i *Invoice) AddPublic() {
 	i.PayTo = i.ID
 	i.PartDetected = i.IncomingAmount.IsPositive()
 	i.TotalDetected = i.IncomingAmount.GreaterThanOrEqual(i.Total)
-	i.TotalConfirmed = (i.PaidHeight > 1)
+	// PaidHeight is block height when marked paid (0 = unpaid). Match BalanceKeeper.
+	i.TotalConfirmed = i.PaidHeight != 0 || i.PaidAmount.GreaterThanOrEqual(i.Total)
 	i.Unconfirmed = false // XXX meant to indicate if a rollback has occured
 	i.Estimate = 0        // XXX meant to estimate time until confirmation
 }
 
 func (i *Invoice) ToPublic() PublicInvoice {
-
+	// Use current Incoming/Paid amounts — Last* fields lag behind bus events (#149).
 	pub := PublicInvoice{
 		ID:             i.ID,
 		Items:          i.Items,
@@ -127,26 +128,12 @@ func (i *Invoice) ToPublic() PublicInvoice {
 		Total:          i.CalcTotal(),
 		PayTo:          i.ID,
 		Confirmations:  i.Confirmations,
-		PartDetected:   false,
-		TotalDetected:  false,
-		TotalConfirmed: false,
+		PartDetected:   i.IncomingAmount.IsPositive(),
+		TotalDetected:  i.IncomingAmount.GreaterThanOrEqual(i.Total),
+		TotalConfirmed: i.PaidHeight != 0 || i.PaidAmount.GreaterThanOrEqual(i.Total),
 		Unconfirmed:    false, // XXX meant to indicate if a rollback has occured
 		Estimate:       0,     // XXX meant to estimate time until confirmation
 	}
-
-	if i.LastIncomingAmount.IsPositive() {
-		pub.PartDetected = true
-	}
-
-	if i.LastIncomingAmount.GreaterThanOrEqual(i.Total) {
-		pub.TotalDetected = true
-	}
-
-	if i.PaidHeight > 1 {
-		pub.TotalConfirmed = true
-	}
-
-	// TODO: we still need a way to handle Unconfirmed?
 	return pub
 }
 
