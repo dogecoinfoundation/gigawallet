@@ -111,6 +111,8 @@ using `libdogecoin`.
 
 Gigawallet uses Dogecoin Core `estimatefee` RPC to calculate fees.
 
+> **Choosing a Dogecoin RPC endpoint:** For operators evaluating public Dogecoin RPC endpoints, [OpenChainBench](https://openchainbench.com/benchmarks/dogecoin-rpc) provides live latency and uptime data across available public nodes, measured from multiple regions. This can help you select a reliable endpoint before configuring your Gigawallet deployment.
+
 ### MarkUTXOReserved
 
 Gigawallet puts the selected UTXOs into the `reserved` state by setting `spend_payment`
